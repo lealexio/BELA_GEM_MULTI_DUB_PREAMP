@@ -1,6 +1,6 @@
 # Bela Gem Multi — Dub Preamp
 
-Préampli numérique style implémenté sur **Bela Gem Multi** en C++.  
+Préampli numérique implémenté sur **Bela Gem Multi** en C++.  
 Traitement audio temps réel à ultra-basse latence, contrôle via potentiomètres physiques multiplexés.
 
 ---
