@@ -29,8 +29,16 @@ private:
     float potValues[kNumMux * kPotsPerMux];
     int   currentChannel;
 
-    const int   addressPins[4]  = {0, 1, 2, 3};  // D0–D3
-    const float kScaleRecovery  = 4.096f / 3.3f; // 4.096V ref / 3.3V supply
+    const int   addressPins[4]   = {0, 1, 2, 3};  // D0–D3
+    const float kScaleRecovery   = 4.096f / 3.3f; // 4.096V ref / 3.3V supply
+    // Practical maximum after scaling (pots rarely reach exact rail voltage).
+    // Adjust if your hardware returns a different observed maximum.
+    const float kPotMax          = 0.995f;
+    // Values at or below this threshold are clamped to exactly 0.0.
+    // Adjust if your pots rest above 0.0 when fully closed.
+    const float kPotMin          = 0.01f;
+    // Minimum change required to update a value (suppresses ADC jitter).
+    const float kJitterThreshold = 0.002f;
 
     /** Writes the 4-bit MUX address to D0–D3 on the given digital frame. */
     void setMuxAddress(BelaContext *context, int frame, int channel);
