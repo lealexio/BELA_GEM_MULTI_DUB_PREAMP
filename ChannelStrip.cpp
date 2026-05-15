@@ -1,4 +1,4 @@
-#include "DspEngine.h"
+#include "ChannelStrip.h"
 
 // ---------------------------------------------------------------------------
 // BiquadFilter — Audio EQ Cookbook formulas (R. Bristow-Johnson)
@@ -16,16 +16,13 @@ void BiquadFilter::setLowShelf(float freq, float gainDb, float sampleRate) {
     float w0 = 2.f * M_PI * freq / sampleRate;
     float cw = cosf(w0);
     float sw = sinf(w0);
-    // shelf slope S = 1 → alpha = sin(w0)/2 * sqrt((A+1/A)*(1/S-1)+2)
-    float alpha = sw / 2.f * sqrtf((A + 1.f/A) * (1.f/1.f - 1.f) + 2.f);
-    // S=1 simplifies the sqrt term to sqrt(2), so:
-    alpha = sw / 2.f * sqrtf(2.f);
+    float alpha = sw / 2.f * sqrtf(2.f); // shelf slope S=1
 
     float sqA = sqrtf(A);
     float a0 =  (A+1) + (A-1)*cw + 2.f*sqA*alpha;
     b0 =  A * ((A+1) - (A-1)*cw + 2.f*sqA*alpha) / a0;
     b1 =  2.f*A * ((A-1) - (A+1)*cw)              / a0;
-    b2 =  A * ((A+1) - (A-1)*cw - 2.f*sqA*alpha) / a0;
+    b2 =  A * ((A+1) - (A-1)*cw - 2.f*sqA*alpha)  / a0;
     a1 = -2.f * ((A-1) + (A+1)*cw)                / a0;
     a2 =       ((A+1) + (A-1)*cw - 2.f*sqA*alpha) / a0;
 }
@@ -39,11 +36,11 @@ void BiquadFilter::setHighShelf(float freq, float gainDb, float sampleRate) {
 
     float sqA = sqrtf(A);
     float a0 =  (A+1) - (A-1)*cw + 2.f*sqA*alpha;
-    b0 =  A * ((A+1) + (A-1)*cw + 2.f*sqA*alpha) / a0;
-    b1 = -2.f*A * ((A-1) + (A+1)*cw)              / a0;
-    b2 =  A * ((A+1) + (A-1)*cw - 2.f*sqA*alpha) / a0;
-    a1 =  2.f * ((A-1) - (A+1)*cw)                / a0;
-    a2 =       ((A+1) - (A-1)*cw - 2.f*sqA*alpha) / a0;
+    b0 =  A * ((A+1) + (A-1)*cw + 2.f*sqA*alpha)  / a0;
+    b1 = -2.f*A * ((A-1) + (A+1)*cw)               / a0;
+    b2 =  A * ((A+1) + (A-1)*cw - 2.f*sqA*alpha)   / a0;
+    a1 =  2.f * ((A-1) - (A+1)*cw)                 / a0;
+    a2 =       ((A+1) - (A-1)*cw - 2.f*sqA*alpha)  / a0;
 }
 
 void BiquadFilter::setPeaking(float freq, float gainDb, float q, float sampleRate) {
@@ -61,18 +58,22 @@ void BiquadFilter::setPeaking(float freq, float gainDb, float q, float sampleRat
 }
 
 // ---------------------------------------------------------------------------
-// DspEngine
+// ChannelStrip
 // ---------------------------------------------------------------------------
 
-void DspEngine::setup(float sampleRate) {
+void ChannelStrip::setup(float sampleRate) {
     sampleRate_ = sampleRate;
-    // Initialise filters at 0 dB so they are transparent on startup
-    low_.setLowShelf (250.f,  0.f, sampleRate_);
-    mid_.setPeaking  (1000.f, 0.f, 1.4f, sampleRate_);
-    high_.setHighShelf(4000.f, 0.f, sampleRate_);
+    // Initialise filters at 0 dB so the strip is transparent on startup
+    low_.setLowShelf  (250.f,  0.f,       sampleRate_);
+    mid_.setPeaking   (1000.f, 0.f, 1.4f, sampleRate_);
+    high_.setHighShelf(4000.f, 0.f,       sampleRate_);
 }
 
-void DspEngine::setGains(float gainLowDb, float gainMidDb, float gainHighDb) {
+void ChannelStrip::setInputGain(float gain) {
+    inputGain_ = gain;
+}
+
+void ChannelStrip::setEqGains(float gainLowDb, float gainMidDb, float gainHighDb) {
     // Recompute coefficients only when a value has actually changed
     if(gainLowDb != lastLow_) {
         low_.setLowShelf(250.f, gainLowDb, sampleRate_);
@@ -88,9 +89,13 @@ void DspEngine::setGains(float gainLowDb, float gainMidDb, float gainHighDb) {
     }
 }
 
-float DspEngine::process(float input) {
-    // Bypass the EQ chain entirely when all gains are at 0 dB
+float ChannelStrip::process(float input) {
+    // Apply input gain stage first
+    float gained = input * inputGain_;
+
+    // Bypass EQ chain entirely when all bands are at 0 dB
     if(lastLow_ == 0.f && lastMid_ == 0.f && lastHigh_ == 0.f)
-        return input;
-    return high_.process(mid_.process(low_.process(input)));
+        return gained;
+
+    return high_.process(mid_.process(low_.process(gained)));
 }

@@ -26,30 +26,41 @@ struct BiquadFilter {
 };
 
 /**
- * 3-band parametric equaliser (low shelf / mid peak / high shelf).
- * Gains are expressed in dB; call setGains() once per render block.
+ * Models one input channel: gain stage followed by a 3-band parametric EQ
+ * (low shelf / mid peak / high shelf).
+ *
+ * Intended to be instantiated once per physical input in the future.
+ * Call setInputGain() and setEqGains() once per render block, then
+ * process() once per sample.
  */
-class DspEngine {
+class ChannelStrip {
 public:
-    DspEngine() = default;
+    ChannelStrip() = default;
 
     /** Must be called in setup() with the audio sample rate. */
     void setup(float sampleRate);
 
     /**
-     * Updates filter coefficients when gains change.
-     * Call once per render block, before the sample loop.
+     * Sets the input gain (linear, 0.0 = silence, 1.0 = unity).
+     * Call once per render block before the sample loop.
+     */
+    void setInputGain(float gain);
+
+    /**
+     * Updates EQ filter coefficients when gains change.
+     * Call once per render block before the sample loop.
      * @param gainLowDb  Low shelf gain  in dB  (-6 to +6)
      * @param gainMidDb  Mid peak  gain  in dB  (-6 to +6)
      * @param gainHighDb High shelf gain in dB  (-6 to +6)
      */
-    void setGains(float gainLowDb, float gainMidDb, float gainHighDb);
+    void setEqGains(float gainLowDb, float gainMidDb, float gainHighDb);
 
-    /** Process one sample through the 3-band EQ chain. */
+    /** Process one sample: applies input gain then the 3-band EQ. */
     float process(float input);
 
 private:
     float sampleRate_  = 44100.f;
+    float inputGain_   = 1.f;
 
     BiquadFilter low_;   // low  shelf  @ 250 Hz
     BiquadFilter mid_;   // peaking EQ  @ 1 kHz, Q=1.4

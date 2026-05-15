@@ -19,24 +19,40 @@ bool HardwareManager::setup(BelaContext *context) {
 }
 
 void HardwareManager::scanStep(BelaContext *context) {
-    // 1. Read the value for the channel addressed in the previous render.
-    //    Frame 0 is valid here because we are inside render().
-    float rawValue = analogRead(context, 0, 0) * kScaleRecovery;
-    // Normalise to [0.0, 1.0]: divide by observed practical max, then clamp.
-    rawValue = rawValue / kPotMax;
-    if(rawValue <= kPotMin) rawValue = 0.0f;
-    if(rawValue >  1.0f)   rawValue = 1.0f;
+    // Read all active MUX inputs for the channel set in the previous render
+    for(int m = 0; m < kActiveMux; m++) {
+        float rawValue = analogRead(context, 0, m) * kScaleRecovery;
 
-    // Only update if the change exceeds the jitter threshold.
-    if(fabsf(rawValue - potValues[currentChannel]) >= kJitterThreshold)
-        potValues[currentChannel] = rawValue;
+        // Clamp to [0.0, 1.0] with min/max calibration
+        if(rawValue <= kPotMin) rawValue = 0.0f;
+        if(rawValue >  1.0f)   rawValue = 1.0f;
+        rawValue = rawValue / kPotMax;
+        if(rawValue > 1.0f)    rawValue = 1.0f;
 
-    // 2. Advance to the next channel.
+        int index = m * kPotsPerMux + currentChannel;
+        // Only update if the change exceeds the jitter threshold
+        if(fabsf(rawValue - potValues[index]) >= kJitterThreshold)
+            potValues[index] = rawValue;
+    }
+
+    // Advance to the next channel and set address pins on the last frame
     currentChannel = (currentChannel + 1) % kPotsPerMux;
-
-    // 3. Set the address pins on the LAST digital frame so the MUX
-    //    has the full duration of the next buffer to settle (~0.3–1 ms).
     setMuxAddress(context, context->digitalFrames - 1, currentChannel);
+}
+
+float HardwareManager::getPotValue(int muxId, int potId) const {
+    if(muxId < 0 || muxId >= kNumMux || potId < 0 || potId >= kPotsPerMux)
+        return 0.0f;
+    return potValues[muxId * kPotsPerMux + potId];
+}
+
+float HardwareManager::getPotValue(int index) const {
+    return (index >= 0 && index < kNumMux * kPotsPerMux) ? potValues[index] : 0.0f;
+}
+
+float HardwareManager::getCenteredPotValue(int muxId, int potId) const {
+    float v = getPotValue(muxId, potId);
+    return (fabsf(v - 0.5f) <= kSnapRadiusCenter) ? 0.5f : v;
 }
 
 void HardwareManager::setMuxAddress(BelaContext *context, int frame, int channel) {
