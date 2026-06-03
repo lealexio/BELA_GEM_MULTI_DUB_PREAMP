@@ -4,8 +4,8 @@
  * Physical mapping of all potentiometers.
  *
  * Usage:
- *   gHardwareManager.getPotValue(INPUT_GAIN)        // PotRef overload
- *   gHardwareManager.getPotValue(INPUT_GAIN.mux, INPUT_GAIN.pot)
+ *   gHardwareManager.getPotValue(CH1_INPUT_GAIN)        // PotRef overload
+ *   gHardwareManager.getPotValue(CH1_INPUT_GAIN.mux, CH1_INPUT_GAIN.pot)
  *
  * To add a new MUX: increment kActiveMux in HardwareManager.h,
  * then define your new PotRef entries with mux = 1 (or 2, 3).
@@ -21,22 +21,17 @@ struct PotRef {
 // MUX 0  (analog input A0)
 // ---------------------------------------------------------------------------
 
-constexpr PotRef EQ_MID_GAIN   = {0,  0, true};  // C00 — mid  peak   equaliser
-constexpr PotRef INPUT_GAIN    = {0,  1, true};  // C01 — input volume
-constexpr PotRef POT_MUX0_C02  = {0,  2};  // C02 — unassigned
-constexpr PotRef POT_MUX0_C03  = {0,  3};  // C03 — unassigned
-constexpr PotRef POT_MUX0_C04  = {0,  4};  // C04 — unassigned
-constexpr PotRef POT_MUX0_C05  = {0,  5};  // C05 — unassigned
-constexpr PotRef POT_MUX0_C06  = {0,  6};  // C06 — unassigned
-constexpr PotRef POT_MUX0_C07  = {0,  7};  // C07 — unassigned
-constexpr PotRef POT_MUX0_C08  = {0,  8};  // C08 — unassigned
-constexpr PotRef POT_MUX0_C09  = {0,  9};  // C09 — unassigned
-constexpr PotRef POT_MUX0_C10  = {0, 10};  // C10 — unassigned
-constexpr PotRef POT_MUX0_C11  = {0, 11};  // C11 — unassigned
-constexpr PotRef POT_MUX0_C12  = {0, 12};  // C12 — unassigned
-constexpr PotRef POT_MUX0_C13  = {0, 13};  // C13 — unassigned
-constexpr PotRef EQ_LOW_GAIN   = {0, 14, true};  // C14 — low  shelf  equaliser
-constexpr PotRef EQ_HIGH_GAIN  = {0, 15, true};  // C15 — high shelf  equaliser
+// --- Channel Strip 1 (IN0 → OUT0) ---
+constexpr PotRef CH1_INPUT_GAIN  = {0,  1, true};  // C01 — channel 1 input volume
+constexpr PotRef CH1_EQ_MID      = {0,  0, true};  // C00 — channel 1 mid  peak
+constexpr PotRef CH1_EQ_LOW      = {0, 14, true};  // C14 — channel 1 low  shelf
+constexpr PotRef CH1_EQ_HIGH     = {0, 15, true};  // C15 — channel 1 high shelf
+
+// --- Channel Strip 2 (IN1 → OUT1) ---
+constexpr PotRef CH2_INPUT_GAIN  = {0,  6, true};        // C03 — channel 2 input volume
+constexpr PotRef CH2_EQ_MID      = {0,  7, true};        // C07 — channel 2 mid  peak
+constexpr PotRef CH2_EQ_HIGH     = {0,  8, true};        // C08 — channel 2 high shelf
+constexpr PotRef CH2_EQ_LOW      = {0,  9, true};        // C09 — channel 2 low  shelf
 
 // ---------------------------------------------------------------------------
 // MUX 1  (analog input A1) — uncomment when physically connected
@@ -66,10 +61,14 @@ constexpr int kIgnoredPotsCount = sizeof(kIgnoredPots) / sizeof(kIgnoredPots[0])
 inline const char* getPotName(int mux, int pot) {
     if(mux == 0) {
         switch(pot) {
-            case  0: return "EQ_MID_GAIN";
-            case  1: return "INPUT_GAIN";
-            case 14: return "EQ_LOW_GAIN";
-            case 15: return "EQ_HIGH_GAIN";
+            case  0: return "CH1_EQ_MID";
+            case  1: return "CH1_INPUT_GAIN";
+            case  6: return "CH2_INPUT_GAIN";
+            case  7: return "CH2_EQ_MID";
+            case  8: return "CH2_EQ_HIGH";
+            case  9: return "CH2_EQ_LOW";
+            case 14: return "CH1_EQ_LOW";
+            case 15: return "CH1_EQ_HIGH";
             default: return nullptr; // unassigned → caller prints raw index
         }
     }

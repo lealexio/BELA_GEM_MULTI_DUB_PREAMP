@@ -16,7 +16,8 @@ https://bela.io
 #include "HardwareConfig.h"
 
 HardwareManager gHardwareManager;
-ChannelStrip    gChannelStrip;
+ChannelStrip    gChannelStrip;   // IN0 → OUT0
+ChannelStrip    gChannelStrip2;  // IN1 → OUT1
 AuxiliaryTask   gI2cTask;
 
 static const bool DEBUG = true;
@@ -116,6 +117,7 @@ bool setup(BelaContext *context, void *userData)
     }
 
     gChannelStrip.setup(context->audioSampleRate);
+    gChannelStrip2.setup(context->audioSampleRate);
 
     // Initialise MCP23017 and launch I2C reading task
     if(!gHardwareManager.initMcp23017())
@@ -132,11 +134,20 @@ void render(BelaContext *context, void *userData)
     // Scan one MUX channel per render callback
     gHardwareManager.scanStep(context);
 
-    gChannelStrip.setInputGain(gHardwareManager.getPotValue(INPUT_GAIN));
+    // --- Channel Strip 1 controls (IN0 → OUT0) ---
+    gChannelStrip.setInputGain(gHardwareManager.getPotValue(CH1_INPUT_GAIN));
     gChannelStrip.setEqGains(
-        potToGainDb(gHardwareManager.getCenteredPotValue(EQ_LOW_GAIN)),
-        potToGainDb(gHardwareManager.getCenteredPotValue(EQ_MID_GAIN)),
-        potToGainDb(gHardwareManager.getCenteredPotValue(EQ_HIGH_GAIN))
+        potToGainDb(gHardwareManager.getCenteredPotValue(CH1_EQ_LOW)),
+        potToGainDb(gHardwareManager.getCenteredPotValue(CH1_EQ_MID)),
+        potToGainDb(gHardwareManager.getCenteredPotValue(CH1_EQ_HIGH))
+    );
+
+    // --- Channel Strip 2 controls (IN1 → OUT1) ---
+    gChannelStrip2.setInputGain(gHardwareManager.getPotValue(CH2_INPUT_GAIN));
+    gChannelStrip2.setEqGains(
+        potToGainDb(gHardwareManager.getCenteredPotValue(CH2_EQ_LOW)),
+        potToGainDb(gHardwareManager.getCenteredPotValue(CH2_EQ_MID)),
+        potToGainDb(gHardwareManager.getCenteredPotValue(CH2_EQ_HIGH))
     );
 
     bool clipCh0 = false;
@@ -148,12 +159,12 @@ void render(BelaContext *context, void *userData)
         if(fabsf(in0) >= kClipThreshold) clipCh0 = true;
         if(fabsf(in1) >= kClipThreshold) clipCh1 = true;
 
-        float mono = (in0 + in1) * 0.5f;
-        float out  = gChannelStrip.process(mono);
+        float out0 = gChannelStrip.process(in0);
+        float out1 = gChannelStrip2.process(in1);
 
-        scope.log(mono, out);
-        audioWrite(context, n, 0, out);
-        audioWrite(context, n, 1, out);
+        scope.log(out0, out1);
+        audioWrite(context, n, 0, out0);
+        audioWrite(context, n, 1, out1);
     }
 
     // Warn once per interval per channel to avoid log spam
