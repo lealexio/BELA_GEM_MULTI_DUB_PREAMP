@@ -26,8 +26,12 @@ public:
      */
     float getPotValue(int muxId, int potId) const;
 
-    /** Convenience overload using a PotRef constant from HardwareConfig.h. */
-    float getPotValue(PotRef ref) const { return getPotValue(ref.mux, ref.pot); }
+    /** Convenience overload using a PotRef constant from HardwareConfig.h.
+     *  Applies inversion automatically if ref.reversed is true. */
+    float getPotValue(PotRef ref) const {
+        float v = getPotValue(ref.mux, ref.pot);
+        return ref.reversed ? 1.0f - v : v;
+    }
 
     /** Flat-index accessor kept for internal use: index = muxId * kPotsPerMux + potId. */
     float getPotValue(int index) const;
@@ -37,7 +41,10 @@ public:
      * Use this for EQ/bipolar controls where the centre position means "no effect".
      */
     float getCenteredPotValue(int muxId, int potId) const;
-    float getCenteredPotValue(PotRef ref) const { return getCenteredPotValue(ref.mux, ref.pot); }
+    float getCenteredPotValue(PotRef ref) const {
+        float v = getCenteredPotValue(ref.mux, ref.pot);
+        return ref.reversed ? 1.0f - v : v;
+    }
 
     // -----------------------------------------------------------------------
     // MCP23017 — I2C GPIO expander (switches)

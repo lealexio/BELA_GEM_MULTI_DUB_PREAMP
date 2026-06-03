@@ -12,16 +12,17 @@
  */
 
 struct PotRef {
-    int mux;
-    int pot;
+    int  mux;
+    int  pot;
+    bool reversed = false; // true = invert rotation (1.0 → 0.0 becomes 0.0 → 1.0)
 };
 
 // ---------------------------------------------------------------------------
 // MUX 0  (analog input A0)
 // ---------------------------------------------------------------------------
 
-constexpr PotRef EQ_LOW_GAIN   = {0,  0};  // C00 — low  shelf  equaliser
-constexpr PotRef INPUT_GAIN    = {0,  1};  // C01 — input volume
+constexpr PotRef EQ_MID_GAIN   = {0,  0, true};  // C00 — mid  peak   equaliser
+constexpr PotRef INPUT_GAIN    = {0,  1, true};  // C01 — input volume
 constexpr PotRef POT_MUX0_C02  = {0,  2};  // C02 — unassigned
 constexpr PotRef POT_MUX0_C03  = {0,  3};  // C03 — unassigned
 constexpr PotRef POT_MUX0_C04  = {0,  4};  // C04 — unassigned
@@ -34,8 +35,8 @@ constexpr PotRef POT_MUX0_C10  = {0, 10};  // C10 — unassigned
 constexpr PotRef POT_MUX0_C11  = {0, 11};  // C11 — unassigned
 constexpr PotRef POT_MUX0_C12  = {0, 12};  // C12 — unassigned
 constexpr PotRef POT_MUX0_C13  = {0, 13};  // C13 — unassigned
-constexpr PotRef EQ_HIGH_GAIN  = {0, 14};  // C14 — high shelf  equaliser
-constexpr PotRef EQ_MID_GAIN   = {0, 15};  // C15 — mid  peak   equaliser
+constexpr PotRef EQ_LOW_GAIN   = {0, 14, true};  // C14 — low  shelf  equaliser
+constexpr PotRef EQ_HIGH_GAIN  = {0, 15, true};  // C15 — high shelf  equaliser
 
 // ---------------------------------------------------------------------------
 // MUX 1  (analog input A1) — uncomment when physically connected
@@ -65,10 +66,10 @@ constexpr int kIgnoredPotsCount = sizeof(kIgnoredPots) / sizeof(kIgnoredPots[0])
 inline const char* getPotName(int mux, int pot) {
     if(mux == 0) {
         switch(pot) {
-            case  0: return "EQ_LOW_GAIN";
+            case  0: return "EQ_MID_GAIN";
             case  1: return "INPUT_GAIN";
-            case 14: return "EQ_HIGH_GAIN";
-            case 15: return "EQ_MID_GAIN";
+            case 14: return "EQ_LOW_GAIN";
+            case 15: return "EQ_HIGH_GAIN";
             default: return nullptr; // unassigned → caller prints raw index
         }
     }
