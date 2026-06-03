@@ -45,6 +45,21 @@ static inline float potToGainDb(float pot) {
     return (pot - 0.5f) * 12.0f;
 }
 
+// Reads all valid audio inputs (audioIns[i] != -1) and returns their average.
+// Single input → direct pass-through. Two inputs → averaged to mono.
+static inline float readChannelInput(BelaContext* ctx, unsigned int frame,
+                                     const ChannelConfig& cfg) {
+    float sum   = 0.f;
+    int   count = 0;
+    for(int i = 0; i < 2; ++i) {
+        if(cfg.audioIns[i] != -1) {
+            sum += audioRead(ctx, frame, cfg.audioIns[i]);
+            ++count;
+        }
+    }
+    return (count > 0) ? sum / count : 0.f;
+}
+
 /**
  * Detects which potentiometers moved since the last call and prints their
  * address and current value. Silent if nothing changed.
@@ -153,8 +168,8 @@ void render(BelaContext *context, void *userData)
     bool clipCh0 = false;
     bool clipCh1 = false;
     for(unsigned int n = 0; n < context->audioFrames; n++) {
-        float in0 = audioRead(context, n, 0);
-        float in1 = audioRead(context, n, 1);
+        float in0 = readChannelInput(context, n, CH1_CONFIG);
+        float in1 = readChannelInput(context, n, CH2_CONFIG);
 
         if(fabsf(in0) >= kClipThreshold) clipCh0 = true;
         if(fabsf(in1) >= kClipThreshold) clipCh1 = true;
@@ -163,8 +178,8 @@ void render(BelaContext *context, void *userData)
         float out1 = gChannelStrip2.process(in1);
 
         scope.log(out0, out1);
-        audioWrite(context, n, 0, out0);
-        audioWrite(context, n, 1, out1);
+        audioWrite(context, n, CH1_CONFIG.audioOut, out0);
+        audioWrite(context, n, CH2_CONFIG.audioOut, out1);
     }
 
     // Warn once per interval per channel to avoid log spam

@@ -1,7 +1,11 @@
 #pragma once
 
 /**
- * Physical mapping of all potentiometers.
+ * Physical mapping of all potentiometers and audio routing per channel strip.
+ *
+ * ChannelConfig defines which Bela audio inputs feed a strip and which output
+ * it drives. When numIns == 2, the two inputs are averaged to mono before
+ * entering the DSP chain.
  *
  * Usage:
  *   gHardwareManager.getPotValue(CH1_INPUT_GAIN)        // PotRef overload
@@ -10,6 +14,22 @@
  * To add a new MUX: increment kActiveMux in HardwareManager.h,
  * then define your new PotRef entries with mux = 1 (or 2, 3).
  */
+
+// ---------------------------------------------------------------------------
+// Audio routing — one entry per ChannelStrip instance
+// ---------------------------------------------------------------------------
+
+struct ChannelConfig {
+    int audioIns[2]; // Bela audio input indices; -1 = unused slot
+    int audioOut;    // Bela audio output index
+};
+
+constexpr ChannelConfig CH1_CONFIG = { {0, -1}, 0 }; // IN0 → OUT0
+constexpr ChannelConfig CH2_CONFIG = { {1, -1}, 1 }; // IN1 → OUT1
+
+// ---------------------------------------------------------------------------
+// Pot mapping structs
+// ---------------------------------------------------------------------------
 
 struct PotRef {
     int  mux;
