@@ -29,27 +29,36 @@ void MasterFx::setup(float sampleRate) {
 
 void MasterFx::setKills(bool killSub, bool killKick, bool killMid, bool killTop) {
     if(killSub != lastSub_) {
+        // Reset filter state on activation to avoid transients from stale history
+        if(killSub) subKill_.reset();
         subKill_.setLowShelf(kSubFreq, killSub ? kKillDb : kPassDb, sampleRate_);
         lastSub_ = killSub;
     }
     if(killKick != lastKick_) {
+        if(killKick) kickKill_.reset();
         kickKill_.setPeaking(kKickFreq, killKick ? kKillDb : kPassDb, kKickQ, sampleRate_);
         lastKick_ = killKick;
     }
     if(killMid != lastMid_) {
+        if(killMid) midKill_.reset();
         midKill_.setPeaking(kMidFreq, killMid ? kKillDb : kPassDb, kMidQ, sampleRate_);
         lastMid_ = killMid;
     }
     if(killTop != lastTop_) {
+        if(killTop) topKill_.reset();
         topKill_.setHighShelf(kTopFreq, killTop ? kKillDb : kPassDb, sampleRate_);
         lastTop_ = killTop;
     }
 }
 
 float MasterFx::process(float input) {
+    // Full bypass when no kill is active: avoids phase coloration from 4 serial
+    // biquads that would make noise-gate transitions slightly audible.
+    if(!lastSub_ && !lastKick_ && !lastMid_ && !lastTop_)
+        return input;
+
     float s = subKill_.process(input);
     s = kickKill_.process(s);
     s = midKill_.process(s);
-    s = topKill_.process(s);
-    return s;
+    return topKill_.process(s);
 }

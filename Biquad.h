@@ -17,6 +17,9 @@ struct BiquadFilter {
     /** Process one sample. */
     float process(float x);
 
+    /** Clear filter memory (call before reactivating a previously bypassed filter). */
+    void reset() { x1 = x2 = y1 = y2 = 0.f; }
+
     /** Low-shelf: boosts/cuts frequencies below freq. */
     void setLowShelf(float freq, float gainDb, float sampleRate);
 
