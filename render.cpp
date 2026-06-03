@@ -10,14 +10,24 @@ https://bela.io
 #include <Bela.h>
 #include <libraries/Scope/Scope.h>
 #include <cmath>
+#include <unistd.h>
 #include "HardwareManager.h"
 #include "ChannelStrip.h"
 #include "HardwareConfig.h"
 
 HardwareManager gHardwareManager;
 ChannelStrip    gChannelStrip;
+AuxiliaryTask   gI2cTask;
 
 static const bool DEBUG = true;
+
+// I2C auxiliary task: reads MCP23017 in a non-RT thread every ~5 ms
+void readI2cTask(void*) {
+    while(!Bela_stopRequested()) {
+        gHardwareManager.readMcp23017();
+        usleep(5000);
+    }
+}
 
 // Throttle print rate (~0.5 s)
 unsigned int gPrintCounter = 0;
@@ -35,6 +45,11 @@ Scope scope;
 // 0.0 → -6 dB  |  0.5 → 0 dB  |  1.0 → +6 dB
 static inline float potToGainDb(float pot) {
     return (pot - 0.5f) * 12.0f;
+}
+
+/** Prints current MCP23017 PA0 switch state. */
+static void printSwitches() {
+    rt_printf("PA0: %s\n", gHardwareManager.getSwitchState(0) ? "OPEN" : "CLOSED");
 }
 
 /** Prints current ChannelStrip gains to the console. */
@@ -60,6 +75,14 @@ bool setup(BelaContext *context, void *userData)
     }
 
     gChannelStrip.setup(context->audioSampleRate);
+
+    // Initialise MCP23017 and launch I2C reading task
+    if(!gHardwareManager.initMcp23017())
+        return false;
+
+    gI2cTask = Bela_createAuxiliaryTask(readI2cTask, 50, "i2c-reader", nullptr);
+    Bela_scheduleAuxiliaryTask(gI2cTask);
+
     return true;
 }
 
@@ -103,8 +126,11 @@ void render(BelaContext *context, void *userData)
     // Print DSP input gains every ~0.5 seconds
     if(DEBUG && ++gPrintCounter >= (context->audioSampleRate / context->audioFrames * 0.5f)) {
         printChannelStrip();
+        printSwitches();
         gPrintCounter = 0;
     }
 }
 
-void cleanup(BelaContext *context, void *userData) {}
+void cleanup(BelaContext *context, void *userData) {
+    gHardwareManager.closeMcp23017();
+}

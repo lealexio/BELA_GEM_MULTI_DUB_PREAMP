@@ -1,5 +1,6 @@
 #pragma once
 #include <cmath>
+#include "SoftwareConfig.h"
 
 /**
  * Second-order IIR biquad filter.
@@ -26,12 +27,53 @@ struct BiquadFilter {
 };
 
 /**
- * Models one input channel: gain stage followed by a 3-band parametric EQ
- * (low shelf / mid peak / high shelf).
+ * Professional noise gate using a peak envelope follower with
+ * independent attack, hold and release stages.
  *
- * Intended to be instantiated once per physical input in the future.
- * Call setInputGain() and setEqGains() once per render block, then
- * process() once per sample.
+ * Signal flow: input → envelope detection → threshold → smooth gain → output
+ *
+ * The gate gain ramps smoothly to avoid clicks:
+ *   - Attack  : gain ramps to 1.0 when envelope > threshold
+ *   - Hold    : gain stays at 1.0 for kGateHoldMs after signal drops
+ *   - Release : gain ramps to 0.0 after the hold period expires
+ */
+struct NoiseGate {
+    /** Must be called once with the audio sample rate before processing. */
+    void setup(float sampleRate);
+
+    /** Process one sample and return the gated output. */
+    float process(float input);
+
+    /** Returns true if the gate is currently open (signal detected). */
+    bool isOpen() const { return gateGain_ > 0.5f; }
+
+private:
+    enum class State { CLOSED, ATTACK, HOLD, RELEASE };
+
+    float envelope_     = 0.f;
+    float gateGain_     = 0.f;
+    float holdCounter_  = 0.f;
+
+    float attackCoeff_  = 0.f;  // per-sample EMA coefficient for envelope attack
+    float releaseCoeff_ = 0.f;  // per-sample EMA coefficient for envelope release
+    float gainAttCoeff_ = 0.f;  // per-sample gain ramp up
+    float gainRelCoeff_ = 0.f;  // per-sample gain ramp down
+    float holdSamples_  = 0.f;  // hold duration in samples
+
+    State state_ = State::CLOSED;
+
+    /** Converts a time constant in ms to a one-pole EMA coefficient. */
+    static float msToCoeff(float ms, float sampleRate) {
+        return expf(-1.f / (ms * 0.001f * sampleRate));
+    }
+};
+
+/**
+ * Models one input channel: input gain → noise gate → 3-band parametric EQ.
+ *
+ * Intended to be instantiated once per physical input.
+ * Call setInputGain() and setEqGains() once per render block,
+ * then process() once per sample.
  */
 class ChannelStrip {
 public:
@@ -55,12 +97,17 @@ public:
      */
     void setEqGains(float gainLowDb, float gainMidDb, float gainHighDb);
 
-    /** Process one sample: applies input gain then the 3-band EQ. */
+    /** Process one sample: gain → gate → EQ. */
     float process(float input);
 
+    /** Returns true if the noise gate is currently open. */
+    bool gateIsOpen() const { return gate_.isOpen(); }
+
 private:
-    float sampleRate_  = 44100.f;
-    float inputGain_   = 1.f;
+    float sampleRate_ = 44100.f;
+    float inputGain_  = 1.f;
+
+    NoiseGate    gate_;
 
     BiquadFilter low_;   // low  shelf  @ 250 Hz
     BiquadFilter mid_;   // peaking EQ  @ 1 kHz, Q=1.4

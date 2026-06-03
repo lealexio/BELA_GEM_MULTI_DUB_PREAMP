@@ -1,5 +1,6 @@
 #pragma once
 #include <Bela.h>
+#include <stdint.h>
 #include "HardwareConfig.h"
 
 class HardwareManager {
@@ -38,6 +39,28 @@ public:
     float getCenteredPotValue(int muxId, int potId) const;
     float getCenteredPotValue(PotRef ref) const { return getCenteredPotValue(ref.mux, ref.pot); }
 
+    // -----------------------------------------------------------------------
+    // MCP23017 — I2C GPIO expander (switches)
+    // -----------------------------------------------------------------------
+
+    /** Opens the I2C bus and configures MCP23017 port A as inputs with pull-ups. */
+    bool initMcp23017();
+
+    /**
+     * Reads GPIOA register from MCP23017 and caches the result.
+     * Must be called from a non-RT thread (AuxiliaryTask), NOT from render().
+     */
+    void readMcp23017();
+
+    /**
+     * Returns the cached state of a PA pin (0–7).
+     * true = switch open (pull-up HIGH), false = switch closed (GND = LOW).
+     */
+    bool getSwitchState(int pin) const;
+
+    /** Closes the I2C file descriptor. Call from cleanup(). */
+    void closeMcp23017();
+
 private:
     static const int kNumMux     = 4;   // Maximum number of MUX supported
     static const int kActiveMux  = 1;   // How many are physically connected — increase as you add MUX
@@ -61,4 +84,11 @@ private:
 
     /** Writes the 4-bit MUX address to D0–D3 on the given digital frame. */
     void setMuxAddress(BelaContext *context, int frame, int channel);
+
+    // MCP23017 I2C state
+    // Change kI2cBus if your Bela routes I2C to a different bus (e.g. "/dev/i2c-2")
+    static constexpr const char* kI2cBus      = "/dev/i2c-1";
+    static constexpr uint8_t     kMcpAddress  = 0x20; // A0=A1=A2=GND
+    int     i2cFd_       = -1;
+    uint8_t mcpPortA_    = 0xFF; // cached GPIOA value (0xFF = all HIGH = all open)
 };
