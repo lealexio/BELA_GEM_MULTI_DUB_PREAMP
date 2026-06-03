@@ -47,6 +47,17 @@ constexpr PotRef EQ_MID_GAIN   = {0, 15};  // C15 — mid  peak   equaliser
 // ... (add entries as needed)
 
 // ---------------------------------------------------------------------------
+// Pots to exclude from debug logging (floating inputs, under investigation…)
+// Add or remove entries as needed; leave the array empty to log everything.
+// ---------------------------------------------------------------------------
+
+constexpr PotRef kIgnoredPots[] = {
+    {1, 2},  // MUX1/C02 — under investigation
+    {2, 2},  // MUX2/C02 — under investigation
+};
+constexpr int kIgnoredPotsCount = sizeof(kIgnoredPots) / sizeof(kIgnoredPots[0]);
+
+// ---------------------------------------------------------------------------
 // Human-readable name lookup — update when you assign new pots
 // Max 4 MUX × 16 pots = 64 entries; unassigned slots show "MUX{m}/C{p}"
 // ---------------------------------------------------------------------------

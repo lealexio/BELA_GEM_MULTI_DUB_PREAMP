@@ -21,8 +21,9 @@ constexpr float kGateAttackMs    = 2.0f;
 
 // How fast the gate closes after signal drops below the threshold (ms).
 // Long release = gate closes smoothly, avoids chopping reverb tails.
-constexpr float kGateReleaseMs   = 150.0f;
+constexpr float kGateReleaseMs   = 600.0f;
 
 // How long the gate stays open after signal drops below threshold (ms).
 // Prevents the gate from "chattering" on signals that fluctuate near threshold.
-constexpr float kGateHoldMs      = 80.0f;
+// For melodic/musical content, set this high enough to bridge note gaps.
+constexpr float kGateHoldMs      = 500.0f;

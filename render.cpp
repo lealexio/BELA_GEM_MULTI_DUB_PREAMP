@@ -67,6 +67,11 @@ static void printChangedPots() {
         for(int p = 0; p < 16; p++) {
             float current = gHardwareManager.getPotValue(m, p);
             float prev    = prevValues[m * 16 + p];
+            bool ignored = false;
+            for(int i = 0; i < kIgnoredPotsCount; i++)
+                if(kIgnoredPots[i].mux == m && kIgnoredPots[i].pot == p) { ignored = true; break; }
+            if(ignored) continue;
+
             if(fabsf(current - prev) >= 0.01f) {
                 const char* name = getPotName(m, p);
                 if(name)
