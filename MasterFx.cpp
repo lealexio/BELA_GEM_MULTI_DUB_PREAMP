@@ -25,6 +25,7 @@ void MasterFx::setup(float sampleRate) {
     kickKill_.setPeaking (kKickFreq, kPassDb, kKickQ, sampleRate_);
     midKill_.setPeaking  (kMidFreq,  kPassDb, kMidQ,  sampleRate_);
     topKill_.setHighShelf(kTopFreq,  kPassDb,         sampleRate_);
+    fxReturnGate_.setup(sampleRate_);
 }
 
 void MasterFx::setKills(bool killSub, bool killKick, bool killMid, bool killTop) {
@@ -49,6 +50,10 @@ void MasterFx::setKills(bool killSub, bool killKick, bool killMid, bool killTop)
         topKill_.setHighShelf(kTopFreq, killTop ? kKillDb : kPassDb, sampleRate_);
         lastTop_ = killTop;
     }
+}
+
+float MasterFx::processFxReturn(float sample) {
+    return fxReturnGate_.process(sample);
 }
 
 float MasterFx::process(float input) {

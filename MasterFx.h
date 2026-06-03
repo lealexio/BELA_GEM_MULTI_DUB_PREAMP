@@ -1,5 +1,6 @@
 #pragma once
 #include "Biquad.h"
+#include "ChannelStrip.h"
 
 /**
  * Master effects bus: receives the summed output of all channel strips
@@ -29,6 +30,12 @@ public:
      */
     void setKills(bool killSub, bool killKick, bool killMid, bool killTop);
 
+    /**
+     * Gates one FX return sample to suppress noise when the effect is idle.
+     * Call once per sample, before mixing the return into the master bus.
+     */
+    float processFxReturn(float sample);
+
     /** Process one mono sample through the kill stage. */
     float process(float input);
 
@@ -39,6 +46,8 @@ private:
     BiquadFilter kickKill_;  // peaking     @ kKillKickFreq
     BiquadFilter midKill_;   // peaking     @ kKillMidFreq
     BiquadFilter topKill_;   // high shelf  @ kKillTopFreq
+
+    NoiseGate fxReturnGate_;  // suppresses noise on the FX return bus when idle
 
     // Track previous states to recompute coefficients only on change
     bool lastSub_  = false;

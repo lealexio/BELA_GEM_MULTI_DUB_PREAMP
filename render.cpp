@@ -202,8 +202,8 @@ void render(BelaContext *context, void *userData)
         float fxSend = gChannelStrip.fxOut() + gChannelStrip2.fxOut();
         audioWrite(context, n, FX1_SEND_OUT, fxSend);
 
-        // FX return: wet signal from the external effect unit → back into master bus
-        float fxReturn = audioRead(context, n, FX1_RETURN_IN);
+        // FX return: gated to suppress noise when the effect unit is idle
+        float fxReturn = gMasterFx.processFxReturn(audioRead(context, n, FX1_RETURN_IN));
 
         // Master bus: dry channels + FX return → kills → stereo output
         float mix = dry1 + dry2 + fxReturn;
