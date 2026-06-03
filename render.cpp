@@ -29,9 +29,6 @@ void readI2cTask(void*) {
     }
 }
 
-// Throttle print rate (~0.5 s)
-unsigned int gPrintCounter = 0;
-
 // Clip detection: samples at or above this absolute value are considered clipped.
 // ADC hard clip occurs at 1.0; 0.99 gives a small early-warning margin.
 static constexpr float kClipThreshold = 0.99f;
@@ -47,23 +44,62 @@ static inline float potToGainDb(float pot) {
     return (pot - 0.5f) * 12.0f;
 }
 
-/** Prints current MCP23017 PA0 switch state. */
-static void printSwitches() {
-    rt_printf("PA0: %s\n", gHardwareManager.getSwitchState(0) ? "OPEN" : "CLOSED");
+/**
+ * Detects which potentiometers moved since the last call and prints their
+ * address and current value. Silent if nothing changed.
+ * Only active when DEBUG = true.
+ */
+static void printChangedPots() {
+    // Total pots across all MUX (4 × 16 = 64)
+    static float prevValues[4 * 16] = {};
+    static bool  initialised        = false;
+
+    // Seed previous values on first call so we don't flood the console at startup
+    if(!initialised) {
+        for(int m = 0; m < 4; m++)
+            for(int p = 0; p < 16; p++)
+                prevValues[m * 16 + p] = gHardwareManager.getPotValue(m, p);
+        initialised = true;
+        return;
+    }
+
+    for(int m = 0; m < 4; m++) {
+        for(int p = 0; p < 16; p++) {
+            float current = gHardwareManager.getPotValue(m, p);
+            float prev    = prevValues[m * 16 + p];
+            if(fabsf(current - prev) >= 0.01f) {
+                const char* name = getPotName(m, p);
+                if(name)
+                    rt_printf("[POT] %-14s  MUX%d/C%02d  →  %.3f\n", name, m, p, current);
+                else
+                    rt_printf("[POT] %-14s  MUX%d/C%02d  →  %.3f\n", "unassigned", m, p, current);
+                prevValues[m * 16 + p] = current;
+            }
+        }
+    }
 }
 
-/** Prints current ChannelStrip gains to the console. */
-static void printChannelStrip() {
-    float gainLow  = potToGainDb(gHardwareManager.getCenteredPotValue(EQ_LOW_GAIN));
-    float gainMid  = potToGainDb(gHardwareManager.getCenteredPotValue(EQ_MID_GAIN));
-    float gainHigh = potToGainDb(gHardwareManager.getCenteredPotValue(EQ_HIGH_GAIN));
-    rt_printf("--- Channel Strip --------\n");
-    rt_printf("INPUT_GAIN  : %.3f\n",     gHardwareManager.getPotValue(INPUT_GAIN));
-    rt_printf("EQ_LOW_GAIN : %+.2f dB\n", gainLow);
-    rt_printf("EQ_MID_GAIN : %+.2f dB\n", gainMid);
-    rt_printf("EQ_HIGH_GAIN: %+.2f dB\n", gainHigh);
-    rt_printf("--------------------------\n");
+/** Prints MCP23017 PA switches only when their state changes. */
+static void printChangedSwitches() {
+    static int prevStates = -1; // -1 forces print on first call
+
+    // Read all 8 PA pins as a bitmask
+    int current = 0;
+    for(int pin = 0; pin < 8; pin++)
+        current |= (gHardwareManager.getSwitchState(pin) ? 1 : 0) << pin;
+
+    if(current == prevStates) return;
+
+    // Print only pins whose state changed
+    for(int pin = 0; pin < 8; pin++) {
+        bool prev = (prevStates >> pin) & 1;
+        bool now  = (current   >> pin) & 1;
+        if(prev != now || prevStates == -1)
+            rt_printf("[SW]  PA%d  →  %s\n", pin, now ? "OPEN" : "CLOSED");
+    }
+    prevStates = current;
 }
+
 
 bool setup(BelaContext *context, void *userData)
 {
@@ -123,12 +159,14 @@ void render(BelaContext *context, void *userData)
         gClipWarnCounter = 0;
     }
 
-    // Print DSP input gains every ~0.5 seconds
-    if(DEBUG && ++gPrintCounter >= (context->audioSampleRate / context->audioFrames * 0.5f)) {
-        printChannelStrip();
-        printSwitches();
-        gPrintCounter = 0;
-    }
+
+    if(DEBUG)
+        // Print any pot that moved (immediate, no throttle)
+        printChangedPots();
+
+    // Print switch state changes immediately
+    if(DEBUG)
+        printChangedSwitches();
 }
 
 void cleanup(BelaContext *context, void *userData) {

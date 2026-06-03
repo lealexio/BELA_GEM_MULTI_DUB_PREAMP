@@ -63,7 +63,7 @@ public:
 
 private:
     static const int kNumMux     = 4;   // Maximum number of MUX supported
-    static const int kActiveMux  = 1;   // How many are physically connected — increase as you add MUX
+    static const int kActiveMux  = 3;   // How many are physically connected — increase as you add MUX
     static const int kPotsPerMux = 16;
 
     float potValues[kNumMux * kPotsPerMux];

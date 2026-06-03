@@ -45,3 +45,23 @@ constexpr PotRef EQ_MID_GAIN   = {0, 15};  // C15 — mid  peak   equaliser
 // constexpr PotRef POT_MUX1_C00 = {1,  0};
 // constexpr PotRef POT_MUX1_C01 = {1,  1};
 // ... (add entries as needed)
+
+// ---------------------------------------------------------------------------
+// Human-readable name lookup — update when you assign new pots
+// Max 4 MUX × 16 pots = 64 entries; unassigned slots show "MUX{m}/C{p}"
+// ---------------------------------------------------------------------------
+
+inline const char* getPotName(int mux, int pot) {
+    if(mux == 0) {
+        switch(pot) {
+            case  0: return "EQ_LOW_GAIN";
+            case  1: return "INPUT_GAIN";
+            case 14: return "EQ_HIGH_GAIN";
+            case 15: return "EQ_MID_GAIN";
+            default: return nullptr; // unassigned → caller prints raw index
+        }
+    }
+    return nullptr;
+}
+
+inline const char* getPotName(PotRef ref) { return getPotName(ref.mux, ref.pot); }
