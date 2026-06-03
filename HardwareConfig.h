@@ -28,6 +28,21 @@ constexpr ChannelConfig CH1_CONFIG = { {0, -1}, 0 }; // IN0 → OUT0
 constexpr ChannelConfig CH2_CONFIG = { {1, -1}, 1 }; // IN1 → OUT1
 
 // ---------------------------------------------------------------------------
+// Switch mapping (MCP23017 PA pins)
+// ---------------------------------------------------------------------------
+
+struct SwitchRef {
+    int  pin;
+    bool reversed = false; // true = invert logic (HIGH = active instead of LOW)
+};
+
+// --- Master FX kill switches ---
+constexpr SwitchRef KILL_KICK = {0, true}; // PA0 → kill KICK (80–200 Hz)
+constexpr SwitchRef KILL_SUB  = {1, true}; // PA1 → kill SUB  (< 80 Hz)
+constexpr SwitchRef KILL_MID  = {2, true}; // PA2 → kill MID  (200–1200 Hz)
+constexpr SwitchRef KILL_TOP  = {3, false}; // PA3 → kill TOP  (> 1200 Hz)
+
+// ---------------------------------------------------------------------------
 // Pot mapping structs
 // ---------------------------------------------------------------------------
 

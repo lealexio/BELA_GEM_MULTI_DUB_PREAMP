@@ -13,11 +13,13 @@ https://bela.io
 #include <unistd.h>
 #include "HardwareManager.h"
 #include "ChannelStrip.h"
+#include "MasterFx.h"
 #include "HardwareConfig.h"
 
 HardwareManager gHardwareManager;
-ChannelStrip    gChannelStrip;   // IN0 → OUT0
-ChannelStrip    gChannelStrip2;  // IN1 → OUT1
+ChannelStrip    gChannelStrip;   // IN0 → master
+ChannelStrip    gChannelStrip2;  // IN1 → master
+MasterFx        gMasterFx;       // sum of channels → OUT0 + OUT1
 AuxiliaryTask   gI2cTask;
 
 static const bool DEBUG = true;
@@ -43,6 +45,13 @@ Scope scope;
 // 0.0 → -6 dB  |  0.5 → 0 dB  |  1.0 → +6 dB
 static inline float potToGainDb(float pot) {
     return (pot - 0.5f) * 12.0f;
+}
+
+// Returns true when a kill switch is active, honouring the reversed flag.
+// By default a switch is active when its PA pin is LOW (button pressed).
+static inline bool readSwitch(const SwitchRef& sw) {
+    bool state = gHardwareManager.getSwitchState(sw.pin);
+    return sw.reversed ? state : !state;
 }
 
 // Reads all valid audio inputs (audioIns[i] != -1) and returns their average.
@@ -133,6 +142,7 @@ bool setup(BelaContext *context, void *userData)
 
     gChannelStrip.setup(context->audioSampleRate);
     gChannelStrip2.setup(context->audioSampleRate);
+    gMasterFx.setup(context->audioSampleRate);
 
     // Initialise MCP23017 and launch I2C reading task
     if(!gHardwareManager.initMcp23017())
@@ -165,6 +175,14 @@ void render(BelaContext *context, void *userData)
         potToGainDb(gHardwareManager.getCenteredPotValue(CH2_EQ_HIGH))
     );
 
+    // Update master kill switches — routing and polarity defined in HardwareConfig.h
+    gMasterFx.setKills(
+        readSwitch(KILL_SUB),
+        readSwitch(KILL_KICK),
+        readSwitch(KILL_MID),
+        readSwitch(KILL_TOP)
+    );
+
     bool clipCh0 = false;
     bool clipCh1 = false;
     for(unsigned int n = 0; n < context->audioFrames; n++) {
@@ -174,12 +192,13 @@ void render(BelaContext *context, void *userData)
         if(fabsf(in0) >= kClipThreshold) clipCh0 = true;
         if(fabsf(in1) >= kClipThreshold) clipCh1 = true;
 
-        float out0 = gChannelStrip.process(in0);
-        float out1 = gChannelStrip2.process(in1);
+        // Sum channels then pass through master effects bus
+        float mix = gChannelStrip.process(in0) + gChannelStrip2.process(in1);
+        float out = gMasterFx.process(mix);
 
-        scope.log(out0, out1);
-        audioWrite(context, n, CH1_CONFIG.audioOut, out0);
-        audioWrite(context, n, CH2_CONFIG.audioOut, out1);
+        scope.log(mix, out);
+        audioWrite(context, n, 0, out);
+        audioWrite(context, n, 1, out);
     }
 
     // Warn once per interval per channel to avoid log spam

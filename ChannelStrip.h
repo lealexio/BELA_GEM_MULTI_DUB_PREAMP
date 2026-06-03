@@ -1,30 +1,6 @@
 #pragma once
-#include <cmath>
+#include "Biquad.h"
 #include "SoftwareConfig.h"
-
-/**
- * Second-order IIR biquad filter.
- * Coefficients are normalised (divided by a0).
- * State variables use Direct Form I.
- */
-struct BiquadFilter {
-    float b0 = 1.f, b1 = 0.f, b2 = 0.f;
-    float a1 = 0.f, a2 = 0.f;
-    float x1 = 0.f, x2 = 0.f;
-    float y1 = 0.f, y2 = 0.f;
-
-    /** Process one sample in-place. */
-    float process(float x);
-
-    /** Low-shelf: boosts/cuts frequencies below freq. */
-    void setLowShelf(float freq, float gainDb, float sampleRate);
-
-    /** High-shelf: boosts/cuts frequencies above freq. */
-    void setHighShelf(float freq, float gainDb, float sampleRate);
-
-    /** Peaking EQ: boosts/cuts a band centred on freq with given Q. */
-    void setPeaking(float freq, float gainDb, float q, float sampleRate);
-};
 
 /**
  * Professional noise gate using a peak envelope follower with
