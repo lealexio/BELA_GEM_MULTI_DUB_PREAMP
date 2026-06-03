@@ -24,8 +24,18 @@ struct ChannelConfig {
     int audioOut;    // Bela audio output index
 };
 
-constexpr ChannelConfig CH1_CONFIG = { {0, -1}, 0 }; // IN0 → OUT0
-constexpr ChannelConfig CH2_CONFIG = { {1, -1}, 1 }; // IN1 → OUT1
+constexpr ChannelConfig CH1_CONFIG = { {0, -1}, 0 }; // IN0 → master
+constexpr ChannelConfig CH2_CONFIG = { {1, -1}, 1 }; // IN1 → master
+
+// ---------------------------------------------------------------------------
+// FX Send / Return routing
+// Master output: OUT0 + OUT1 (mono)
+// FX send bus:   OUT2  (sum of all channel FX sends → external effect unit)
+// FX return:     IN2   (wet signal back from the effect unit → master bus)
+// ---------------------------------------------------------------------------
+
+constexpr int FX1_SEND_OUT  = 2;  // Bela OUT2
+constexpr int FX1_RETURN_IN = 2;  // Bela IN2
 
 // ---------------------------------------------------------------------------
 // Switch mapping (MCP23017 PA pins)
@@ -63,10 +73,14 @@ constexpr PotRef CH1_EQ_LOW      = {0, 14, true};  // C14 — channel 1 low  she
 constexpr PotRef CH1_EQ_HIGH     = {0, 15, true};  // C15 — channel 1 high shelf
 
 // --- Channel Strip 2 (IN1 → OUT1) ---
-constexpr PotRef CH2_INPUT_GAIN  = {0,  6, true};        // C03 — channel 2 input volume
-constexpr PotRef CH2_EQ_MID      = {0,  7, true};        // C07 — channel 2 mid  peak
-constexpr PotRef CH2_EQ_HIGH     = {0,  8, true};        // C08 — channel 2 high shelf
-constexpr PotRef CH2_EQ_LOW      = {0,  9, true};        // C09 — channel 2 low  shelf
+constexpr PotRef CH2_INPUT_GAIN  = {0,  6, true};  // C06 — channel 2 input volume
+constexpr PotRef CH2_EQ_MID      = {0,  7, true};  // C07 — channel 2 mid  peak
+constexpr PotRef CH2_EQ_HIGH     = {0,  8, true};  // C08 — channel 2 high shelf
+constexpr PotRef CH2_EQ_LOW      = {0,  9, true};  // C09 — channel 2 low  shelf
+
+// --- FX Send levels (post-fader, 0.0 = no send, 1.0 = full send) ---
+constexpr PotRef CH1_FX_SEND     = {0, 13};        // C13 — channel 1 FX send
+constexpr PotRef CH2_FX_SEND     = {0, 10};        // C10 — channel 2 FX send
 
 // ---------------------------------------------------------------------------
 // MUX 1  (analog input A1) — uncomment when physically connected
@@ -98,6 +112,8 @@ inline const char* getPotName(int mux, int pot) {
         switch(pot) {
             case  0: return "CH1_EQ_MID";
             case  1: return "CH1_INPUT_GAIN";
+            case 10: return "CH2_FX_SEND";
+            case 13: return "CH1_FX_SEND";
             case  6: return "CH2_INPUT_GAIN";
             case  7: return "CH2_EQ_MID";
             case  8: return "CH2_EQ_HIGH";

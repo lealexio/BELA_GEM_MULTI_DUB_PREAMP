@@ -87,6 +87,10 @@ void ChannelStrip::setInputGain(float gain) {
     inputGain_ = gain;
 }
 
+void ChannelStrip::setFxSendLevel(float level) {
+    fxSendLevel_ = level;
+}
+
 void ChannelStrip::setEqGains(float gainLowDb, float gainMidDb, float gainHighDb) {
     // Recompute coefficients only when a value has actually changed
     if(gainLowDb != lastLow_) {
@@ -111,8 +115,11 @@ float ChannelStrip::process(float input) {
     float gated = gate_.process(gained);
 
     // 3. EQ — bypassed entirely when all bands are at 0 dB
-    if(lastLow_ == 0.f && lastMid_ == 0.f && lastHigh_ == 0.f)
-        return gated;
+    float out = (lastLow_ == 0.f && lastMid_ == 0.f && lastHigh_ == 0.f)
+        ? gated
+        : high_.process(mid_.process(low_.process(gated)));
 
-    return high_.process(mid_.process(low_.process(gated)));
+    // Store dry output so fxOut() can scale it by fxSendLevel_
+    lastOut_ = out;
+    return out;
 }

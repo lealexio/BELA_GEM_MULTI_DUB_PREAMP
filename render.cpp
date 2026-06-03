@@ -159,21 +159,23 @@ void render(BelaContext *context, void *userData)
     // Scan one MUX channel per render callback
     gHardwareManager.scanStep(context);
 
-    // --- Channel Strip 1 controls (IN0 → OUT0) ---
+    // --- Channel Strip 1 controls ---
     gChannelStrip.setInputGain(gHardwareManager.getPotValue(CH1_INPUT_GAIN));
     gChannelStrip.setEqGains(
         potToGainDb(gHardwareManager.getCenteredPotValue(CH1_EQ_LOW)),
         potToGainDb(gHardwareManager.getCenteredPotValue(CH1_EQ_MID)),
         potToGainDb(gHardwareManager.getCenteredPotValue(CH1_EQ_HIGH))
     );
+    gChannelStrip.setFxSendLevel(gHardwareManager.getPotValue(CH1_FX_SEND));
 
-    // --- Channel Strip 2 controls (IN1 → OUT1) ---
+    // --- Channel Strip 2 controls ---
     gChannelStrip2.setInputGain(gHardwareManager.getPotValue(CH2_INPUT_GAIN));
     gChannelStrip2.setEqGains(
         potToGainDb(gHardwareManager.getCenteredPotValue(CH2_EQ_LOW)),
         potToGainDb(gHardwareManager.getCenteredPotValue(CH2_EQ_MID)),
         potToGainDb(gHardwareManager.getCenteredPotValue(CH2_EQ_HIGH))
     );
+    gChannelStrip2.setFxSendLevel(gHardwareManager.getPotValue(CH2_FX_SEND));
 
     // Update master kill switches — routing and polarity defined in HardwareConfig.h
     gMasterFx.setKills(
@@ -192,8 +194,19 @@ void render(BelaContext *context, void *userData)
         if(fabsf(in0) >= kClipThreshold) clipCh0 = true;
         if(fabsf(in1) >= kClipThreshold) clipCh1 = true;
 
-        // Sum channels then pass through master effects bus
-        float mix = gChannelStrip.process(in0) + gChannelStrip2.process(in1);
+        // Process channels (dry path)
+        float dry1 = gChannelStrip.process(in0);
+        float dry2 = gChannelStrip2.process(in1);
+
+        // FX send: sum of both channels' post-fader sends → OUT2 (external effect unit)
+        float fxSend = gChannelStrip.fxOut() + gChannelStrip2.fxOut();
+        audioWrite(context, n, FX1_SEND_OUT, fxSend);
+
+        // FX return: wet signal from the external effect unit → back into master bus
+        float fxReturn = audioRead(context, n, FX1_RETURN_IN);
+
+        // Master bus: dry channels + FX return → kills → stereo output
+        float mix = dry1 + dry2 + fxReturn;
         float out = gMasterFx.process(mix);
 
         scope.log(mix, out);
