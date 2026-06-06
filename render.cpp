@@ -177,12 +177,13 @@ void render(BelaContext *context, void *userData)
     );
     gChannelStrip2.setFxSendLevel(gHardwareManager.getPotValue(CH2_FX_SEND));
 
-    // Update master kill switches — routing and polarity defined in HardwareConfig.h
+    // Update master kill switches — gains ramp smoothly over kKillRampMs
     gMasterFx.setKills(
         readSwitch(KILL_SUB),
         readSwitch(KILL_KICK),
         readSwitch(KILL_MID),
-        readSwitch(KILL_TOP)
+        readSwitch(KILL_TOP),
+        context->audioFrames
     );
 
     bool clipCh0 = false;

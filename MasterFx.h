@@ -6,18 +6,17 @@
  * Master effects bus: receives the summed output of all channel strips
  * and applies 4 independent kill switches.
  *
- * Each kill mutes a specific frequency band via a deep notch (-60 dB).
- * When all kills are OFF every filter sits at 0 dB → perfectly transparent.
+ * Each kill smoothly ramps its band gain from 0 dB to -60 dB (and back)
+ * over kKillRampMs to avoid pops. The ramp is updated once per render block.
  *
- * Band mapping (set in SoftwareConfig.h):
- *   SUB  — low shelf  below kKillSubFreq   (default  80 Hz)
- *   KICK — peaking    around kKillKickFreq (default 127 Hz, Q ≈ 1.05)
- *   MID  — peaking    around kKillMidFreq  (default 490 Hz, Q ≈ 0.49)
- *   TOP  — high shelf above  kKillTopFreq  (default 1200 Hz)
+ * Band mapping:
+ *   SUB  — low shelf  below  80 Hz
+ *   KICK — peaking    around 127 Hz
+ *   MID  — peaking    around 490 Hz
+ *   TOP  — high shelf above 1200 Hz
  *
  * Switch assignment (MCP23017 PA pins):
  *   PA0 → KICK   PA1 → SUB   PA2 → MID   PA3 → TOP
- * A pin reads LOW (pressed) when the kill is active.
  */
 class MasterFx {
 public:
@@ -25,10 +24,11 @@ public:
     void setup(float sampleRate);
 
     /**
-     * Updates kill states. Call once per render block before the sample loop.
-     * A kill is active when its argument is true.
+     * Updates kill states and advances gain ramps. Call once per render block.
+     * @param blockSize number of audio frames in the current render block
      */
-    void setKills(bool killSub, bool killKick, bool killMid, bool killTop);
+    void setKills(bool killSub, bool killKick, bool killMid, bool killTop,
+                  unsigned int blockSize);
 
     /**
      * Gates one FX return sample to suppress noise when the effect is idle.
@@ -40,22 +40,20 @@ public:
     float process(float input);
 
 private:
+    // Band indices
+    enum { SUB = 0, KICK = 1, MID = 2, TOP = 3 };
+
     float sampleRate_ = 44100.f;
 
-    BiquadFilter subKill_;   // low  shelf  @ kKillSubFreq
-    BiquadFilter kickKill_;  // peaking     @ kKillKickFreq
-    BiquadFilter midKill_;   // peaking     @ kKillMidFreq
-    BiquadFilter topKill_;   // high shelf  @ kKillTopFreq
+    BiquadFilter filters_[4];    // one per band
+    float currentDb_[4] = {};    // current gain in dB for each band (starts at 0)
+    float targetDb_[4]  = {};    // target gain in dB (0 = pass, -60 = kill)
 
-    NoiseGate fxReturnGate_;  // suppresses noise on the FX return bus when idle
+    NoiseGate fxReturnGate_;
 
-    // Track previous states to recompute coefficients only on change
-    bool lastSub_  = false;
-    bool lastKick_ = false;
-    bool lastMid_  = false;
-    bool lastTop_  = false;
+    /** Updates one filter's coefficients for the given gain in dB. */
+    void updateFilter(int band, float gainDb);
 
-    // -60 dB is effectively silence; 0 dB = transparent pass-through
     static constexpr float kKillDb = -60.f;
     static constexpr float kPassDb =   0.f;
 };

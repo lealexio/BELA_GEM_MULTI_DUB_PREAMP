@@ -21,9 +21,17 @@ constexpr float kGateAttackMs    = 2.0f;
 
 // How fast the gate closes after signal drops below the threshold (ms).
 // Long release = gate closes smoothly, avoids chopping reverb tails.
-constexpr float kGateReleaseMs   = 600.0f;
+constexpr float kGateReleaseMs   = 150.0f;
 
 // How long the gate stays open after signal drops below threshold (ms).
 // Prevents the gate from "chattering" on signals that fluctuate near threshold.
 // For melodic/musical content, set this high enough to bridge note gaps.
-constexpr float kGateHoldMs      = 500.0f;
+constexpr float kGateHoldMs      = 100.0f;
+
+// ---------------------------------------------------------------------------
+// Kill switches (MasterFx)
+// ---------------------------------------------------------------------------
+
+// Time to ramp from 0 dB to -60 dB (or back) when a kill is toggled (ms).
+// Higher = softer transition; lower = snappier but may pop.
+constexpr float kKillRampMs = 30.0f;
