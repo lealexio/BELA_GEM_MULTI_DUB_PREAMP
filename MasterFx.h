@@ -1,59 +1,55 @@
 #pragma once
-#include "Biquad.h"
-#include "ChannelStrip.h"
+#include "KillSwitch.h"
+#include "NoiseGate.h"
 
 /**
- * Master effects bus: receives the summed output of all channel strips
- * and applies 4 independent kill switches.
+ * Master effects bus.
  *
- * Each kill smoothly ramps its band gain from 0 dB to -60 dB (and back)
- * over kKillRampMs to avoid pops. The ramp is updated once per render block.
+ * Orchestrates the two currently active master processors:
+ *   - KillSwitch   : 4-band crossover kill (SUB / KICK / MID / TOP)
+ *   - NoiseGate    : suppresses idle noise on the FX return line
  *
- * Band mapping:
- *   SUB  — low shelf  below  80 Hz
- *   KICK — peaking    around 127 Hz
- *   MID  — peaking    around 490 Hz
- *   TOP  — high shelf above 1200 Hz
+ * Additional master effects (compressor, limiter, reverb, …) can be added
+ * by composing new objects here without modifying the channel strips or
+ * the render loop.
  *
- * Switch assignment (MCP23017 PA pins):
- *   PA0 → KICK   PA1 → SUB   PA2 → MID   PA3 → TOP
+ * Signal flow:
+ *   channel strips (dry)
+ *       └──► process(mix)  ──►  KillSwitch  ──►  OUT
+ *
+ *   effect unit (wet return)
+ *       └──► processFxReturn(sample)  ──►  NoiseGate  ──►  (summed in render.cpp)
+ *
+ * Usage pattern:
+ *   1. Call setup() once with the audio sample rate.
+ *   2. Call setKills() once per render block (before the sample loop).
+ *   3. Call processFxReturn() and process() once per audio sample.
  */
 class MasterFx {
 public:
-    /** Must be called in setup() with the audio sample rate. */
+    /** Initialises all sub-processors. Must be called before processing. */
     void setup(float sampleRate);
 
     /**
-     * Updates kill states and advances gain ramps. Call once per render block.
-     * @param blockSize number of audio frames in the current render block
+     * Updates kill targets. The gain ramp advances sample by sample in process().
+     * Call once per render block before the sample loop.
      */
-    void setKills(bool killSub, bool killKick, bool killMid, bool killTop,
-                  unsigned int blockSize);
+    void setKills(bool killSub, bool killKick, bool killMid, bool killTop);
 
     /**
-     * Gates one FX return sample to suppress noise when the effect is idle.
-     * Call once per sample, before mixing the return into the master bus.
+     * Applies the FX-return noise gate to one sample.
+     * Suppresses idle hum or noise from an effect unit when no signal is fed.
      */
     float processFxReturn(float sample);
 
-    /** Process one mono sample through the kill stage. */
+    /**
+     * Processes one master-bus sample through the kill crossover.
+     * @param input  Sum of all dry channel outputs (+ FX return if pre-kill)
+     * @return       Kill-filtered output sample
+     */
     float process(float input);
 
 private:
-    // Band indices
-    enum { SUB = 0, KICK = 1, MID = 2, TOP = 3 };
-
-    float sampleRate_ = 44100.f;
-
-    BiquadFilter filters_[4];    // one per band
-    float currentDb_[4] = {};    // current gain in dB for each band (starts at 0)
-    float targetDb_[4]  = {};    // target gain in dB (0 = pass, -60 = kill)
-
-    NoiseGate fxReturnGate_;
-
-    /** Updates one filter's coefficients for the given gain in dB. */
-    void updateFilter(int band, float gainDb);
-
-    static constexpr float kKillDb = -60.f;
-    static constexpr float kPassDb =   0.f;
+    KillSwitch kills_;
+    NoiseGate  fxReturnGate_;
 };

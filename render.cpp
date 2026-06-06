@@ -15,16 +15,22 @@ https://bela.io
 #include "ChannelStrip.h"
 #include "MasterFx.h"
 #include "HardwareConfig.h"
+#include "SoftwareConfig.h"
 
 HardwareManager gHardwareManager;
 ChannelStrip    gChannelStrip;   // IN0 → master
 ChannelStrip    gChannelStrip2;  // IN1 → master
-MasterFx        gMasterFx;       // sum of channels → OUT0 + OUT1
+MasterFx        gMasterFx;
 AuxiliaryTask   gI2cTask;
 
-static const bool DEBUG = true;
+Scope scope;
 
-// I2C auxiliary task: reads MCP23017 in a non-RT thread every ~5 ms
+static unsigned int gClipWarnCounter = 0;
+
+// ---------------------------------------------------------------------------
+// I2C auxiliary task — reads MCP23017 in a non-RT thread every ~5 ms
+// ---------------------------------------------------------------------------
+
 void readI2cTask(void*) {
     while(!Bela_stopRequested()) {
         gHardwareManager.readMcp23017();
@@ -32,30 +38,22 @@ void readI2cTask(void*) {
     }
 }
 
-// Clip detection: samples at or above this absolute value are considered clipped.
-// ADC hard clip occurs at 1.0; 0.99 gives a small early-warning margin.
-static constexpr float kClipThreshold = 0.99f;
-// Minimum number of render blocks between two clip warnings (avoids log spam).
-static constexpr unsigned int kClipWarnInterval = 4410; // ~0.5 s at 44.1 kHz / 16 frames
-unsigned int gClipWarnCounter = 0;
+// ---------------------------------------------------------------------------
+// Audio helpers
+// ---------------------------------------------------------------------------
 
-Scope scope;
-
-// Maps a centred pot value [0.0, 1.0] to a gain in dB [-6, +6].
-// 0.0 → -6 dB  |  0.5 → 0 dB  |  1.0 → +6 dB
+/**
+ * Maps a centred pot value [0.0, 1.0] to a gain in dB.
+ *   0.0 → -kEqGainRangeDb   |   0.5 → 0 dB   |   1.0 → +kEqGainRangeDb
+ */
 static inline float potToGainDb(float pot) {
-    return (pot - 0.5f) * 12.0f;
+    return (pot - 0.5f) * (kEqGainRangeDb * 2.f);
 }
 
-// Returns true when a kill switch is active, honouring the reversed flag.
-// By default a switch is active when its PA pin is LOW (button pressed).
-static inline bool readSwitch(const SwitchRef& sw) {
-    bool state = gHardwareManager.getSwitchState(sw.pin);
-    return sw.reversed ? state : !state;
-}
-
-// Reads all valid audio inputs (audioIns[i] != -1) and returns their average.
-// Single input → direct pass-through. Two inputs → averaged to mono.
+/**
+ * Reads all valid audio inputs for the given config and returns their average.
+ * Single input → direct pass-through. Two inputs → averaged to mono.
+ */
 static inline float readChannelInput(BelaContext* ctx, unsigned int frame,
                                      const ChannelConfig& cfg) {
     float sum   = 0.f;
@@ -69,41 +67,37 @@ static inline float readChannelInput(BelaContext* ctx, unsigned int frame,
     return (count > 0) ? sum / count : 0.f;
 }
 
-/**
- * Detects which potentiometers moved since the last call and prints their
- * address and current value. Silent if nothing changed.
- * Only active when DEBUG = true.
- */
-static void printChangedPots() {
-    // Total pots across all MUX (4 × 16 = 64)
-    static float prevValues[4 * 16] = {};
-    static bool  initialised        = false;
+// ---------------------------------------------------------------------------
+// Debug helpers (compiled-out when kDebug = false)
+// ---------------------------------------------------------------------------
 
-    // Seed previous values on first call so we don't flood the console at startup
+/** Prints pots that moved since the last call. Silent when nothing changed. */
+static void printChangedPots() {
+    static float prevValues[kNumMux * kPotsPerMux] = {};
+    static bool  initialised = false;
+
     if(!initialised) {
-        for(int m = 0; m < 4; m++)
-            for(int p = 0; p < 16; p++)
-                prevValues[m * 16 + p] = gHardwareManager.getPotValue(m, p);
+        for(int m = 0; m < kNumMux; m++)
+            for(int p = 0; p < kPotsPerMux; p++)
+                prevValues[m * kPotsPerMux + p] = gHardwareManager.getPotValue(m, p);
         initialised = true;
         return;
     }
 
-    for(int m = 0; m < 4; m++) {
-        for(int p = 0; p < 16; p++) {
-            float current = gHardwareManager.getPotValue(m, p);
-            float prev    = prevValues[m * 16 + p];
+    for(int m = 0; m < kNumMux; m++) {
+        for(int p = 0; p < kPotsPerMux; p++) {
             bool ignored = false;
             for(int i = 0; i < kIgnoredPotsCount; i++)
                 if(kIgnoredPots[i].mux == m && kIgnoredPots[i].pot == p) { ignored = true; break; }
             if(ignored) continue;
 
-            if(fabsf(current - prev) >= 0.01f) {
+            float current = gHardwareManager.getPotValue(m, p);
+            float prev    = prevValues[m * kPotsPerMux + p];
+            if(fabsf(current - prev) >= kDebugPotMinMove) {
                 const char* name = getPotName(m, p);
-                if(name)
-                    rt_printf("[POT] %-14s  MUX%d/C%02d  →  %.3f\n", name, m, p, current);
-                else
-                    rt_printf("[POT] %-14s  MUX%d/C%02d  →  %.3f\n", "unassigned", m, p, current);
-                prevValues[m * 16 + p] = current;
+                rt_printf("[POT] %-16s  MUX%d/C%02d  →  %.3f\n",
+                          name ? name : "unassigned", m, p, current);
+                prevValues[m * kPotsPerMux + p] = current;
             }
         }
     }
@@ -111,16 +105,14 @@ static void printChangedPots() {
 
 /** Prints MCP23017 PA switches only when their state changes. */
 static void printChangedSwitches() {
-    static int prevStates = -1; // -1 forces print on first call
+    static int prevStates = -1;
 
-    // Read all 8 PA pins as a bitmask
     int current = 0;
     for(int pin = 0; pin < 8; pin++)
         current |= (gHardwareManager.getSwitchState(pin) ? 1 : 0) << pin;
 
     if(current == prevStates) return;
 
-    // Print only pins whose state changed
     for(int pin = 0; pin < 8; pin++) {
         bool prev = (prevStates >> pin) & 1;
         bool now  = (current   >> pin) & 1;
@@ -130,9 +122,11 @@ static void printChangedSwitches() {
     prevStates = current;
 }
 
+// ---------------------------------------------------------------------------
+// Bela callbacks
+// ---------------------------------------------------------------------------
 
-bool setup(BelaContext *context, void *userData)
-{
+bool setup(BelaContext* context, void* userData) {
     scope.setup(2, context->audioSampleRate);
 
     if(!gHardwareManager.setup(context)) {
@@ -144,7 +138,6 @@ bool setup(BelaContext *context, void *userData)
     gChannelStrip2.setup(context->audioSampleRate);
     gMasterFx.setup(context->audioSampleRate);
 
-    // Initialise MCP23017 and launch I2C reading task
     if(!gHardwareManager.initMcp23017())
         return false;
 
@@ -154,9 +147,7 @@ bool setup(BelaContext *context, void *userData)
     return true;
 }
 
-void render(BelaContext *context, void *userData)
-{
-    // Scan one MUX channel per render callback
+void render(BelaContext* context, void* userData) {
     gHardwareManager.scanStep(context);
 
     // --- Channel Strip 1 controls ---
@@ -177,17 +168,18 @@ void render(BelaContext *context, void *userData)
     );
     gChannelStrip2.setFxSendLevel(gHardwareManager.getPotValue(CH2_FX_SEND));
 
-    // Update master kill switches — gains ramp smoothly over kKillRampMs
+    // --- Master kill switches — targets updated here, ramp advances per sample ---
     gMasterFx.setKills(
-        readSwitch(KILL_SUB),
-        readSwitch(KILL_KICK),
-        readSwitch(KILL_MID),
-        readSwitch(KILL_TOP),
-        context->audioFrames
+        gHardwareManager.getSwitchState(KILL_SUB),
+        gHardwareManager.getSwitchState(KILL_KICK),
+        gHardwareManager.getSwitchState(KILL_MID),
+        gHardwareManager.getSwitchState(KILL_TOP)
     );
 
+    // --- Sample loop ---
     bool clipCh0 = false;
     bool clipCh1 = false;
+
     for(unsigned int n = 0; n < context->audioFrames; n++) {
         float in0 = readChannelInput(context, n, CH1_CONFIG);
         float in1 = readChannelInput(context, n, CH2_CONFIG);
@@ -195,44 +187,39 @@ void render(BelaContext *context, void *userData)
         if(fabsf(in0) >= kClipThreshold) clipCh0 = true;
         if(fabsf(in1) >= kClipThreshold) clipCh1 = true;
 
-        // Process channels (dry path)
         float dry1 = gChannelStrip.process(in0);
         float dry2 = gChannelStrip2.process(in1);
 
-        // FX send: sum of both channels' post-fader sends → OUT2 (external effect unit)
+        // FX send: post-fader sum → OUT2 (external effect unit)
         float fxSend = gChannelStrip.fxOut() + gChannelStrip2.fxOut();
         audioWrite(context, n, FX1_SEND_OUT, fxSend);
 
-        // FX return: gated to suppress noise when the effect unit is idle
+        // FX return: noise-gated to suppress idle hum from the effect unit
         float fxReturn = gMasterFx.processFxReturn(audioRead(context, n, FX1_RETURN_IN));
 
-        // Master bus: dry channels + FX return → kills → stereo output
-        float mix = dry1 + dry2 + fxReturn;
-        float out = gMasterFx.process(mix);
+        // Master bus: dry + FX return → kill crossover → stereo output
+        float out = gMasterFx.process(dry1 + dry2 + fxReturn);
 
-        scope.log(mix, out);
-        audioWrite(context, n, 0, out);
-        audioWrite(context, n, 1, out);
+        scope.log(dry1 + dry2 + fxReturn, out);
+        audioWrite(context, n, MASTER_OUT_L, out);
+        audioWrite(context, n, MASTER_OUT_R, out);
     }
 
-    // Warn once per interval per channel to avoid log spam
+    // --- Clip warnings (rate-limited) ---
     ++gClipWarnCounter;
-    if((clipCh0 || clipCh1) && gClipWarnCounter >= kClipWarnInterval) {
+    if((clipCh0 || clipCh1) && gClipWarnCounter >= kClipWarnIntervalBlocks) {
         if(clipCh0) rt_printf("WARNING Canal 0 clipping\n");
         if(clipCh1) rt_printf("WARNING Canal 1 clipping\n");
         gClipWarnCounter = 0;
     }
 
-
-    if(DEBUG)
-        // Print any pot that moved (immediate, no throttle)
+    // --- Debug logging ---
+    if(kDebug) {
         printChangedPots();
-
-    // Print switch state changes immediately
-    if(DEBUG)
         printChangedSwitches();
+    }
 }
 
-void cleanup(BelaContext *context, void *userData) {
+void cleanup(BelaContext* context, void* userData) {
     gHardwareManager.closeMcp23017();
 }
