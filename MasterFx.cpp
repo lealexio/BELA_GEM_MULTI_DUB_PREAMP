@@ -1,8 +1,13 @@
 #include "MasterFx.h"
 
 void MasterFx::setup(float sampleRate) {
+    paramEq_.setup(sampleRate);
     kills_.setup(sampleRate);
     fxReturnGate_.setup(sampleRate);
+}
+
+void MasterFx::setParamEqBand(ParametricEq::Band band, float freqPot, float gainDb) {
+    paramEq_.setBand(band, freqPot, gainDb);
 }
 
 void MasterFx::setKills(bool killSub, bool killKick, bool killMid, bool killTop) {
@@ -14,5 +19,6 @@ float MasterFx::processFxReturn(float sample) {
 }
 
 float MasterFx::process(float input) {
-    return kills_.process(input);
+    float equalized = paramEq_.process(input);
+    return kills_.process(equalized);
 }

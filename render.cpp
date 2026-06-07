@@ -43,11 +43,13 @@ void readI2cTask(void*) {
 // ---------------------------------------------------------------------------
 
 /**
- * Maps a centred pot value [0.0, 1.0] to a gain in dB.
- *   0.0 → -kEqGainRangeDb   |   0.5 → 0 dB   |   1.0 → +kEqGainRangeDb
+ * Maps a centred pot value [0.0, 1.0] to a symmetric gain in dB.
+ *   0.0 → -range dB  |  0.5 → 0 dB  |  1.0 → +range dB
+ * Used for channel EQ (kEqGainRangeDb) and master EQ (kMasterEqGainRangeDb),
+ * both of which default to ±6 dB.
  */
-static inline float potToGainDb(float pot) {
-    return (pot - 0.5f) * (kEqGainRangeDb * 2.f);
+static inline float potToGainDb(float pot, float rangeDb = kEqGainRangeDb) {
+    return (pot - 0.5f) * (rangeDb * 2.f);
 }
 
 /**
@@ -167,6 +169,24 @@ void render(BelaContext* context, void* userData) {
         potToGainDb(gHardwareManager.getCenteredPotValue(CH2_EQ_HIGH))
     );
     gChannelStrip2.setFxSendLevel(gHardwareManager.getPotValue(CH2_FX_SEND));
+
+    // --- Master parametric EQ (before kills) ---
+    gMasterFx.setParamEqBand(ParametricEq::SUB,
+        gHardwareManager.getPotValue(MASTER_EQ_SUB_FREQ),
+        potToGainDb(gHardwareManager.getCenteredPotValue(MASTER_EQ_SUB_GAIN))
+    );
+    gMasterFx.setParamEqBand(ParametricEq::KICK,
+        gHardwareManager.getPotValue(MASTER_EQ_KICK_FREQ),
+        potToGainDb(gHardwareManager.getCenteredPotValue(MASTER_EQ_KICK_GAIN))
+    );
+    gMasterFx.setParamEqBand(ParametricEq::MID,
+        gHardwareManager.getPotValue(MASTER_EQ_MID_FREQ),
+        potToGainDb(gHardwareManager.getCenteredPotValue(MASTER_EQ_MID_GAIN))
+    );
+    gMasterFx.setParamEqBand(ParametricEq::TOP,
+        gHardwareManager.getPotValue(MASTER_EQ_TOP_FREQ),
+        potToGainDb(gHardwareManager.getCenteredPotValue(MASTER_EQ_TOP_GAIN))
+    );
 
     // --- Master kill switches — targets updated here, ramp advances per sample ---
     gMasterFx.setKills(

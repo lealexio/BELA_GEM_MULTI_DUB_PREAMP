@@ -79,6 +79,28 @@ constexpr float kGateReleaseMs = 150.0f;
 constexpr float kGateHoldMs    = 100.0f;
 
 // ---------------------------------------------------------------------------
+// Master parametric EQ (ParametricEq — 4 bands, inserted before kills)
+// ---------------------------------------------------------------------------
+
+/// Frequency ranges for each band's logarithmic pot sweep.
+/// The pot [0.0–1.0] sweeps from FMin to FMax on a log scale.
+constexpr float kMasterEqSubFMin  =   20.f;    // SUB  band min (Hz)
+constexpr float kMasterEqSubFMax  =   80.f;    // SUB  band max (Hz)
+constexpr float kMasterEqKickFMin =   80.f;    // KICK band min (Hz)
+constexpr float kMasterEqKickFMax =  200.f;    // KICK band max (Hz)
+constexpr float kMasterEqMidFMin  =  200.f;    // MID  band min (Hz)
+constexpr float kMasterEqMidFMax  = 1200.f;    // MID  band max (Hz)
+constexpr float kMasterEqTopFMin  = 1200.f;    // TOP  band min (Hz)
+constexpr float kMasterEqTopFMax  = 16000.f;   // TOP  band max (Hz) — capped for filter stability
+
+/// Q factor of each peaking filter.
+/// Higher Q = narrower bell; lower Q = broad, musical shaping.
+constexpr float kMasterEqQ = 0.8f;
+
+/// Gain range for master EQ bands: pot 0.5 → 0 dB, pot 1.0 → +range, pot 0.0 → -range.
+constexpr float kMasterEqGainRangeDb = 6.f;
+
+// ---------------------------------------------------------------------------
 // Kill switches — crossover frequencies (KillSwitch)
 // ---------------------------------------------------------------------------
 

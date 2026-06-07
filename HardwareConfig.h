@@ -146,6 +146,17 @@ constexpr PotRef CH2_FX_SEND    = {0, 10};        // C10 — FX send level
 // constexpr PotRef POT_MUX1_C00 = {1, 0};
 // constexpr PotRef POT_MUX1_C01 = {1, 1};
 
+// --- MUX 2  (analog input A2) — Master parametric EQ ---
+
+constexpr PotRef MASTER_EQ_SUB_FREQ  = {2,  8}; // C08 — SUB  freq sweep  (20–80 Hz)
+constexpr PotRef MASTER_EQ_SUB_GAIN  = {2,  6}; // C06 — SUB  gain        (±kMasterEqGainRangeDb dB)
+constexpr PotRef MASTER_EQ_KICK_FREQ = {2, 11}; // C11 — KICK freq sweep  (80–200 Hz)
+constexpr PotRef MASTER_EQ_KICK_GAIN = {2, 13}; // C13 — KICK gain        (±kMasterEqGainRangeDb dB)
+constexpr PotRef MASTER_EQ_MID_FREQ  = {2,  0}; // C00 — MID  freq sweep  (200–1200 Hz)
+constexpr PotRef MASTER_EQ_MID_GAIN  = {2, 14}; // C14 — MID  gain        (±kMasterEqGainRangeDb dB)
+constexpr PotRef MASTER_EQ_TOP_FREQ  = {0,  4}; // MUX0 C04 — TOP freq sweep  (1200–16000 Hz)
+constexpr PotRef MASTER_EQ_TOP_GAIN  = {0,  2}; // MUX0 C02 — TOP gain        (±kMasterEqGainRangeDb dB)
+
 // ---------------------------------------------------------------------------
 // Debug logging exclusion list
 // Add pots that are floating / noisy / under investigation to suppress spam.
@@ -153,7 +164,7 @@ constexpr PotRef CH2_FX_SEND    = {0, 10};        // C10 — FX send level
 
 constexpr PotRef kIgnoredPots[] = {
     {1, 2}, // MUX1/C02 — under investigation
-    {2, 2}, // MUX2/C02 — under investigation
+    {2, 2}, // MUX2/C02 — unassigned / floating
 };
 constexpr int kIgnoredPotsCount = sizeof(kIgnoredPots) / sizeof(kIgnoredPots[0]);
 
@@ -166,6 +177,8 @@ inline const char* getPotName(int mux, int pot) {
         switch(pot) {
             case  0: return "CH1_EQ_MID";
             case  1: return "CH1_INPUT_GAIN";
+            case  2: return "MEQ_TOP_GAIN";
+            case  4: return "MEQ_TOP_FREQ";
             case  6: return "CH2_INPUT_GAIN";
             case  7: return "CH2_EQ_MID";
             case  8: return "CH2_EQ_HIGH";
@@ -174,6 +187,17 @@ inline const char* getPotName(int mux, int pot) {
             case 13: return "CH1_FX_SEND";
             case 14: return "CH1_EQ_LOW";
             case 15: return "CH1_EQ_HIGH";
+            default: return nullptr;
+        }
+    }
+    if(mux == 2) {
+        switch(pot) {
+            case  0: return "MEQ_MID_FREQ";
+            case  6: return "MEQ_SUB_GAIN";
+            case  8: return "MEQ_SUB_FREQ";
+            case 11: return "MEQ_KICK_FREQ";
+            case 13: return "MEQ_KICK_GAIN";
+            case 14: return "MEQ_MID_GAIN";
             default: return nullptr;
         }
     }
