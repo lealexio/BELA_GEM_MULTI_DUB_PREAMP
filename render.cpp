@@ -188,6 +188,16 @@ void render(BelaContext* context, void* userData) {
         potToGainDb(gHardwareManager.getCenteredPotValue(MASTER_EQ_TOP_GAIN))
     );
 
+    // --- Master filter section (HPF + LPF — pot at 0 = filter OFF) ---
+    gMasterFx.setHpf(
+        gHardwareManager.getPotValue(MASTER_HPF_FREQ),
+        gHardwareManager.getPotValue(MASTER_HPF_RES)
+    );
+    gMasterFx.setLpf(
+        gHardwareManager.getPotValue(MASTER_LPF_FREQ),
+        gHardwareManager.getPotValue(MASTER_LPF_RES)
+    );
+
     // --- Master kill switches — targets updated here, ramp advances per sample ---
     gMasterFx.setKills(
         gHardwareManager.getSwitchState(KILL_SUB),

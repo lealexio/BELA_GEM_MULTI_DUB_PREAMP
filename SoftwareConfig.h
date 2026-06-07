@@ -101,6 +101,26 @@ constexpr float kMasterEqQ = 0.8f;
 constexpr float kMasterEqGainRangeDb = 6.f;
 
 // ---------------------------------------------------------------------------
+// FilterSection (HPF + LPF) — inserted in master bus before kills
+// ---------------------------------------------------------------------------
+
+/// HPF frequency sweep range. When freqPot < kFilterOffThreshold the HPF is bypassed.
+constexpr float kHpfFMin = 20.f;     // HPF minimum cutoff frequency (Hz)
+constexpr float kHpfFMax = 2000.f;   // HPF maximum cutoff frequency (Hz)
+
+/// LPF frequency sweep range. When freqPot < kFilterOffThreshold the LPF is bypassed.
+constexpr float kLpfFMin = 200.f;    // LPF minimum cutoff frequency (Hz)
+constexpr float kLpfFMax = 20000.f;  // LPF maximum cutoff frequency (Hz)
+
+/// Resonance (Q) sweep range applied to both HPF and LPF.
+/// kFilterQMin = Butterworth (flat), kFilterQMax = CDJ-style resonance peak.
+constexpr float kFilterQMin = 0.7f;  // minimum Q — flat, no resonance
+constexpr float kFilterQMax = 4.5f;  // maximum Q — pronounced resonance peak
+
+/// Pot value below which a filter is considered OFF and removed from the signal path.
+constexpr float kFilterOffThreshold = 0.01f;
+
+// ---------------------------------------------------------------------------
 // Kill switches — crossover frequencies (KillSwitch)
 // ---------------------------------------------------------------------------
 

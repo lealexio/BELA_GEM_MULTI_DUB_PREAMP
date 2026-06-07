@@ -157,6 +157,13 @@ constexpr PotRef MASTER_EQ_MID_GAIN  = {2, 14}; // C14 — MID  gain        (±k
 constexpr PotRef MASTER_EQ_TOP_FREQ  = {0,  4}; // MUX0 C04 — TOP freq sweep  (1200–16000 Hz)
 constexpr PotRef MASTER_EQ_TOP_GAIN  = {0,  2}; // MUX0 C02 — TOP gain        (±kMasterEqGainRangeDb dB)
 
+// --- MUX 0 + MUX 2 — Master filter section (HPF + LPF) ---
+
+constexpr PotRef MASTER_HPF_FREQ = {2,  7}; // MUX2 C07 — HPF cutoff freq (0 = OFF, sweep 20–2000 Hz)
+constexpr PotRef MASTER_HPF_RES  = {2, 12}; // MUX2 C12 — HPF resonance   (Q kFilterQMin–kFilterQMax)
+constexpr PotRef MASTER_LPF_FREQ = {0,  3}; // MUX0 C03 — LPF cutoff freq (0 = OFF, sweep 200–20000 Hz)
+constexpr PotRef MASTER_LPF_RES  = {2, 15}; // MUX2 C15 — LPF resonance   (Q kFilterQMin–kFilterQMax)
+
 // ---------------------------------------------------------------------------
 // Debug logging exclusion list
 // Add pots that are floating / noisy / under investigation to suppress spam.
@@ -178,6 +185,7 @@ inline const char* getPotName(int mux, int pot) {
             case  0: return "CH1_EQ_MID";
             case  1: return "CH1_INPUT_GAIN";
             case  2: return "MEQ_TOP_GAIN";
+            case  3: return "MASTER_LPF_FREQ";
             case  4: return "MEQ_TOP_FREQ";
             case  6: return "CH2_INPUT_GAIN";
             case  7: return "CH2_EQ_MID";
@@ -194,10 +202,13 @@ inline const char* getPotName(int mux, int pot) {
         switch(pot) {
             case  0: return "MEQ_MID_FREQ";
             case  6: return "MEQ_SUB_GAIN";
+            case  7: return "MASTER_HPF_FREQ";
             case  8: return "MEQ_SUB_FREQ";
             case 11: return "MEQ_KICK_FREQ";
+            case 12: return "MASTER_HPF_RES";
             case 13: return "MEQ_KICK_GAIN";
             case 14: return "MEQ_MID_GAIN";
+            case 15: return "MASTER_LPF_RES";
             default: return nullptr;
         }
     }

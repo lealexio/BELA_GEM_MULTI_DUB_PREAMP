@@ -2,24 +2,29 @@
 #include "KillSwitch.h"
 #include "NoiseGate.h"
 #include "ParametricEq.h"
+#include "FilterSection.h"
 
 /**
  * Master effects bus.
  *
  * Orchestrates all master processors in signal-flow order:
- *   1. ParametricEq  : 4-band sweepable peaking EQ (SUB / KICK / MID / TOP)
- *   2. KillSwitch    : 4-band crossover kill
- *   3. NoiseGate     : FX return noise suppression (separate path)
+ *   1. ParametricEq   : 4-band sweepable peaking EQ (SUB / KICK / MID / TOP)
+ *   2. FilterSection  : HPF and LPF with resonance (CDJ-style, bypass when pot at 0)
+ *   3. KillSwitch     : 4-band crossover kill
+ *   4. NoiseGate      : FX return noise suppression (separate path)
  *
  * Signal flow:
  *   channel strips (dry mix)
  *       └──► process(mix)
  *                 │
  *                 ▼
- *           ParametricEq   ← setParamEqBand() once per block
+ *           ParametricEq    ← setParamEqBand() once per block
  *                 │
  *                 ▼
- *            KillSwitch    ← setKills() once per block
+ *           FilterSection   ← setHpf() + setLpf() once per block
+ *                 │
+ *                 ▼
+ *            KillSwitch     ← setKills() once per block
  *                 │
  *                 ▼
  *               OUT
@@ -32,7 +37,7 @@
  *
  * Usage pattern:
  *   1. Call setup() once with the audio sample rate.
- *   2. Call setParamEqBand() and setKills() once per render block.
+ *   2. Call set*() methods once per render block (before the sample loop).
  *   3. Call processFxReturn() and process() once per audio sample.
  */
 class MasterFx {
@@ -49,6 +54,20 @@ public:
     void setParamEqBand(ParametricEq::Band band, float freqPot, float gainDb);
 
     /**
+     * Updates the HPF cutoff and resonance. Call once per render block.
+     * @param freqPot  [0.0–1.0]; below kFilterOffThreshold → HPF bypassed
+     * @param resPot   [0.0–1.0] → mapped to Q [kFilterQMin, kFilterQMax]
+     */
+    void setHpf(float freqPot, float resPot);
+
+    /**
+     * Updates the LPF cutoff and resonance. Call once per render block.
+     * @param freqPot  [0.0–1.0]; below kFilterOffThreshold → LPF bypassed
+     * @param resPot   [0.0–1.0] → mapped to Q [kFilterQMin, kFilterQMax]
+     */
+    void setLpf(float freqPot, float resPot);
+
+    /**
      * Updates kill targets. The gain ramp advances sample by sample in process().
      * Call once per render block before the sample loop.
      */
@@ -61,13 +80,14 @@ public:
     float processFxReturn(float sample);
 
     /**
-     * Processes one master-bus sample:  ParametricEq → KillSwitch.
+     * Processes one master-bus sample: ParametricEq → FilterSection → KillSwitch.
      * @param input  Sum of all dry channel outputs (+ FX return if pre-kill)
      */
     float process(float input);
 
 private:
-    ParametricEq paramEq_;
-    KillSwitch   kills_;
-    NoiseGate    fxReturnGate_;
+    ParametricEq  paramEq_;
+    FilterSection filters_;
+    KillSwitch    kills_;
+    NoiseGate     fxReturnGate_;
 };
