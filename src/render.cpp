@@ -19,8 +19,10 @@ https://bela.io
 #include "SoftwareConfig.h"
 
 HardwareManager gHardwareManager;
-ChannelStrip    gChannelStrip;   // IN0 → master
-ChannelStrip    gChannelStrip2;  // IN1 → master
+ChannelStrip    gChannelStrip;   // IN0 → master (CH1)
+ChannelStrip    gChannelStrip2;  // IN1 → master (CH2)
+ChannelStrip    gChannelStrip3;  // IN2 → master (AUX3)
+ChannelStrip    gChannelStrip4;  // IN3 → master (AUX4)
 MasterFx        gMasterFx;
 DubSiren        gDubSiren;
 AuxiliaryTask   gI2cTask;
@@ -75,6 +77,18 @@ static inline float readChannelInput(BelaContext* ctx, unsigned int frame,
 // Debug helpers (compiled-out when kDebug = false)
 // ---------------------------------------------------------------------------
 
+/**
+ * Returns the logical (display) value for a pot, applying the reversed flag
+ * if a matching PotRef exists in kAllNamedPots.
+ */
+static float logicalPotValue(int mux, int pot) {
+    float raw = gHardwareManager.getPotValue(mux, pot);
+    for(const auto& ref : kAllNamedPots)
+        if(ref.mux == mux && ref.pot == pot)
+            return ref.reversed ? 1.f - raw : raw;
+    return raw;
+}
+
 /** Prints pots that moved since the last call. Silent when nothing changed. */
 static void printChangedPots() {
     static float prevValues[kNumMux * kPotsPerMux] = {};
@@ -83,7 +97,7 @@ static void printChangedPots() {
     if(!initialised) {
         for(int m = 0; m < kNumMux; m++)
             for(int p = 0; p < kPotsPerMux; p++)
-                prevValues[m * kPotsPerMux + p] = gHardwareManager.getPotValue(m, p);
+                prevValues[m * kPotsPerMux + p] = logicalPotValue(m, p);
         initialised = true;
         return;
     }
@@ -95,7 +109,7 @@ static void printChangedPots() {
                 if(kIgnoredPots[i].mux == m && kIgnoredPots[i].pot == p) { ignored = true; break; }
             if(ignored) continue;
 
-            float current = gHardwareManager.getPotValue(m, p);
+            float current = logicalPotValue(m, p);
             float prev    = prevValues[m * kPotsPerMux + p];
             if(fabsf(current - prev) >= kDebugPotMinMove) {
                 const char* name = getPotName(m, p);
@@ -162,6 +176,8 @@ bool setup(BelaContext* context, void* userData) {
 
     gChannelStrip.setup(context->audioSampleRate);
     gChannelStrip2.setup(context->audioSampleRate);
+    gChannelStrip3.setup(context->audioSampleRate);
+    gChannelStrip4.setup(context->audioSampleRate);
     gMasterFx.setup(context->audioSampleRate);
     gDubSiren.setup(context->audioSampleRate);
 
@@ -194,6 +210,24 @@ void render(BelaContext* context, void* userData) {
         potToGainDb(gHardwareManager.getCenteredPotValue(CH2_EQ_HIGH))
     );
     gChannelStrip2.setFxSendLevel(gHardwareManager.getPotValue(CH2_FX_SEND));
+
+    // --- AUX 3 controls ---
+    gChannelStrip3.setInputGain(gHardwareManager.getPotValue(AUX3_INPUT_GAIN));
+    gChannelStrip3.setEqGains(
+        potToGainDb(gHardwareManager.getCenteredPotValue(AUX3_EQ_LOW)),
+        potToGainDb(gHardwareManager.getCenteredPotValue(AUX3_EQ_MID)),
+        potToGainDb(gHardwareManager.getCenteredPotValue(AUX3_EQ_HIGH))
+    );
+    gChannelStrip3.setFxSendLevel(gHardwareManager.getPotValue(AUX3_FX_SEND));
+
+    // --- AUX 4 controls ---
+    gChannelStrip4.setInputGain(gHardwareManager.getPotValue(AUX4_INPUT_GAIN));
+    gChannelStrip4.setEqGains(
+        potToGainDb(gHardwareManager.getCenteredPotValue(AUX4_EQ_LOW)),
+        potToGainDb(gHardwareManager.getCenteredPotValue(AUX4_EQ_MID)),
+        potToGainDb(gHardwareManager.getCenteredPotValue(AUX4_EQ_HIGH))
+    );
+    gChannelStrip4.setFxSendLevel(gHardwareManager.getPotValue(AUX4_FX_SEND));
 
     // --- Master parametric EQ ---
     gMasterFx.setParamEqBand(ParametricEq::SUB,
@@ -263,19 +297,23 @@ void render(BelaContext* context, void* userData) {
 
         float dry1 = gChannelStrip.process(in0);
         float dry2 = gChannelStrip2.process(in1);
+        float dry3 = gChannelStrip3.process(readChannelInput(context, n, AUX3_CONFIG));
+        float dry4 = gChannelStrip4.process(readChannelInput(context, n, AUX4_CONFIG));
 
         // Siren: process before FX send to include its FX output
         float sirenOut = gDubSiren.process();
 
-        // FX send: channel strips + siren → OUT2 (external effect unit)
-        float fxSend = gChannelStrip.fxOut() + gChannelStrip2.fxOut() + gDubSiren.fxOut();
+        // FX send: all channel strips + siren → OUT2 (external effect unit)
+        float fxSend = gChannelStrip.fxOut()  + gChannelStrip2.fxOut()
+                     + gChannelStrip3.fxOut() + gChannelStrip4.fxOut()
+                     + gDubSiren.fxOut();
         audioWrite(context, n, FX1_SEND_OUT, fxSend);
 
         // FX return: noise-gated to suppress idle hum from the effect unit
         float fxReturn = gMasterFx.processFxReturn(audioRead(context, n, FX1_RETURN_IN));
 
-        // Master bus: dry channels + siren + FX return → EQ → filters → kills
-        float out = gMasterFx.process(dry1 + dry2 + sirenOut + fxReturn);
+        // Master bus: all channels + siren + FX return → EQ → filters → kills
+        float out = gMasterFx.process(dry1 + dry2 + dry3 + dry4 + sirenOut + fxReturn);
 
         scope.log(dry1 + dry2 + fxReturn, out);
         audioWrite(context, n, MASTER_OUT_L, out);
