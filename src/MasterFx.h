@@ -3,15 +3,17 @@
 #include "NoiseGate.h"
 #include "ParametricEq.h"
 #include "FilterSection.h"
+#include "GraphicEq.h"
 
 /**
  * Master effects bus.
  *
  * Orchestrates all master processors in signal-flow order:
  *   1. ParametricEq   : 4-band sweepable peaking EQ (SUB / KICK / MID / TOP)
- *   2. FilterSection  : HPF and LPF with resonance (CDJ-style, bypass when pot at 0)
- *   3. KillSwitch     : 4-band crossover kill
- *   4. NoiseGate      : FX return noise suppression (separate path)
+ *   2. GraphicEq      : 12-band fixed-frequency graphic EQ (40 Hz … 16 kHz)
+ *   3. FilterSection  : HPF and LPF with resonance (CDJ-style, bypass when pot at 0)
+ *   4. KillSwitch     : 4-band crossover kill
+ *   5. NoiseGate      : FX return noise suppression (separate path)
  *
  * Signal flow:
  *   channel strips (dry mix)
@@ -19,6 +21,9 @@
  *                 │
  *                 ▼
  *           ParametricEq    ← setParamEqBand() once per block
+ *                 │
+ *                 ▼
+ *            GraphicEq      ← setGraphicEqBand() × 12 once per block
  *                 │
  *                 ▼
  *           FilterSection   ← setHpf() + setLpf() once per block
@@ -54,6 +59,13 @@ public:
     void setParamEqBand(ParametricEq::Band band, float freqPot, float gainDb);
 
     /**
+     * Updates one graphic EQ band. Call for each of the 12 bands once per render block.
+     * @param band    Band index (0 = 40 Hz … 11 = 16 kHz)
+     * @param gainDb  Gain in dB; 0.0 = transparent (centred pot)
+     */
+    void setGraphicEqBand(int band, float gainDb);
+
+    /**
      * Updates the HPF cutoff and resonance. Call once per render block.
      * @param freqPot  [0.0–1.0]; below kFilterOffThreshold → HPF bypassed
      * @param resPot   [0.0–1.0] → mapped to Q [kFilterQMin, kFilterQMax]
@@ -87,6 +99,7 @@ public:
 
 private:
     ParametricEq  paramEq_;
+    GraphicEq     graphicEq_;
     FilterSection filters_;
     KillSwitch    kills_;
     NoiseGate     fxReturnGate_;

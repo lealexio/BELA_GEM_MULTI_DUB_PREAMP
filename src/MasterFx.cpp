@@ -2,6 +2,7 @@
 
 void MasterFx::setup(float sampleRate) {
     paramEq_.setup(sampleRate);
+    graphicEq_.setup(sampleRate);
     filters_.setup(sampleRate);
     kills_.setup(sampleRate);
     fxReturnGate_.setup(sampleRate);
@@ -9,6 +10,10 @@ void MasterFx::setup(float sampleRate) {
 
 void MasterFx::setParamEqBand(ParametricEq::Band band, float freqPot, float gainDb) {
     paramEq_.setBand(band, freqPot, gainDb);
+}
+
+void MasterFx::setGraphicEqBand(int band, float gainDb) {
+    graphicEq_.setBandGainDb(band, gainDb);
 }
 
 void MasterFx::setHpf(float freqPot, float resPot) {
@@ -29,6 +34,7 @@ float MasterFx::processFxReturn(float sample) {
 
 float MasterFx::process(float input) {
     float out = paramEq_.process(input);
+    out = graphicEq_.process(out);
     out = filters_.process(out);
     return kills_.process(out);
 }

@@ -105,23 +105,36 @@ static void printChangedPots() {
     }
 }
 
-/** Prints MCP23017 PA switches only when their state changes. */
+/** Prints MCP23017 PA and PB switches only when their state changes. */
 static void printChangedSwitches() {
-    static int prevStates = -1;
+    static int prevA = -1;
+    static int prevB = -1;
 
-    int current = 0;
-    for(int pin = 0; pin < 8; pin++)
-        current |= (gHardwareManager.getSwitchState(pin) ? 1 : 0) << pin;
-
-    if(current == prevStates) return;
-
+    int curA = 0, curB = 0;
     for(int pin = 0; pin < 8; pin++) {
-        bool prev = (prevStates >> pin) & 1;
-        bool now  = (current   >> pin) & 1;
-        if(prev != now || prevStates == -1)
-            rt_printf("[SW]  PA%d  →  %s\n", pin, now ? "OPEN" : "CLOSED");
+        curA |= (gHardwareManager.getSwitchState (pin) ? 1 : 0) << pin;
+        curB |= (gHardwareManager.getSwitchStateB(pin) ? 1 : 0) << pin;
     }
-    prevStates = current;
+
+    if(curA != prevA) {
+        for(int pin = 0; pin < 8; pin++) {
+            bool prev = (prevA >> pin) & 1;
+            bool now  = (curA  >> pin) & 1;
+            if(prev != now || prevA == -1)
+                rt_printf("[SW]  PA%d  →  %s\n", pin, now ? "OPEN" : "CLOSED");
+        }
+        prevA = curA;
+    }
+
+    if(curB != prevB) {
+        for(int pin = 0; pin < 8; pin++) {
+            bool prev = (prevB >> pin) & 1;
+            bool now  = (curB  >> pin) & 1;
+            if(prev != now || prevB == -1)
+                rt_printf("[SW]  PB%d  →  %s\n", pin, now ? "OPEN" : "CLOSED");
+        }
+        prevB = curB;
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -170,23 +183,33 @@ void render(BelaContext* context, void* userData) {
     );
     gChannelStrip2.setFxSendLevel(gHardwareManager.getPotValue(CH2_FX_SEND));
 
-    // --- Master parametric EQ (before kills) ---
+    // --- Master parametric EQ ---
     gMasterFx.setParamEqBand(ParametricEq::SUB,
         gHardwareManager.getPotValue(MASTER_EQ_SUB_FREQ),
-        potToGainDb(gHardwareManager.getCenteredPotValue(MASTER_EQ_SUB_GAIN))
+        potToGainDb(gHardwareManager.getCenteredPotValue(MASTER_EQ_SUB_GAIN), kMasterEqGainRangeDb)
     );
     gMasterFx.setParamEqBand(ParametricEq::KICK,
         gHardwareManager.getPotValue(MASTER_EQ_KICK_FREQ),
-        potToGainDb(gHardwareManager.getCenteredPotValue(MASTER_EQ_KICK_GAIN))
+        potToGainDb(gHardwareManager.getCenteredPotValue(MASTER_EQ_KICK_GAIN), kMasterEqGainRangeDb)
     );
     gMasterFx.setParamEqBand(ParametricEq::MID,
         gHardwareManager.getPotValue(MASTER_EQ_MID_FREQ),
-        potToGainDb(gHardwareManager.getCenteredPotValue(MASTER_EQ_MID_GAIN))
+        potToGainDb(gHardwareManager.getCenteredPotValue(MASTER_EQ_MID_GAIN), kMasterEqGainRangeDb)
     );
     gMasterFx.setParamEqBand(ParametricEq::TOP,
         gHardwareManager.getPotValue(MASTER_EQ_TOP_FREQ),
-        potToGainDb(gHardwareManager.getCenteredPotValue(MASTER_EQ_TOP_GAIN))
+        potToGainDb(gHardwareManager.getCenteredPotValue(MASTER_EQ_TOP_GAIN), kMasterEqGainRangeDb)
     );
+
+    // --- Master graphic EQ — 12 bands, pots centred = 0 dB ---
+    static const PotRef kGeqPots[GraphicEq::kNumBands] = {
+        GEQ_40HZ, GEQ_60HZ, GEQ_80HZ, GEQ_100HZ, GEQ_125HZ, GEQ_250HZ,
+        GEQ_500HZ, GEQ_1KHZ, GEQ_2KHZ, GEQ_4KHZ, GEQ_8KHZ, GEQ_16KHZ
+    };
+    for(int i = 0; i < GraphicEq::kNumBands; ++i) {
+        float pot = gHardwareManager.getCenteredPotValue(kGeqPots[i]);
+        gMasterFx.setGraphicEqBand(i, potToGainDb(pot, kGEqGainRangeDb));
+    }
 
     // --- Master filter section (HPF + LPF — pot at 0 = filter OFF) ---
     gMasterFx.setHpf(

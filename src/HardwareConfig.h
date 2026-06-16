@@ -87,17 +87,23 @@ constexpr int FX1_RETURN_IN = 2; // Bela IN2
 
 /**
  * Reference to one MCP23017 switch.
- * reversed = true : invert logic — HIGH = active instead of LOW.
+ *   pin      : GPIO pin index (0–7) within the port
+ *   reversed : invert logic — true means HIGH = active instead of LOW
+ *   portB    : false = port A (default), true = port B
  */
 struct SwitchRef {
     int  pin;
     bool reversed = false;
+    bool portB    = false;
 };
 
-constexpr SwitchRef KILL_KICK = {0, true};  // PA0 → kill KICK (80–200 Hz)
-constexpr SwitchRef KILL_SUB  = {1, true};  // PA1 → kill SUB  (< 80 Hz)
-constexpr SwitchRef KILL_MID  = {2, true};  // PA2 → kill MID  (200–1200 Hz)
-constexpr SwitchRef KILL_TOP  = {3, false}; // PA3 → kill TOP  (> 1200 Hz)
+constexpr SwitchRef KILL_KICK = {0, true,  false}; // PA0 → kill KICK (80–200 Hz)
+constexpr SwitchRef KILL_SUB  = {1, true,  false}; // PA1 → kill SUB  (< 80 Hz)
+constexpr SwitchRef KILL_MID  = {2, true,  false}; // PA2 → kill MID  (200–1200 Hz)
+constexpr SwitchRef KILL_TOP  = {3, false, false}; // PA3 → kill TOP  (> 1200 Hz)
+
+// Port B switches
+constexpr SwitchRef SW_PB0 = {0, false, true}; // PB0 — assign purpose in render.cpp
 
 // ---------------------------------------------------------------------------
 // Potentiometer mapping
@@ -141,14 +147,30 @@ constexpr PotRef CH2_FX_SEND    = {3, 6, false, "CH2_FX_SEND"};
 
 
 // Master parametric EQ
-constexpr PotRef MASTER_EQ_SUB_FREQ  = {2,  14, false, "MASTER_EQ_SUB_FREQ"};
-constexpr PotRef MASTER_EQ_SUB_GAIN  = {2,  13, false, "MASTER_EQ_SUB_GAIN"};
-constexpr PotRef MASTER_EQ_KICK_FREQ = {2, 8, false, "MASTER_EQ_KICK_FREQ"};
-constexpr PotRef MASTER_EQ_KICK_GAIN = {2, 9, false, "MASTER_EQ_KICK_GAIN"};
-constexpr PotRef MASTER_EQ_MID_FREQ  = {2,  8, false, "MASTER_EQ_MID_FREQ"}; // unmapped
-constexpr PotRef MASTER_EQ_MID_GAIN  = {2, 7, false, "MASTER_EQ_MID_GAIN"};
-constexpr PotRef MASTER_EQ_TOP_FREQ = {2,  3, false, "MASTER_EQ_TOP_FREQ"};
-constexpr PotRef MASTER_EQ_TOP_GAIN = {2,  6, false, "MASTER_EQ_TOP_GAIN"};
+constexpr PotRef MASTER_EQ_SUB_FREQ  = {2, 14, false, "MASTER_EQ_SUB_FREQ"};
+constexpr PotRef MASTER_EQ_SUB_GAIN  = {2, 13, false, "MASTER_EQ_SUB_GAIN"};
+constexpr PotRef MASTER_EQ_KICK_FREQ = {2,  8, false, "MASTER_EQ_KICK_FREQ"};
+constexpr PotRef MASTER_EQ_KICK_GAIN = {2,  9, false, "MASTER_EQ_KICK_GAIN"};
+constexpr PotRef MASTER_EQ_MID_FREQ  = {1, 14, false, "MASTER_EQ_MID_FREQ"};
+constexpr PotRef MASTER_EQ_MID_GAIN  = {2,  7, false, "MASTER_EQ_MID_GAIN"};
+constexpr PotRef MASTER_EQ_TOP_FREQ  = {2,  3, false, "MASTER_EQ_TOP_FREQ"};
+constexpr PotRef MASTER_EQ_TOP_GAIN  = {2,  6, false, "MASTER_EQ_TOP_GAIN"};
+
+// --- Graphic EQ (12 bands) ---
+// MUX 1 — low and mid bands
+constexpr PotRef GEQ_2KHZ  = {1,  0, false, "GEQ_2KHZ"};
+constexpr PotRef GEQ_8KHZ  = {1,  1, false, "GEQ_8KHZ"};
+constexpr PotRef GEQ_60HZ  = {1,  6, false, "GEQ_60HZ"};
+constexpr PotRef GEQ_40HZ  = {1,  7, false, "GEQ_40HZ"};
+constexpr PotRef GEQ_80HZ  = {1,  8, false, "GEQ_80HZ"};
+constexpr PotRef GEQ_100HZ = {1,  9, false, "GEQ_100HZ"};
+constexpr PotRef GEQ_250HZ = {1, 10, false, "GEQ_250HZ"};
+constexpr PotRef GEQ_125HZ = {1, 11, false, "GEQ_125HZ"};
+constexpr PotRef GEQ_500HZ = {1, 15, false, "GEQ_500HZ"};
+// MUX 2 — high bands (note: "1600hz" in user spec → interpreted as 16 kHz)
+constexpr PotRef GEQ_4KHZ  = {2,  0, false, "GEQ_4KHZ"};
+constexpr PotRef GEQ_1KHZ  = {2, 15, false, "GEQ_1KHZ"};
+constexpr PotRef GEQ_16KHZ = {2,  1, false, "GEQ_16KHZ"};
 
 // Master filter section (HPF + LPF)
 constexpr PotRef MASTER_HPF_FREQ = {2,  11, false, "MASTER_HPF_FREQ"};
@@ -173,6 +195,9 @@ constexpr PotRef kAllNamedPots[] = {
     // Master filter section
     MASTER_HPF_FREQ, MASTER_HPF_RES,
     MASTER_LPF_FREQ, MASTER_LPF_RES,
+    // Graphic EQ — 12 bands (40 Hz … 16 kHz)
+    GEQ_40HZ, GEQ_60HZ, GEQ_80HZ, GEQ_100HZ, GEQ_125HZ, GEQ_250HZ,
+    GEQ_500HZ, GEQ_1KHZ, GEQ_2KHZ, GEQ_4KHZ, GEQ_8KHZ, GEQ_16KHZ,
 };
 
 // ---------------------------------------------------------------------------

@@ -139,3 +139,18 @@ constexpr float kKillRampMs = 30.0f;
 ///   2 → 24 dB/oct  (recommended)
 ///   4 → 48 dB/oct  (very steep)
 constexpr int kKillFilterStages = 2;
+
+// ---------------------------------------------------------------------------
+// Graphic EQ (GraphicEq — 12 fixed bands in master bus, after ParametricEq)
+// ---------------------------------------------------------------------------
+
+/// Gain range per band: pot 0.5 → 0 dB, pot 1.0 → +range, pot 0.0 → -range.
+constexpr float kGEqGainRangeDb = 12.f;
+
+/// Q factor for all 12 peaking bands.
+/// √2 ≈ 1.41 is the standard octave-band graphic EQ value (flat summing).
+constexpr float kGEqQ = 1.41f;
+
+/// Minimum gain change (dB) that triggers a biquad coefficient recompute.
+/// Prevents unnecessary DSP work from ADC jitter.
+constexpr float kGEqUpdateEpsilonDb = 0.05f;

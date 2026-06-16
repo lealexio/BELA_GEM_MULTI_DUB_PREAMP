@@ -8,8 +8,11 @@
 
 // MCP23017 register addresses (BANK=0, default)
 static constexpr uint8_t MCP_IODIRA = 0x00; // I/O direction port A (1=input)
+static constexpr uint8_t MCP_IODIRB = 0x01; // I/O direction port B (1=input)
 static constexpr uint8_t MCP_GPPUA  = 0x0C; // Pull-up resistors port A
+static constexpr uint8_t MCP_GPPUB  = 0x0D; // Pull-up resistors port B
 static constexpr uint8_t MCP_GPIOA  = 0x12; // GPIO read port A
+static constexpr uint8_t MCP_GPIOB  = 0x13; // GPIO read port B
 
 // Required for constexpr static array members (ODR-used)
 constexpr int HardwareManager::addressPins_[4];
@@ -83,9 +86,19 @@ bool HardwareManager::initMcp23017() {
         rt_fprintf(stderr, "HardwareManager: IODIRA write failed\n");
         return false;
     }
+    buf[0] = MCP_IODIRB; buf[1] = 0xFF;
+    if(write(i2cFd_, buf, 2) != 2) {
+        rt_fprintf(stderr, "HardwareManager: IODIRB write failed\n");
+        return false;
+    }
     buf[0] = MCP_GPPUA; buf[1] = 0xFF;
     if(write(i2cFd_, buf, 2) != 2) {
         rt_fprintf(stderr, "HardwareManager: GPPUA write failed\n");
+        return false;
+    }
+    buf[0] = MCP_GPPUB; buf[1] = 0xFF;
+    if(write(i2cFd_, buf, 2) != 2) {
+        rt_fprintf(stderr, "HardwareManager: GPPUB write failed\n");
         return false;
     }
 
@@ -99,11 +112,19 @@ void HardwareManager::readMcp23017() {
     uint8_t reg = MCP_GPIOA;
     if(write(i2cFd_, &reg, 1) == 1)
         read(i2cFd_, &mcpPortA_, 1);
+    reg = MCP_GPIOB;
+    if(write(i2cFd_, &reg, 1) == 1)
+        read(i2cFd_, &mcpPortB_, 1);
 }
 
 bool HardwareManager::getSwitchState(int pin) const {
     if(pin < 0 || pin > 7) return false;
     return (mcpPortA_ >> pin) & 1;
+}
+
+bool HardwareManager::getSwitchStateB(int pin) const {
+    if(pin < 0 || pin > 7) return false;
+    return (mcpPortB_ >> pin) & 1;
 }
 
 void HardwareManager::closeMcp23017() {

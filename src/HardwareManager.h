@@ -93,20 +93,27 @@ public:
     void readMcp23017();
 
     /**
-     * Returns the raw state of a PA pin (0–7).
-     * true  = switch open  (pull-up HIGH)
-     * false = switch closed (pulled to GND)
+     * Returns the raw state of one pin (0–7) on port A.
+     * true  = HIGH (pull-up, switch open)
+     * false = LOW  (switch closed to GND)
      */
     bool getSwitchState(int pin) const;
 
     /**
+     * Returns the raw state of one pin (0–7) on port B.
+     * true  = HIGH (pull-up, switch open)
+     * false = LOW  (switch closed to GND)
+     */
+    bool getSwitchStateB(int pin) const;
+
+    /**
      * Convenience overload for a SwitchRef from HardwareConfig.h.
-     * Returns true when the switch is "active", honouring the reversed flag:
+     * Dispatches to port A or B based on sw.portB, then applies the reversed flag:
      *   reversed = false → active when pin is LOW  (button pressed to GND)
      *   reversed = true  → active when pin is HIGH (normally-open wiring)
      */
     bool getSwitchState(const SwitchRef& sw) const {
-        bool raw = getSwitchState(sw.pin);
+        bool raw = sw.portB ? getSwitchStateB(sw.pin) : getSwitchState(sw.pin);
         return sw.reversed ? raw : !raw;
     }
 
@@ -123,4 +130,5 @@ private:
 
     int     i2cFd_    = -1;
     uint8_t mcpPortA_ = 0xFF; // cached GPIOA register (0xFF = all HIGH = all open)
+    uint8_t mcpPortB_ = 0xFF; // cached GPIOB register
 };
