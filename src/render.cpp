@@ -78,15 +78,16 @@ static inline float readChannelInput(BelaContext* ctx, unsigned int frame,
 // ---------------------------------------------------------------------------
 
 /**
- * Returns the logical (display) value for a pot, applying the reversed flag
- * if a matching PotRef exists in kAllNamedPots.
+ * Returns the logical (display) value for a pot.
+ * Uses getPotValue(PotRef) when a named PotRef exists, so both the reversed
+ * flag and the centered snap (0.5 dead-zone) are visible in the debug logs.
+ * Falls back to the raw value for unassigned pots.
  */
 static float logicalPotValue(int mux, int pot) {
-    float raw = gHardwareManager.getPotValue(mux, pot);
     for(const auto& ref : kAllNamedPots)
         if(ref.mux == mux && ref.pot == pot)
-            return ref.reversed ? 1.f - raw : raw;
-    return raw;
+            return gHardwareManager.getPotValue(ref);
+    return gHardwareManager.getPotValue(mux, pot);
 }
 
 /** Prints pots that moved since the last call. Silent when nothing changed. */
@@ -196,66 +197,64 @@ void render(BelaContext* context, void* userData) {
     // --- Channel Strip 1 controls ---
     gChannelStrip.setInputGain(gHardwareManager.getPotValue(CH1_INPUT_GAIN));
     gChannelStrip.setEqGains(
-        potToGainDb(gHardwareManager.getCenteredPotValue(CH1_EQ_LOW)),
-        potToGainDb(gHardwareManager.getCenteredPotValue(CH1_EQ_MID)),
-        potToGainDb(gHardwareManager.getCenteredPotValue(CH1_EQ_HIGH))
+        potToGainDb(gHardwareManager.getPotValue(CH1_EQ_LOW)),
+        potToGainDb(gHardwareManager.getPotValue(CH1_EQ_MID)),
+        potToGainDb(gHardwareManager.getPotValue(CH1_EQ_HIGH))
     );
     gChannelStrip.setFxSendLevel(gHardwareManager.getPotValue(CH1_FX_SEND));
 
     // --- Channel Strip 2 controls ---
     gChannelStrip2.setInputGain(gHardwareManager.getPotValue(CH2_INPUT_GAIN));
     gChannelStrip2.setEqGains(
-        potToGainDb(gHardwareManager.getCenteredPotValue(CH2_EQ_LOW)),
-        potToGainDb(gHardwareManager.getCenteredPotValue(CH2_EQ_MID)),
-        potToGainDb(gHardwareManager.getCenteredPotValue(CH2_EQ_HIGH))
+        potToGainDb(gHardwareManager.getPotValue(CH2_EQ_LOW)),
+        potToGainDb(gHardwareManager.getPotValue(CH2_EQ_MID)),
+        potToGainDb(gHardwareManager.getPotValue(CH2_EQ_HIGH))
     );
     gChannelStrip2.setFxSendLevel(gHardwareManager.getPotValue(CH2_FX_SEND));
 
     // --- AUX 3 controls ---
     gChannelStrip3.setInputGain(gHardwareManager.getPotValue(AUX3_INPUT_GAIN));
     gChannelStrip3.setEqGains(
-        potToGainDb(gHardwareManager.getCenteredPotValue(AUX3_EQ_LOW)),
-        potToGainDb(gHardwareManager.getCenteredPotValue(AUX3_EQ_MID)),
-        potToGainDb(gHardwareManager.getCenteredPotValue(AUX3_EQ_HIGH))
+        potToGainDb(gHardwareManager.getPotValue(AUX3_EQ_LOW)),
+        potToGainDb(gHardwareManager.getPotValue(AUX3_EQ_MID)),
+        potToGainDb(gHardwareManager.getPotValue(AUX3_EQ_HIGH))
     );
     gChannelStrip3.setFxSendLevel(gHardwareManager.getPotValue(AUX3_FX_SEND));
 
     // --- AUX 4 controls ---
     gChannelStrip4.setInputGain(gHardwareManager.getPotValue(AUX4_INPUT_GAIN));
     gChannelStrip4.setEqGains(
-        potToGainDb(gHardwareManager.getCenteredPotValue(AUX4_EQ_LOW)),
-        potToGainDb(gHardwareManager.getCenteredPotValue(AUX4_EQ_MID)),
-        potToGainDb(gHardwareManager.getCenteredPotValue(AUX4_EQ_HIGH))
+        potToGainDb(gHardwareManager.getPotValue(AUX4_EQ_LOW)),
+        potToGainDb(gHardwareManager.getPotValue(AUX4_EQ_MID)),
+        potToGainDb(gHardwareManager.getPotValue(AUX4_EQ_HIGH))
     );
     gChannelStrip4.setFxSendLevel(gHardwareManager.getPotValue(AUX4_FX_SEND));
 
     // --- Master parametric EQ ---
     gMasterFx.setParamEqBand(ParametricEq::SUB,
         gHardwareManager.getPotValue(MASTER_EQ_SUB_FREQ),
-        potToGainDb(gHardwareManager.getCenteredPotValue(MASTER_EQ_SUB_GAIN), kMasterEqGainRangeDb)
+        potToGainDb(gHardwareManager.getPotValue(MASTER_EQ_SUB_GAIN), kMasterEqGainRangeDb)
     );
     gMasterFx.setParamEqBand(ParametricEq::KICK,
         gHardwareManager.getPotValue(MASTER_EQ_KICK_FREQ),
-        potToGainDb(gHardwareManager.getCenteredPotValue(MASTER_EQ_KICK_GAIN), kMasterEqGainRangeDb)
+        potToGainDb(gHardwareManager.getPotValue(MASTER_EQ_KICK_GAIN), kMasterEqGainRangeDb)
     );
     gMasterFx.setParamEqBand(ParametricEq::MID,
         gHardwareManager.getPotValue(MASTER_EQ_MID_FREQ),
-        potToGainDb(gHardwareManager.getCenteredPotValue(MASTER_EQ_MID_GAIN), kMasterEqGainRangeDb)
+        potToGainDb(gHardwareManager.getPotValue(MASTER_EQ_MID_GAIN), kMasterEqGainRangeDb)
     );
     gMasterFx.setParamEqBand(ParametricEq::TOP,
         gHardwareManager.getPotValue(MASTER_EQ_TOP_FREQ),
-        potToGainDb(gHardwareManager.getCenteredPotValue(MASTER_EQ_TOP_GAIN), kMasterEqGainRangeDb)
+        potToGainDb(gHardwareManager.getPotValue(MASTER_EQ_TOP_GAIN), kMasterEqGainRangeDb)
     );
 
-    // --- Master graphic EQ — 12 bands, pots centred = 0 dB ---
+    // --- Master graphic EQ — 12 bands (centered=true in each PotRef → snap at 0.5) ---
     static const PotRef kGeqPots[GraphicEq::kNumBands] = {
         GEQ_40HZ, GEQ_60HZ, GEQ_80HZ, GEQ_100HZ, GEQ_125HZ, GEQ_250HZ,
         GEQ_500HZ, GEQ_1KHZ, GEQ_2KHZ, GEQ_4KHZ, GEQ_8KHZ, GEQ_16KHZ
     };
-    for(int i = 0; i < GraphicEq::kNumBands; ++i) {
-        float pot = gHardwareManager.getCenteredPotValue(kGeqPots[i]);
-        gMasterFx.setGraphicEqBand(i, potToGainDb(pot, kGEqGainRangeDb));
-    }
+    for(int i = 0; i < GraphicEq::kNumBands; ++i)
+        gMasterFx.setGraphicEqBand(i, potToGainDb(gHardwareManager.getPotValue(kGeqPots[i]), kGEqGainRangeDb));
 
     // --- Master filter section (HPF + LPF — pot at 0 = filter OFF) ---
     gMasterFx.setHpf(

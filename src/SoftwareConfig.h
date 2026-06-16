@@ -51,7 +51,7 @@ constexpr float kSnapRadiusEdge   = 0.04f;
 /// Half-width of the snap dead-zone around 0.5 for getCenteredPotValue().
 /// A pot within this radius of centre is returned exactly as 0.5
 /// ("no effect" for EQ / bipolar controls).
-constexpr float kSnapRadiusCenter = 0.10f;
+constexpr float kSnapRadiusCenter = 0.03f;
 
 // ---------------------------------------------------------------------------
 // Channel EQ (ChannelStrip — 3-band parametric)

@@ -60,10 +60,14 @@ public:
 
     /**
      * Overload accepting a PotRef from HardwareConfig.h.
-     * Applies reversed rotation automatically when ref.reversed is true.
+     * Applies centered snap (getCenteredPotValue) when ref.centered is true,
+     * then applies reversed rotation when ref.reversed is true.
+     * This is the preferred accessor — no need to call getCenteredPotValue()
+     * explicitly in render.cpp when the PotRef is properly configured.
      */
     float getPotValue(PotRef ref) const {
-        float v = getPotValue(ref.mux, ref.pot);
+        float v = ref.centered ? getCenteredPotValue(ref.mux, ref.pot)
+                               : getPotValue(ref.mux, ref.pot);
         return ref.reversed ? 1.f - v : v;
     }
 

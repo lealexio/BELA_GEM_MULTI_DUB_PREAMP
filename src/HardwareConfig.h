@@ -120,6 +120,9 @@ constexpr SwitchRef SIREN_TRIGGER = {0, false, true}; // PB0 → dub siren gate
  *   reversed : true = invert the reading (physically rotated backwards)
  *   name     : human-readable label used in debug logs — must match the
  *              variable name so logs are unambiguous. nullptr = unlabelled.
+ *   centered : true = snap dead-zone at 0.5 (use for EQ / bipolar controls).
+ *              getPotValue(PotRef) automatically calls getCenteredPotValue()
+ *              when this flag is set — no need to call it explicitly in render.cpp.
  *
  * Single source of truth: the name lives here, not in a separate switch/case.
  * Add the pot to kAllNamedPots[] so getPotName() can find it automatically.
@@ -129,6 +132,7 @@ struct PotRef {
     int         pot;
     bool        reversed = false;
     const char* name     = nullptr;
+    bool        centered = false;
 };
 
 // --- MUX 0  (analog input A0) ---
@@ -144,58 +148,58 @@ constexpr PotRef SIREN_FX_SEND = {3, 11, true, "SIREN_FX_SEND"}; // siren FX sen
 
 // Channel Strip 1 (IN0 → master)
 constexpr PotRef CH1_INPUT_GAIN = {3,  2, true,  "CH1_INPUT_GAIN"};
-constexpr PotRef CH1_EQ_MID     = {0,  5, true,  "CH1_EQ_MID"};
-constexpr PotRef CH1_EQ_LOW     = {0, 14, true,  "CH1_EQ_LOW"};
-constexpr PotRef CH1_EQ_HIGH    = {0, 3, true,  "CH1_EQ_HIGH"};
-constexpr PotRef CH1_FX_SEND    = {3, 3, true, "CH1_FX_SEND"};
+constexpr PotRef CH1_EQ_MID     = {0,  5, true,  "CH1_EQ_MID",  true};
+constexpr PotRef CH1_EQ_LOW     = {0, 14, true,  "CH1_EQ_LOW",  true};
+constexpr PotRef CH1_EQ_HIGH    = {0,  3, true,  "CH1_EQ_HIGH", true};
+constexpr PotRef CH1_FX_SEND    = {3,  3, true,  "CH1_FX_SEND"};
 
 // Channel Strip 2 (IN1 → master)
 constexpr PotRef CH2_INPUT_GAIN = {3,  7, true,  "CH2_INPUT_GAIN"};
-constexpr PotRef CH2_EQ_MID     = {0,  6, true,  "CH2_EQ_MID"};
-constexpr PotRef CH2_EQ_HIGH    = {1, 12, true,  "CH2_EQ_HIGH"};
-constexpr PotRef CH2_EQ_LOW     = {0, 13, true,  "CH2_EQ_LOW"};
-constexpr PotRef CH2_FX_SEND    = {3,  6, true, "CH2_FX_SEND"};
+constexpr PotRef CH2_EQ_MID     = {0,  6, true,  "CH2_EQ_MID",  true};
+constexpr PotRef CH2_EQ_HIGH    = {1, 12, true,  "CH2_EQ_HIGH", true};
+constexpr PotRef CH2_EQ_LOW     = {0, 13, true,  "CH2_EQ_LOW",  true};
+constexpr PotRef CH2_FX_SEND    = {3,  6, true,  "CH2_FX_SEND"};
 
 // AUX 3 (IN2 → master)
 constexpr PotRef AUX3_INPUT_GAIN = {3,  8, true,  "AUX3_INPUT_GAIN"};
-constexpr PotRef AUX3_EQ_LOW     = {0, 12, true,  "AUX3_EQ_LOW"};
-constexpr PotRef AUX3_EQ_MID     = {0,  7, true,  "AUX3_EQ_MID"};
-constexpr PotRef AUX3_EQ_HIGH    = {1, 13, true,  "AUX3_EQ_HIGH"};
-constexpr PotRef AUX3_FX_SEND    = {3,  9, true, "AUX3_FX_SEND"};
+constexpr PotRef AUX3_EQ_LOW     = {0, 12, true,  "AUX3_EQ_LOW",  true};
+constexpr PotRef AUX3_EQ_MID     = {0,  7, true,  "AUX3_EQ_MID",  true};
+constexpr PotRef AUX3_EQ_HIGH    = {1, 13, true,  "AUX3_EQ_HIGH", true};
+constexpr PotRef AUX3_FX_SEND    = {3,  9, true,  "AUX3_FX_SEND"};
 
 // AUX 4 (IN3 → master)
 constexpr PotRef AUX4_INPUT_GAIN = {3, 15, true,  "AUX4_INPUT_GAIN"};
-constexpr PotRef AUX4_EQ_LOW     = {0, 11, true,  "AUX4_EQ_LOW"};
-constexpr PotRef AUX4_EQ_MID     = {0,  8, true,  "AUX4_EQ_MID"};
-constexpr PotRef AUX4_EQ_HIGH    = {1, 14, true,  "AUX4_EQ_HIGH"};
-constexpr PotRef AUX4_FX_SEND    = {3, 14, true, "AUX4_FX_SEND"};
+constexpr PotRef AUX4_EQ_LOW     = {0, 11, true,  "AUX4_EQ_LOW",  true};
+constexpr PotRef AUX4_EQ_MID     = {0,  8, true,  "AUX4_EQ_MID",  true};
+constexpr PotRef AUX4_EQ_HIGH    = {1, 14, true,  "AUX4_EQ_HIGH", true};
+constexpr PotRef AUX4_FX_SEND    = {3, 14, true,  "AUX4_FX_SEND"};
 
 
 // Master parametric EQ
 constexpr PotRef MASTER_EQ_SUB_FREQ  = {2, 14, true, "MASTER_EQ_SUB_FREQ"};
-constexpr PotRef MASTER_EQ_SUB_GAIN  = {2, 13, true, "MASTER_EQ_SUB_GAIN"};
+constexpr PotRef MASTER_EQ_SUB_GAIN  = {2, 13, true, "MASTER_EQ_SUB_GAIN",  true};
 constexpr PotRef MASTER_EQ_KICK_FREQ = {2,  8, true, "MASTER_EQ_KICK_FREQ"};
-constexpr PotRef MASTER_EQ_KICK_GAIN = {2,  9, true, "MASTER_EQ_KICK_GAIN"};
-constexpr PotRef MASTER_EQ_MID_FREQ  = {3, 1, true, "MASTER_EQ_MID_FREQ"};
-constexpr PotRef MASTER_EQ_MID_GAIN  = {2,  7, true, "MASTER_EQ_MID_GAIN"};
+constexpr PotRef MASTER_EQ_KICK_GAIN = {2,  9, true, "MASTER_EQ_KICK_GAIN", true};
+constexpr PotRef MASTER_EQ_MID_FREQ  = {3,  1, true, "MASTER_EQ_MID_FREQ"};
+constexpr PotRef MASTER_EQ_MID_GAIN  = {2,  7, true, "MASTER_EQ_MID_GAIN",  true};
 constexpr PotRef MASTER_EQ_TOP_FREQ  = {2,  3, true, "MASTER_EQ_TOP_FREQ"};
-constexpr PotRef MASTER_EQ_TOP_GAIN  = {2,  6, true, "MASTER_EQ_TOP_GAIN"};
+constexpr PotRef MASTER_EQ_TOP_GAIN  = {2,  6, true, "MASTER_EQ_TOP_GAIN",  true};
 
-// --- Graphic EQ (12 bands) ---
+// --- Graphic EQ (12 bands) — all centered (0.5 = 0 dB) ---
 // MUX 1 — low and mid bands
-constexpr PotRef GEQ_2KHZ  = {1,  0, true, "GEQ_2KHZ"};
-constexpr PotRef GEQ_8KHZ  = {1,  1, true, "GEQ_8KHZ"};
-constexpr PotRef GEQ_60HZ  = {1,  6, true, "GEQ_60HZ"};
-constexpr PotRef GEQ_40HZ  = {1,  7, true, "GEQ_40HZ"};
-constexpr PotRef GEQ_80HZ  = {1,  8, true, "GEQ_80HZ"};
-constexpr PotRef GEQ_100HZ = {1,  9, true, "GEQ_100HZ"};
-constexpr PotRef GEQ_250HZ = {1, 10, true, "GEQ_250HZ"};
-constexpr PotRef GEQ_125HZ = {1, 11, true, "GEQ_125HZ"};
-constexpr PotRef GEQ_500HZ = {1, 15, true, "GEQ_500HZ"};
+constexpr PotRef GEQ_2KHZ  = {1,  0, true, "GEQ_2KHZ",  true};
+constexpr PotRef GEQ_8KHZ  = {1,  1, true, "GEQ_8KHZ",  true};
+constexpr PotRef GEQ_60HZ  = {1,  6, true, "GEQ_60HZ",  true};
+constexpr PotRef GEQ_40HZ  = {1,  7, true, "GEQ_40HZ",  true};
+constexpr PotRef GEQ_80HZ  = {1,  8, true, "GEQ_80HZ",  true};
+constexpr PotRef GEQ_100HZ = {1,  9, true, "GEQ_100HZ", true};
+constexpr PotRef GEQ_250HZ = {1, 10, true, "GEQ_250HZ", true};
+constexpr PotRef GEQ_125HZ = {1, 11, true, "GEQ_125HZ", true};
+constexpr PotRef GEQ_500HZ = {1, 15, true, "GEQ_500HZ", true};
 // MUX 2 — high bands (note: "1600hz" in user spec → interpreted as 16 kHz)
-constexpr PotRef GEQ_4KHZ  = {2,  0, true, "GEQ_4KHZ"};
-constexpr PotRef GEQ_1KHZ  = {2, 15, true, "GEQ_1KHZ"};
-constexpr PotRef GEQ_16KHZ = {2,  1, true, "GEQ_16KHZ"};
+constexpr PotRef GEQ_4KHZ  = {2,  0, true, "GEQ_4KHZ",  true};
+constexpr PotRef GEQ_1KHZ  = {2, 15, true, "GEQ_1KHZ",  true};
+constexpr PotRef GEQ_16KHZ = {2,  1, true, "GEQ_16KHZ", true};
 
 // Master filter section (HPF + LPF)
 constexpr PotRef MASTER_HPF_FREQ = {2,  11, true, "MASTER_HPF_FREQ"};
