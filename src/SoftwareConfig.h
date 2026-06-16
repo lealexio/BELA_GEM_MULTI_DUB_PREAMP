@@ -43,6 +43,11 @@ constexpr unsigned int kClipWarnIntervalBlocks = 4410;
 /// Suppresses quantisation / jitter noise without degrading responsiveness.
 constexpr float kJitterThreshold = 0.002f;
 
+/// Dead-zone at each end of the pot travel: values ≤ kSnapRadiusEdge snap to 0.0,
+/// values ≥ (1 - kSnapRadiusEdge) snap to 1.0.
+/// Applied in scanStep() so all accessors benefit automatically.
+constexpr float kSnapRadiusEdge   = 0.04f;
+
 /// Half-width of the snap dead-zone around 0.5 for getCenteredPotValue().
 /// A pot within this radius of centre is returned exactly as 0.5
 /// ("no effect" for EQ / bipolar controls).

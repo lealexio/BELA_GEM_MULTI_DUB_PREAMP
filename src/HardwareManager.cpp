@@ -40,6 +40,10 @@ void HardwareManager::scanStep(BelaContext* context) {
         raw = raw / kPotMax;
         if(raw > 1.f) raw = 1.f;
 
+        // Snap to hard 0 / 1 at the ends of travel
+        if(raw <= kSnapRadiusEdge)        raw = 0.f;
+        else if(raw >= 1.f - kSnapRadiusEdge) raw = 1.f;
+
         int idx = m * kPotsPerMux + currentChannel_;
         if(fabsf(raw - potValues_[idx]) >= kJitterThreshold)
             potValues_[idx] = raw;
