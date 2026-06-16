@@ -97,13 +97,13 @@ struct SwitchRef {
     bool portB    = false;
 };
 
-constexpr SwitchRef KILL_KICK = {0, true,  false}; // PA0 → kill KICK (80–200 Hz)
-constexpr SwitchRef KILL_SUB  = {1, true,  false}; // PA1 → kill SUB  (< 80 Hz)
-constexpr SwitchRef KILL_MID  = {2, true,  false}; // PA2 → kill MID  (200–1200 Hz)
-constexpr SwitchRef KILL_TOP  = {3, false, false}; // PA3 → kill TOP  (> 1200 Hz)
+constexpr SwitchRef KILL_SUB  = {0, true,  false}; // PA1 → kill SUB  (< 80 Hz)
+constexpr SwitchRef KILL_KICK = {1, true,  false}; // PA0 → kill KICK (80–200 Hz)
+constexpr SwitchRef KILL_MID  = {2, false,  false}; // PA2 → kill MID  (200–1200 Hz)
+constexpr SwitchRef KILL_TOP  = {3, true, false}; // PA3 → kill TOP  (> 1200 Hz)
 
 // Port B switches
-constexpr SwitchRef SW_PB0 = {0, false, true}; // PB0 — assign purpose in render.cpp
+constexpr SwitchRef SIREN_TRIGGER = {0, false, true}; // PB0 → dub siren gate
 
 // ---------------------------------------------------------------------------
 // Potentiometer mapping
@@ -130,6 +130,15 @@ struct PotRef {
 };
 
 // --- MUX 0  (analog input A0) ---
+
+// Dub Siren controls
+constexpr PotRef SIREN_TYPE    = {0, 10, false, "SIREN_TYPE"};    // preset selector
+constexpr PotRef SIREN_MOD     = {0,  9, false, "SIREN_MOD"};     // LFO depth + rate
+
+// --- MUX 3  (analog input A3) — siren + channel gain/send ---
+
+constexpr PotRef SIREN_GAIN    = {3,  0, false, "SIREN_GAIN"};    // siren output gain
+constexpr PotRef SIREN_FX_SEND = {3, 11, false, "SIREN_FX_SEND"}; // siren FX send level
 
 // Channel Strip 1 (IN0 → master)
 constexpr PotRef CH1_INPUT_GAIN = {3,  2, true,  "CH1_INPUT_GAIN"};
@@ -195,6 +204,8 @@ constexpr PotRef kAllNamedPots[] = {
     // Master filter section
     MASTER_HPF_FREQ, MASTER_HPF_RES,
     MASTER_LPF_FREQ, MASTER_LPF_RES,
+    // Dub Siren
+    SIREN_TYPE, SIREN_MOD, SIREN_GAIN, SIREN_FX_SEND,
     // Graphic EQ — 12 bands (40 Hz … 16 kHz)
     GEQ_40HZ, GEQ_60HZ, GEQ_80HZ, GEQ_100HZ, GEQ_125HZ, GEQ_250HZ,
     GEQ_500HZ, GEQ_1KHZ, GEQ_2KHZ, GEQ_4KHZ, GEQ_8KHZ, GEQ_16KHZ,

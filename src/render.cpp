@@ -14,6 +14,7 @@ https://bela.io
 #include "HardwareManager.h"
 #include "ChannelStrip.h"
 #include "MasterFx.h"
+#include "DubSiren.h"
 #include "HardwareConfig.h"
 #include "SoftwareConfig.h"
 
@@ -21,6 +22,7 @@ HardwareManager gHardwareManager;
 ChannelStrip    gChannelStrip;   // IN0 → master
 ChannelStrip    gChannelStrip2;  // IN1 → master
 MasterFx        gMasterFx;
+DubSiren        gDubSiren;
 AuxiliaryTask   gI2cTask;
 
 Scope scope;
@@ -105,36 +107,45 @@ static void printChangedPots() {
     }
 }
 
-/** Prints MCP23017 PA and PB switches only when their state changes. */
+/**
+ * Named switch registry for debug logging.
+ * Each entry holds a SwitchRef and a label.
+ * getSwitchState(SwitchRef) already applies the reversed flag, so
+ * "active" here means the switch is logically ON (kill engaged, trigger pressed…).
+ */
+struct NamedSwitch {
+    const char* name;
+    SwitchRef   ref;
+    const char* activeLabel;   // printed when logically active
+    const char* inactiveLabel; // printed when logically inactive
+};
+
+static const NamedSwitch kNamedSwitches[] = {
+    { "KILL_KICK",      KILL_KICK,      "KILL",   "open"  },
+    { "KILL_SUB",       KILL_SUB,       "KILL",   "open"  },
+    { "KILL_MID",       KILL_MID,       "KILL",   "open"  },
+    { "KILL_TOP",       KILL_TOP,       "KILL",   "open"  },
+    { "SIREN_TRIGGER",  SIREN_TRIGGER,  "ON",     "off"   },
+};
+static constexpr int kNamedSwitchCount =
+    sizeof(kNamedSwitches) / sizeof(kNamedSwitches[0]);
+
+/** Prints named switches when their logical state changes. */
 static void printChangedSwitches() {
-    static int prevA = -1;
-    static int prevB = -1;
+    static bool prevStates[kNamedSwitchCount];
+    static bool initialised = false;
 
-    int curA = 0, curB = 0;
-    for(int pin = 0; pin < 8; pin++) {
-        curA |= (gHardwareManager.getSwitchState (pin) ? 1 : 0) << pin;
-        curB |= (gHardwareManager.getSwitchStateB(pin) ? 1 : 0) << pin;
-    }
-
-    if(curA != prevA) {
-        for(int pin = 0; pin < 8; pin++) {
-            bool prev = (prevA >> pin) & 1;
-            bool now  = (curA  >> pin) & 1;
-            if(prev != now || prevA == -1)
-                rt_printf("[SW]  PA%d  →  %s\n", pin, now ? "OPEN" : "CLOSED");
+    for(int i = 0; i < kNamedSwitchCount; ++i) {
+        bool state = gHardwareManager.getSwitchState(kNamedSwitches[i].ref);
+        if(!initialised || state != prevStates[i]) {
+            rt_printf("[SW]  %-16s  →  %s\n",
+                kNamedSwitches[i].name,
+                state ? kNamedSwitches[i].activeLabel
+                      : kNamedSwitches[i].inactiveLabel);
+            prevStates[i] = state;
         }
-        prevA = curA;
     }
-
-    if(curB != prevB) {
-        for(int pin = 0; pin < 8; pin++) {
-            bool prev = (prevB >> pin) & 1;
-            bool now  = (curB  >> pin) & 1;
-            if(prev != now || prevB == -1)
-                rt_printf("[SW]  PB%d  →  %s\n", pin, now ? "OPEN" : "CLOSED");
-        }
-        prevB = curB;
-    }
+    initialised = true;
 }
 
 // ---------------------------------------------------------------------------
@@ -152,6 +163,7 @@ bool setup(BelaContext* context, void* userData) {
     gChannelStrip.setup(context->audioSampleRate);
     gChannelStrip2.setup(context->audioSampleRate);
     gMasterFx.setup(context->audioSampleRate);
+    gDubSiren.setup(context->audioSampleRate);
 
     if(!gHardwareManager.initMcp23017())
         return false;
@@ -229,6 +241,15 @@ void render(BelaContext* context, void* userData) {
         gHardwareManager.getSwitchState(KILL_TOP)
     );
 
+    // --- Dub siren controls ---
+    gDubSiren.setControls(
+        gHardwareManager.getPotValue(SIREN_TYPE),
+        gHardwareManager.getPotValue(SIREN_MOD),
+        gHardwareManager.getPotValue(SIREN_GAIN),
+        gHardwareManager.getPotValue(SIREN_FX_SEND),
+        gHardwareManager.getSwitchState(SIREN_TRIGGER)
+    );
+
     // --- Sample loop ---
     bool clipCh0 = false;
     bool clipCh1 = false;
@@ -243,15 +264,18 @@ void render(BelaContext* context, void* userData) {
         float dry1 = gChannelStrip.process(in0);
         float dry2 = gChannelStrip2.process(in1);
 
-        // FX send: post-fader sum → OUT2 (external effect unit)
-        float fxSend = gChannelStrip.fxOut() + gChannelStrip2.fxOut();
+        // Siren: process before FX send to include its FX output
+        float sirenOut = gDubSiren.process();
+
+        // FX send: channel strips + siren → OUT2 (external effect unit)
+        float fxSend = gChannelStrip.fxOut() + gChannelStrip2.fxOut() + gDubSiren.fxOut();
         audioWrite(context, n, FX1_SEND_OUT, fxSend);
 
         // FX return: noise-gated to suppress idle hum from the effect unit
         float fxReturn = gMasterFx.processFxReturn(audioRead(context, n, FX1_RETURN_IN));
 
-        // Master bus: dry + FX return → kill crossover → stereo output
-        float out = gMasterFx.process(dry1 + dry2 + fxReturn);
+        // Master bus: dry channels + siren + FX return → EQ → filters → kills
+        float out = gMasterFx.process(dry1 + dry2 + sirenOut + fxReturn);
 
         scope.log(dry1 + dry2 + fxReturn, out);
         audioWrite(context, n, MASTER_OUT_L, out);

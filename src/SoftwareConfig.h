@@ -154,3 +154,13 @@ constexpr float kGEqQ = 1.41f;
 /// Minimum gain change (dB) that triggers a biquad coefficient recompute.
 /// Prevents unnecessary DSP work from ADC jitter.
 constexpr float kGEqUpdateEpsilonDb = 0.05f;
+
+// ---------------------------------------------------------------------------
+// Dub Siren (DubSiren)
+// ---------------------------------------------------------------------------
+
+/// Time for the siren gate amplitude to ramp from 0 to 1 (trigger pressed).
+constexpr float kSirenGateAttackMs  = 5.f;
+
+/// Time for the siren gate amplitude to ramp from 1 to 0 (trigger released).
+constexpr float kSirenGateReleaseMs = 80.f;
