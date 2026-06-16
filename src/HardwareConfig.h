@@ -30,7 +30,7 @@ constexpr int kNumMux     = 4;
 
 /// Number of MUX chips physically wired to the Bela (≤ kNumMux).
 /// Increase this when you connect additional CD74HC4067 boards.
-constexpr int kActiveMux  = 3;
+constexpr int kActiveMux  = 4;
 
 /// Number of channels per MUX chip (CD74HC4067 = 16).
 constexpr int kPotsPerMux = 16;
@@ -126,42 +126,35 @@ struct PotRef {
 // --- MUX 0  (analog input A0) ---
 
 // Channel Strip 1 (IN0 → master)
-constexpr PotRef CH1_INPUT_GAIN = {0,  1, true,  "CH1_INPUT_GAIN"};
-constexpr PotRef CH1_EQ_MID     = {0,  0, true,  "CH1_EQ_MID"};
+constexpr PotRef CH1_INPUT_GAIN = {3,  2, true,  "CH1_INPUT_GAIN"};
+constexpr PotRef CH1_EQ_MID     = {0,  5, true,  "CH1_EQ_MID"};
 constexpr PotRef CH1_EQ_LOW     = {0, 14, true,  "CH1_EQ_LOW"};
-constexpr PotRef CH1_EQ_HIGH    = {0, 15, true,  "CH1_EQ_HIGH"};
-constexpr PotRef CH1_FX_SEND    = {0, 13, false, "CH1_FX_SEND"};
+constexpr PotRef CH1_EQ_HIGH    = {0, 3, true,  "CH1_EQ_HIGH"};
+constexpr PotRef CH1_FX_SEND    = {3, 3, false, "CH1_FX_SEND"};
 
 // Channel Strip 2 (IN1 → master)
-constexpr PotRef CH2_INPUT_GAIN = {0,  6, true,  "CH2_INPUT_GAIN"};
-constexpr PotRef CH2_EQ_MID     = {0,  7, true,  "CH2_EQ_MID"};
-constexpr PotRef CH2_EQ_HIGH    = {0,  8, true,  "CH2_EQ_HIGH"};
-constexpr PotRef CH2_EQ_LOW     = {0,  9, true,  "CH2_EQ_LOW"};
-constexpr PotRef CH2_FX_SEND    = {0, 10, false, "CH2_FX_SEND"};
+constexpr PotRef CH2_INPUT_GAIN = {3,  7, true,  "CH2_INPUT_GAIN"};
+constexpr PotRef CH2_EQ_MID     = {0,  6, true,  "CH2_EQ_MID"};
+constexpr PotRef CH2_EQ_HIGH    = {1,  12, true,  "CH2_EQ_HIGH"};
+constexpr PotRef CH2_EQ_LOW     = {0,  13, true,  "CH2_EQ_LOW"};
+constexpr PotRef CH2_FX_SEND    = {3, 6, false, "CH2_FX_SEND"};
 
-// Master EQ — TOP band and filter section share MUX 0
-constexpr PotRef MASTER_EQ_TOP_FREQ = {0,  4, false, "MASTER_EQ_TOP_FREQ"};
-constexpr PotRef MASTER_EQ_TOP_GAIN = {0,  2, false, "MASTER_EQ_TOP_GAIN"};
-constexpr PotRef MASTER_LPF_FREQ    = {0,  3, false, "MASTER_LPF_FREQ"};
-
-// --- MUX 1  (analog input A1) — uncomment when physically connected ---
-//     Also increment kActiveMux above and add entries to kAllNamedPots[].
-// constexpr PotRef POT_MUX1_C00 = {1, 0, false, "POT_MUX1_C00"};
-
-// --- MUX 2  (analog input A2) ---
 
 // Master parametric EQ
-constexpr PotRef MASTER_EQ_SUB_FREQ  = {2,  8, false, "MASTER_EQ_SUB_FREQ"};
-constexpr PotRef MASTER_EQ_SUB_GAIN  = {2,  6, false, "MASTER_EQ_SUB_GAIN"};
-constexpr PotRef MASTER_EQ_KICK_FREQ = {2, 11, false, "MASTER_EQ_KICK_FREQ"};
-constexpr PotRef MASTER_EQ_KICK_GAIN = {2, 13, false, "MASTER_EQ_KICK_GAIN"};
-constexpr PotRef MASTER_EQ_MID_FREQ  = {2,  0, false, "MASTER_EQ_MID_FREQ"};
-constexpr PotRef MASTER_EQ_MID_GAIN  = {2, 14, false, "MASTER_EQ_MID_GAIN"};
+constexpr PotRef MASTER_EQ_SUB_FREQ  = {2,  14, false, "MASTER_EQ_SUB_FREQ"};
+constexpr PotRef MASTER_EQ_SUB_GAIN  = {2,  13, false, "MASTER_EQ_SUB_GAIN"};
+constexpr PotRef MASTER_EQ_KICK_FREQ = {2, 8, false, "MASTER_EQ_KICK_FREQ"};
+constexpr PotRef MASTER_EQ_KICK_GAIN = {2, 9, false, "MASTER_EQ_KICK_GAIN"};
+constexpr PotRef MASTER_EQ_MID_FREQ  = {2,  8, false, "MASTER_EQ_MID_FREQ"}; // unmapped
+constexpr PotRef MASTER_EQ_MID_GAIN  = {2, 7, false, "MASTER_EQ_MID_GAIN"};
+constexpr PotRef MASTER_EQ_TOP_FREQ = {2,  3, false, "MASTER_EQ_TOP_FREQ"};
+constexpr PotRef MASTER_EQ_TOP_GAIN = {2,  6, false, "MASTER_EQ_TOP_GAIN"};
 
 // Master filter section (HPF + LPF)
-constexpr PotRef MASTER_HPF_FREQ = {2,  7, false, "MASTER_HPF_FREQ"};
+constexpr PotRef MASTER_HPF_FREQ = {2,  11, false, "MASTER_HPF_FREQ"};
 constexpr PotRef MASTER_HPF_RES  = {2, 12, false, "MASTER_HPF_RES"};
-constexpr PotRef MASTER_LPF_RES  = {2, 15, false, "MASTER_LPF_RES"};
+constexpr PotRef MASTER_LPF_RES  = {2, 10, false, "MASTER_LPF_RES"};
+constexpr PotRef MASTER_LPF_FREQ    = {2,  5, false, "MASTER_LPF_FREQ"};
 
 // ---------------------------------------------------------------------------
 // All named pots — single registration point for debug name lookup.
@@ -187,9 +180,8 @@ constexpr PotRef kAllNamedPots[] = {
 // ---------------------------------------------------------------------------
 
 constexpr PotRef kIgnoredPots[] = {
-    {1, 2, false, nullptr}, // MUX1/C02 — under investigation
     {2, 2, false, nullptr}, // MUX2/C02 — unassigned / floating
-    {2, 3, false, nullptr}, // MUX2/C02 — unassigned / floating
+	{0, 4, false, nullptr}, // MUX2/C04 — unassigned / floating
 };
 constexpr int kIgnoredPotsCount = sizeof(kIgnoredPots) / sizeof(kIgnoredPots[0]);
 
