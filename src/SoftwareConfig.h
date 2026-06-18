@@ -35,6 +35,10 @@ constexpr float kClipThreshold = 0.99f;
 /// Default: ~0.5 s at 44.1 kHz / 16 frames per block.
 constexpr unsigned int kClipWarnIntervalBlocks = 4410;
 
+/// Duration of the linear mute ramp applied to all audio outputs at startup.
+/// Suppresses the DAC initialisation transient (pop). 80 ms is imperceptible.
+constexpr float kStartupRampMs = 80.f;
+
 // ---------------------------------------------------------------------------
 // Potentiometer processing
 // ---------------------------------------------------------------------------

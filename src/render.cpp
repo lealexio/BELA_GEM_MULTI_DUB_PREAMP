@@ -34,7 +34,9 @@ BiquadFilter    gFxMidLpf;  // MIDS mode : LPF at kFxMidHighFreq
 
 Scope scope;
 
-static unsigned int gClipWarnCounter = 0;
+static unsigned int gClipWarnCounter     = 0;
+static int          gStartupRampRemaining = 0;
+static int          gStartupRampTotal     = 0;
 
 // ---------------------------------------------------------------------------
 // I2C auxiliary task — reads MCP23017 in a non-RT thread every ~5 ms
@@ -235,6 +237,10 @@ bool setup(BelaContext* context, void* userData) {
     gFxMidHpf.setHighPass(kFxMidLowFreq,  kFxFilterQ, sr); // MIDS: HPF @ 250 Hz
     gFxMidLpf.setLowPass (kFxMidHighFreq, kFxFilterQ, sr); // MIDS: LPF @ 4 kHz
 
+    // Startup mute ramp: suppress DAC initialisation transient
+    gStartupRampTotal     = (int)(sr * kStartupRampMs / 1000.f);
+    gStartupRampRemaining = gStartupRampTotal;
+
     if(!gHardwareManager.initMcp23017())
         return false;
 
@@ -391,17 +397,23 @@ void render(BelaContext* context, void* userData) {
             fxSend = gFxHpf4k.process(fxSend);                         // > 4 kHz only
         else if(fxModeMids)
             fxSend = gFxMidLpf.process(gFxMidHpf.process(fxSend));    // 250 Hz – 4 kHz
-        audioWrite(context, n, FX1_SEND_OUT, fxSend);
-
         // FX return: noise-gated to suppress idle hum from the effect unit
         float fxReturn = gMasterFx.processFxReturn(audioRead(context, n, FX1_RETURN_IN));
 
         // Master bus: all channels + siren + FX return → EQ → filters → kills
         float out = gMasterFx.process(dry1 + dry2 + dry3 + dry4 + sirenOut + fxReturn);
 
+        // Startup mute ramp: linear fade 0→1 over kStartupRampMs to suppress DAC pop
+        float startupGain = 1.f;
+        if(gStartupRampRemaining > 0) {
+            startupGain = 1.f - (float)gStartupRampRemaining / (float)gStartupRampTotal;
+            --gStartupRampRemaining;
+        }
+
         scope.log(dry1 + dry2 + fxReturn, out);
-        audioWrite(context, n, MASTER_OUT_L, out);
-        audioWrite(context, n, MASTER_OUT_R, out);
+        audioWrite(context, n, FX1_SEND_OUT, fxSend * startupGain);
+        audioWrite(context, n, MASTER_OUT_L, out    * startupGain);
+        audioWrite(context, n, MASTER_OUT_R, out    * startupGain);
     }
 
     // --- Clip warnings (rate-limited) ---
