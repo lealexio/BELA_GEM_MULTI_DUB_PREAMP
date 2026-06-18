@@ -137,6 +137,9 @@ struct PotRef {
 
 // --- MUX 0  (analog input A0) ---
 
+// Master output
+constexpr PotRef MASTER_GAIN = {0, 1, true, "MASTER_GAIN"}; // master output gain (0 = silence)
+
 // Dub Siren controls
 constexpr PotRef SIREN_TYPE    = {0, 10, true, "SIREN_TYPE"};    // preset selector
 constexpr PotRef SIREN_MOD     = {0,  9, true, "SIREN_MOD"};     // LFO depth + rate
@@ -218,6 +221,8 @@ constexpr PotRef kAllNamedPots[] = {
     CH2_INPUT_GAIN, CH2_EQ_MID, CH2_EQ_HIGH, CH2_EQ_LOW, CH2_FX_SEND,
     AUX3_INPUT_GAIN, AUX3_EQ_LOW, AUX3_EQ_MID, AUX3_EQ_HIGH, AUX3_FX_SEND,
     AUX4_INPUT_GAIN, AUX4_EQ_LOW, AUX4_EQ_MID, AUX4_EQ_HIGH, AUX4_FX_SEND,
+    // Master output
+    MASTER_GAIN,
     // Master parametric EQ
     MASTER_EQ_SUB_FREQ,  MASTER_EQ_SUB_GAIN,
     MASTER_EQ_KICK_FREQ, MASTER_EQ_KICK_GAIN,

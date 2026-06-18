@@ -274,6 +274,9 @@ void render(BelaContext* context, void* userData) {
         gHardwareManager.getSwitchState(KILL_TOP)
     );
 
+    // --- Master output gain ---
+    gMasterFx.setMasterGain(gHardwareManager.getPotValue(MASTER_GAIN));
+
     // --- Dub siren controls ---
     gDubSiren.setControls(
         gHardwareManager.getPotValue(SIREN_TYPE),

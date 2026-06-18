@@ -71,7 +71,7 @@ constexpr float kEqGainRangeDb = 6.f;    // Pot 0.0 → -kEqGainRangeDb dB
 
 /// Amplitude threshold below which the gate closes (linear 0.0–1.0).
 /// 0.005 ≈ -46 dBFS — captures real silence while passing any musical signal.
-constexpr float kGateThreshold = 0.005f;
+constexpr float kGateThreshold = 0.001f;
 
 /// Gate open speed: how fast the gate ramps to 1.0 once signal is detected (ms).
 constexpr float kGateAttackMs  = 2.0f;
@@ -169,3 +169,7 @@ constexpr float kSirenGateAttackMs  = 5.f;
 
 /// Time for the siren gate amplitude to ramp from 1 to 0 (trigger released).
 constexpr float kSirenGateReleaseMs = 80.f;
+
+/// Master gain scale applied to both the dry output and FX send of the siren.
+/// Reduce if the siren is too loud relative to the channel strips.
+constexpr float kSirenGainScale = 0.1f;

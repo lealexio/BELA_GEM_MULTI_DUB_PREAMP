@@ -86,6 +86,12 @@ public:
     void setKills(bool killSub, bool killKick, bool killMid, bool killTop);
 
     /**
+     * Sets the master output gain applied after the full processing chain.
+     * @param gain  [0.0–1.0]; 0.0 = total silence (dry + FX return)
+     */
+    void setMasterGain(float gain);
+
+    /**
      * Applies the FX-return noise gate to one sample.
      * Suppresses idle hum from the effect unit when no signal is fed.
      */
@@ -103,4 +109,6 @@ private:
     FilterSection filters_;
     KillSwitch    kills_;
     NoiseGate     fxReturnGate_;
+
+    float masterGain_ = 1.f;
 };

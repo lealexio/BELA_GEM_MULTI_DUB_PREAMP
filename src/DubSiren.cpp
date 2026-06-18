@@ -119,6 +119,6 @@ float DubSiren::process() {
     gateSmooth_ += coeff * (target - gateSmooth_);
 
     float signal = osc * gateSmooth_;
-    lastFxOut_   = signal * fxSend_;
-    return signal * gain_;
+    lastFxOut_   = signal * fxSend_ * kSirenGainScale;
+    return signal * gain_ * kSirenGainScale;
 }

@@ -28,6 +28,10 @@ void MasterFx::setKills(bool killSub, bool killKick, bool killMid, bool killTop)
     kills_.setKills(killSub, killKick, killMid, killTop);
 }
 
+void MasterFx::setMasterGain(float gain) {
+    masterGain_ = gain;
+}
+
 float MasterFx::processFxReturn(float sample) {
     return fxReturnGate_.process(sample);
 }
@@ -36,5 +40,6 @@ float MasterFx::process(float input) {
     float out = paramEq_.process(input);
     out = graphicEq_.process(out);
     out = filters_.process(out);
-    return kills_.process(out);
+    out = kills_.process(out);
+    return out * masterGain_;
 }
