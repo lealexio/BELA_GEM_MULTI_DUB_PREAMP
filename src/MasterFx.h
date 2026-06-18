@@ -4,6 +4,7 @@
 #include "ParametricEq.h"
 #include "FilterSection.h"
 #include "GraphicEq.h"
+#include "BandTrim.h"
 
 /**
  * Master effects bus.
@@ -12,8 +13,9 @@
  *   1. ParametricEq   : 4-band sweepable peaking EQ (SUB / KICK / MID / TOP)
  *   2. GraphicEq      : 12-band fixed-frequency graphic EQ (40 Hz … 16 kHz)
  *   3. FilterSection  : HPF and LPF with resonance (CDJ-style, bypass when pot at 0)
- *   4. KillSwitch     : 4-band crossover kill
- *   5. NoiseGate      : FX return noise suppression (separate path)
+ *   4. BandTrim       : 4-band ±3 dB gain trim at speaker crossover frequencies
+ *   5. KillSwitch     : 4-band crossover kill
+ *   6. NoiseGate      : FX return noise suppression (separate path)
  *
  * Signal flow:
  *   channel strips (dry mix)
@@ -27,6 +29,9 @@
  *                 │
  *                 ▼
  *           FilterSection   ← setHpf() + setLpf() once per block
+ *                 │
+ *                 ▼
+ *            BandTrim       ← setBandTrim() × 4 once per block
  *                 │
  *                 ▼
  *            KillSwitch     ← setKills() once per block
@@ -80,6 +85,13 @@ public:
     void setLpf(float freqPot, float resPot);
 
     /**
+     * Updates one band-trim gain. Call for each of the 4 bands once per render block.
+     * @param band    Target band (BandTrim::SUB / KICK / MID / TOP)
+     * @param gainDb  Gain in dB; 0.0 = transparent (pot at centre)
+     */
+    void setBandTrim(BandTrim::Band band, float gainDb);
+
+    /**
      * Updates kill targets. The gain ramp advances sample by sample in process().
      * Call once per render block before the sample loop.
      */
@@ -107,6 +119,7 @@ private:
     ParametricEq  paramEq_;
     GraphicEq     graphicEq_;
     FilterSection filters_;
+    BandTrim      bandTrim_;
     KillSwitch    kills_;
     NoiseGate     fxReturnGate_;
 

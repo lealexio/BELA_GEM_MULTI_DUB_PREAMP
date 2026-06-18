@@ -192,6 +192,13 @@ constexpr PotRef MASTER_EQ_MID_GAIN  = {2,  7, true, "MASTER_EQ_MID_GAIN",  true
 constexpr PotRef MASTER_EQ_TOP_FREQ  = {2,  3, true, "MASTER_EQ_TOP_FREQ"};
 constexpr PotRef MASTER_EQ_TOP_GAIN  = {2,  6, true, "MASTER_EQ_TOP_GAIN",  true};
 
+// --- Band Trim (4 bands, centered, ±3 dB) ---
+// MUX 1/C02-C05 — matched to speaker crossover frequencies
+constexpr PotRef BTRIM_TOP  = {1, 2, true, "BTRIM_TOP",  true}; // high-shelf  @ 1200 Hz
+constexpr PotRef BTRIM_MID  = {1, 3, true, "BTRIM_MID",  true}; // peaking     @ ~490 Hz
+constexpr PotRef BTRIM_KICK = {1, 4, true, "BTRIM_KICK", true}; // peaking     @ ~126 Hz
+constexpr PotRef BTRIM_SUB  = {1, 5, true, "BTRIM_SUB",  true}; // low-shelf   @ 80 Hz
+
 // --- Graphic EQ (12 bands) — all centered (0.5 = 0 dB) ---
 // MUX 1 — low and mid bands
 constexpr PotRef GEQ_2KHZ  = {1,  0, true, "GEQ_2KHZ",  true};
@@ -235,6 +242,8 @@ constexpr PotRef kAllNamedPots[] = {
     // Master filter section
     MASTER_HPF_FREQ, MASTER_HPF_RES,
     MASTER_LPF_FREQ, MASTER_LPF_RES,
+    // Band Trim — speaker crossover gains
+    BTRIM_SUB, BTRIM_KICK, BTRIM_MID, BTRIM_TOP,
     // Dub Siren
     SIREN_TYPE, SIREN_MOD, SIREN_GAIN, SIREN_FX_SEND,
     // Graphic EQ — 12 bands (40 Hz … 16 kHz)

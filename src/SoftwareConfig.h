@@ -146,6 +146,30 @@ constexpr float kKillRampMs = 30.0f;
 constexpr int kKillFilterStages = 2;
 
 // ---------------------------------------------------------------------------
+// Band Trim (BandTrim — 4-band ±3 dB trim, after FilterSection, before KillSwitch)
+// ---------------------------------------------------------------------------
+
+/// Gain range per band: pot 0.5 → 0 dB, pot 0.0 → -kBandTrimGainDb, pot 1.0 → +kBandTrimGainDb.
+constexpr float kBandTrimGainDb = 3.f;
+
+/// Centre frequency for the KICK peaking filter: geometric mean of SUB/KICK boundary (80 Hz)
+/// and KICK/MID boundary (200 Hz).
+constexpr float kBandTrimKickFreq = 126.f;  // sqrt(80 * 200)
+
+/// Centre frequency for the MID peaking filter: geometric mean of KICK/MID (200 Hz)
+/// and MID/TOP boundary (1200 Hz).
+constexpr float kBandTrimMidFreq  = 490.f;  // sqrt(200 * 1200)
+
+/// Q factor for the KICK peaking band — moderately wide bell.
+constexpr float kBandTrimKickQ = 1.0f;
+
+/// Q factor for the MID peaking band — slightly broader bell for a smoother transition.
+constexpr float kBandTrimMidQ  = 0.7f;
+
+/// Minimum gain change (dB) that triggers a biquad coefficient recompute.
+constexpr float kBandTrimEpsilonDb = 0.05f;
+
+// ---------------------------------------------------------------------------
 // Graphic EQ (GraphicEq — 12 fixed bands in master bus, after ParametricEq)
 // ---------------------------------------------------------------------------
 

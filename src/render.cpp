@@ -327,6 +327,12 @@ void render(BelaContext* context, void* userData) {
         gHardwareManager.getSwitchState(KILL_TOP)
     );
 
+    // --- Band Trim (SUB / KICK / MID / TOP) ---
+    gMasterFx.setBandTrim(BandTrim::SUB,  potToGainDb(gHardwareManager.getPotValue(BTRIM_SUB),  kBandTrimGainDb));
+    gMasterFx.setBandTrim(BandTrim::KICK, potToGainDb(gHardwareManager.getPotValue(BTRIM_KICK), kBandTrimGainDb));
+    gMasterFx.setBandTrim(BandTrim::MID,  potToGainDb(gHardwareManager.getPotValue(BTRIM_MID),  kBandTrimGainDb));
+    gMasterFx.setBandTrim(BandTrim::TOP,  potToGainDb(gHardwareManager.getPotValue(BTRIM_TOP),  kBandTrimGainDb));
+
     // --- Master output gain ---
     gMasterFx.setMasterGain(gHardwareManager.getPotValue(MASTER_GAIN));
 
