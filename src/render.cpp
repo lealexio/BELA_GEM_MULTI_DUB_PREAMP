@@ -145,21 +145,62 @@ static const NamedSwitch kNamedSwitches[] = {
 static constexpr int kNamedSwitchCount =
     sizeof(kNamedSwitches) / sizeof(kNamedSwitches[0]);
 
-/** Prints named switches when their logical state changes. */
+/** Returns true if a (port, pin) pair is already covered by kNamedSwitches. */
+static bool isSwitchNamed(bool portB, int pin) {
+    for(int i = 0; i < kNamedSwitchCount; ++i)
+        if(kNamedSwitches[i].ref.portB == portB && kNamedSwitches[i].ref.pin == pin)
+            return true;
+    return false;
+}
+
+/** Prints named switches (logical state) and unassigned pins (raw state) on change. */
 static void printChangedSwitches() {
-    static bool prevStates[kNamedSwitchCount];
+    static bool prevNamed[kNamedSwitchCount];
+    static int  prevRawA = -1;
+    static int  prevRawB = -1;
     static bool initialised = false;
 
+    // Named switches — logical state with labels
     for(int i = 0; i < kNamedSwitchCount; ++i) {
         bool state = gHardwareManager.getSwitchState(kNamedSwitches[i].ref);
-        if(!initialised || state != prevStates[i]) {
+        if(!initialised || state != prevNamed[i]) {
             rt_printf("[SW]  %-16s  →  %s\n",
                 kNamedSwitches[i].name,
                 state ? kNamedSwitches[i].activeLabel
                       : kNamedSwitches[i].inactiveLabel);
-            prevStates[i] = state;
+            prevNamed[i] = state;
         }
     }
+
+    // Unassigned pins — raw electrical state (HIGH/LOW)
+    int curA = 0, curB = 0;
+    for(int pin = 0; pin < 8; ++pin) {
+        curA |= (gHardwareManager.getSwitchState (pin) ? 1 : 0) << pin;
+        curB |= (gHardwareManager.getSwitchStateB(pin) ? 1 : 0) << pin;
+    }
+
+    if(!initialised || curA != prevRawA) {
+        for(int pin = 0; pin < 8; ++pin) {
+            if(isSwitchNamed(false, pin)) continue;
+            bool prev = (prevRawA >> pin) & 1;
+            bool now  = (curA    >> pin) & 1;
+            if(!initialised || prev != now)
+                rt_printf("[SW]  PA%-2d  (unassigned)  →  %s\n", pin, now ? "HIGH" : "LOW");
+        }
+        prevRawA = curA;
+    }
+
+    if(!initialised || curB != prevRawB) {
+        for(int pin = 0; pin < 8; ++pin) {
+            if(isSwitchNamed(true, pin)) continue;
+            bool prev = (prevRawB >> pin) & 1;
+            bool now  = (curB    >> pin) & 1;
+            if(!initialised || prev != now)
+                rt_printf("[SW]  PB%-2d  (unassigned)  →  %s\n", pin, now ? "HIGH" : "LOW");
+        }
+        prevRawB = curB;
+    }
+
     initialised = true;
 }
 
