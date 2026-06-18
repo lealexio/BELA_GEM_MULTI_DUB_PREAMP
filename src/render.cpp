@@ -27,6 +27,11 @@ MasterFx        gMasterFx;
 DubSiren        gDubSiren;
 AuxiliaryTask   gI2cTask;
 
+// FX send band filters (used when PA5 or PA6 is active)
+BiquadFilter    gFxHpf4k;   // TOPS mode : HPF at kFxMidHighFreq
+BiquadFilter    gFxMidHpf;  // MIDS mode : HPF at kFxMidLowFreq
+BiquadFilter    gFxMidLpf;  // MIDS mode : LPF at kFxMidHighFreq
+
 Scope scope;
 
 static unsigned int gClipWarnCounter = 0;
@@ -136,11 +141,13 @@ struct NamedSwitch {
 };
 
 static const NamedSwitch kNamedSwitches[] = {
-    { "KILL_KICK",      KILL_KICK,      "KILL",   "open"  },
-    { "KILL_SUB",       KILL_SUB,       "KILL",   "open"  },
-    { "KILL_MID",       KILL_MID,       "KILL",   "open"  },
-    { "KILL_TOP",       KILL_TOP,       "KILL",   "open"  },
-    { "SIREN_TRIGGER",  SIREN_TRIGGER,  "ON",     "off"   },
+    { "KILL_KICK",       KILL_KICK,       "KILL",    "open"     },
+    { "KILL_SUB",        KILL_SUB,        "KILL",    "open"     },
+    { "KILL_MID",        KILL_MID,        "KILL",    "open"     },
+    { "KILL_TOP",        KILL_TOP,        "KILL",    "open"     },
+    { "FX_FILTER_MIDS",  FX_FILTER_MIDS,  "mids",    "fullband" },
+    { "FX_FILTER_TOPS",  FX_FILTER_TOPS,  "tops",    "fullband" },
+    { "SIREN_TRIGGER",   SIREN_TRIGGER,   "ON",      "off"      },
 };
 static constexpr int kNamedSwitchCount =
     sizeof(kNamedSwitches) / sizeof(kNamedSwitches[0]);
@@ -222,6 +229,11 @@ bool setup(BelaContext* context, void* userData) {
     gChannelStrip4.setup(context->audioSampleRate);
     gMasterFx.setup(context->audioSampleRate);
     gDubSiren.setup(context->audioSampleRate);
+
+    float sr = context->audioSampleRate;
+    gFxHpf4k .setHighPass(kFxMidHighFreq, kFxFilterQ, sr); // TOPS: HPF @ 4 kHz
+    gFxMidHpf.setHighPass(kFxMidLowFreq,  kFxFilterQ, sr); // MIDS: HPF @ 250 Hz
+    gFxMidLpf.setLowPass (kFxMidHighFreq, kFxFilterQ, sr); // MIDS: LPF @ 4 kHz
 
     if(!gHardwareManager.initMcp23017())
         return false;
@@ -318,6 +330,25 @@ void render(BelaContext* context, void* userData) {
     // --- Master output gain ---
     gMasterFx.setMasterGain(gHardwareManager.getPotValue(MASTER_GAIN));
 
+    // --- FX send filter mode (read once per block) ---
+    const bool fxModeMids = gHardwareManager.getSwitchState(FX_FILTER_MIDS);
+    const bool fxModeTops = gHardwareManager.getSwitchState(FX_FILTER_TOPS);
+
+    // Reset filter memory on mode change to avoid pops
+    static bool prevFxMids = false;
+    static bool prevFxTops = false;
+    if(fxModeMids != prevFxMids || fxModeTops != prevFxTops) {
+        gFxHpf4k .reset();
+        gFxMidHpf.reset();
+        gFxMidLpf.reset();
+        prevFxMids = fxModeMids;
+        prevFxTops = fxModeTops;
+        const char* mode = fxModeTops ? "TOPS (>4kHz)"
+                         : fxModeMids ? "MIDS (250Hz-4kHz)"
+                                      : "FULLBAND";
+        rt_printf("[FX]  Send mode  →  %s\n", mode);
+    }
+
     // --- Dub siren controls ---
     gDubSiren.setControls(
         gHardwareManager.getPotValue(SIREN_TYPE),
@@ -346,10 +377,14 @@ void render(BelaContext* context, void* userData) {
         // Siren: process before FX send to include its FX output
         float sirenOut = gDubSiren.process();
 
-        // FX send: all channel strips + siren → OUT2 (external effect unit)
+        // FX send: all channel strips + siren → filtered by mode → OUT2
         float fxSend = gChannelStrip.fxOut()  + gChannelStrip2.fxOut()
                      + gChannelStrip3.fxOut() + gChannelStrip4.fxOut()
                      + gDubSiren.fxOut();
+        if(fxModeTops)
+            fxSend = gFxHpf4k.process(fxSend);                         // > 4 kHz only
+        else if(fxModeMids)
+            fxSend = gFxMidLpf.process(gFxMidHpf.process(fxSend));    // 250 Hz – 4 kHz
         audioWrite(context, n, FX1_SEND_OUT, fxSend);
 
         // FX return: noise-gated to suppress idle hum from the effect unit

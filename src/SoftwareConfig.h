@@ -170,6 +170,19 @@ constexpr float kSirenGateAttackMs  = 5.f;
 /// Time for the siren gate amplitude to ramp from 1 to 0 (trigger released).
 constexpr float kSirenGateReleaseMs = 80.f;
 
+// ---------------------------------------------------------------------------
+// FX Send filter modes (PA5 = mids only, PA6 = tops only)
+// ---------------------------------------------------------------------------
+
+/// Low boundary of the mid band: frequencies below this are excluded in MIDS mode.
+constexpr float kFxMidLowFreq  = 250.f;   // Hz
+
+/// High boundary of the mid band / tops crossover.
+constexpr float kFxMidHighFreq = 4000.f;  // Hz
+
+/// Butterworth Q for FX send filter transitions (0.707 = maximally flat, no resonance).
+constexpr float kFxFilterQ = 0.707f;
+
 /// Master gain scale applied to both the dry output and FX send of the siren.
 /// Reduce if the siren is too loud relative to the channel strips.
 constexpr float kSirenGainScale = 0.1f;

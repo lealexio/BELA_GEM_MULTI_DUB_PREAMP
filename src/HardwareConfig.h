@@ -104,6 +104,10 @@ constexpr SwitchRef KILL_KICK = {1, true,  false}; // PA0 → kill KICK (80–20
 constexpr SwitchRef KILL_MID  = {2, false,  false}; // PA2 → kill MID  (200–1200 Hz)
 constexpr SwitchRef KILL_TOP  = {3, true, false}; // PA3 → kill TOP  (> 1200 Hz)
 
+// Port A — FX send filter mode (both off = fullband)
+constexpr SwitchRef FX_FILTER_MIDS = {5, false, false}; // PA5 → FX send: mids only (250 Hz – 4 kHz)
+constexpr SwitchRef FX_FILTER_TOPS = {6, false, false}; // PA6 → FX send: tops only (> 4 kHz)
+
 // Port B switches
 constexpr SwitchRef SIREN_TRIGGER = {0, false, true}; // PB0 → dub siren gate
 
