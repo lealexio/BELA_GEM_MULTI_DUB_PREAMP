@@ -187,7 +187,7 @@ constexpr PotRef MASTER_EQ_SUB_FREQ  = {2, 14, true, "MASTER_EQ_SUB_FREQ"};
 constexpr PotRef MASTER_EQ_SUB_GAIN  = {2, 13, true, "MASTER_EQ_SUB_GAIN",  true};
 constexpr PotRef MASTER_EQ_KICK_FREQ = {2,  8, true, "MASTER_EQ_KICK_FREQ"};
 constexpr PotRef MASTER_EQ_KICK_GAIN = {2,  9, true, "MASTER_EQ_KICK_GAIN", true};
-constexpr PotRef MASTER_EQ_MID_FREQ  = {3,  1, true, "MASTER_EQ_MID_FREQ"};
+constexpr PotRef MASTER_EQ_MID_FREQ  = {3,  1, false, "MASTER_EQ_MID_FREQ"};
 constexpr PotRef MASTER_EQ_MID_GAIN  = {2,  7, true, "MASTER_EQ_MID_GAIN",  true};
 constexpr PotRef MASTER_EQ_TOP_FREQ  = {2,  3, true, "MASTER_EQ_TOP_FREQ"};
 constexpr PotRef MASTER_EQ_TOP_GAIN  = {2,  6, true, "MASTER_EQ_TOP_GAIN",  true};
@@ -257,9 +257,11 @@ constexpr PotRef kAllNamedPots[] = {
 
 constexpr PotRef kIgnoredPots[] = {
     {2, 2, false, nullptr}, // MUX2/C02 — unassigned / floating
-	{0, 4, false, nullptr}, // MUX2/C04 — unassigned / floating
+    {0, 2, false, nullptr}, // MUX0/C02 — unassigned / floating
+    {0, 4, false, nullptr}, // MUX0/C04 — unassigned / floating
+    {2, 4, false, nullptr}, // MUX2/C04 — unassigned / floating
 };
-constexpr int kIgnoredPotsCount = sizeof(kIgnoredPots) / sizeof(kIgnoredPots[0]);
+constexpr int kIgnoredPotsCount = static_cast<int>(sizeof(kIgnoredPots) / sizeof(kIgnoredPots[0]));
 
 // ---------------------------------------------------------------------------
 // Pot name lookup — no switch/case needed, name lives in the PotRef itself.
