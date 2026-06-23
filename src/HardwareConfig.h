@@ -81,7 +81,7 @@ constexpr ChannelConfig AUX4_CONFIG = { {3, -1}, MASTER_OUT_R }; // Bela IN3
 // ---------------------------------------------------------------------------
 
 constexpr int FX1_SEND_OUT  = 2; // Bela OUT2
-constexpr int FX1_RETURN_IN = 2; // Bela IN2
+constexpr int FX1_RETURN_IN = 9; // Bela IN9
 
 // ---------------------------------------------------------------------------
 // VU meter outputs (Bela Gem Multi — 10 outputs available)
