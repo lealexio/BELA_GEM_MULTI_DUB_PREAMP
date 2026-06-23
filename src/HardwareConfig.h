@@ -84,6 +84,17 @@ constexpr int FX1_SEND_OUT  = 2; // Bela OUT2
 constexpr int FX1_RETURN_IN = 2; // Bela IN2
 
 // ---------------------------------------------------------------------------
+// VU meter outputs (Bela Gem Multi — 10 outputs available)
+// ---------------------------------------------------------------------------
+
+// Band-split outputs: master mix post-MasterFx, filtered per crossover band.
+// Crossover frequencies match KillSwitch (kKillFc0/1/2 in SoftwareConfig.h).
+constexpr int VU_SUB_OUT  = 9; // Bela OUT9 — SUB band  (< 80 Hz)
+constexpr int VU_KICK_OUT = 8; // Bela OUT8 — KICK band (80–200 Hz)
+constexpr int VU_MID_OUT  = 7; // Bela OUT7 — MID band  (200–1200 Hz)
+constexpr int VU_TOP_OUT  = 6; // Bela OUT6 — TOP band  (> 1200 Hz)
+
+// ---------------------------------------------------------------------------
 // Switch mapping (MCP23017 PA pins)
 // ---------------------------------------------------------------------------
 

@@ -32,6 +32,15 @@ BiquadFilter    gFxHpf4k;   // TOPS mode : HPF at kFxMidHighFreq
 BiquadFilter    gFxMidHpf;  // MIDS mode : HPF at kFxMidLowFreq
 BiquadFilter    gFxMidLpf;  // MIDS mode : LPF at kFxMidHighFreq
 
+// VU meter band-split filters (post-MasterFx, one biquad per crossover edge).
+// Outputs are muted when the corresponding kill switch is active.
+BiquadFilter    gVuSubLpf;  // SUB  : LPF  @ kKillFc0 (80 Hz)
+BiquadFilter    gVuKickHpf; // KICK : HPF  @ kKillFc0 (80 Hz)
+BiquadFilter    gVuKickLpf; // KICK : LPF  @ kKillFc1 (200 Hz)
+BiquadFilter    gVuMidHpf;  // MID  : HPF  @ kKillFc1 (200 Hz)
+BiquadFilter    gVuMidLpf;  // MID  : LPF  @ kKillFc2 (1200 Hz)
+BiquadFilter    gVuTopHpf;  // TOP  : HPF  @ kKillFc2 (1200 Hz)
+
 Scope scope;
 
 static unsigned int gClipWarnCounter     = 0;
@@ -237,6 +246,14 @@ bool setup(BelaContext* context, void* userData) {
     gFxMidHpf.setHighPass(kFxMidLowFreq,  kFxFilterQ, sr); // MIDS: HPF @ 250 Hz
     gFxMidLpf.setLowPass (kFxMidHighFreq, kFxFilterQ, sr); // MIDS: LPF @ 4 kHz
 
+    // VU meter crossover filters (Butterworth, no resonance)
+    gVuSubLpf .setLowPass (kKillFc0, 0.707f, sr); // SUB  < 80 Hz
+    gVuKickHpf.setHighPass(kKillFc0, 0.707f, sr); // KICK > 80 Hz
+    gVuKickLpf.setLowPass (kKillFc1, 0.707f, sr); // KICK < 200 Hz
+    gVuMidHpf .setHighPass(kKillFc1, 0.707f, sr); // MID  > 200 Hz
+    gVuMidLpf .setLowPass (kKillFc2, 0.707f, sr); // MID  < 1200 Hz
+    gVuTopHpf .setHighPass(kKillFc2, 0.707f, sr); // TOP  > 1200 Hz
+
     // Startup mute ramp: suppress DAC initialisation transient
     gStartupRampTotal     = (int)(sr * kStartupRampMs / 1000.f);
     gStartupRampRemaining = gStartupRampTotal;
@@ -326,12 +343,11 @@ void render(BelaContext* context, void* userData) {
     );
 
     // --- Master kill switches — targets updated here, ramp advances per sample ---
-    gMasterFx.setKills(
-        gHardwareManager.getSwitchState(KILL_SUB),
-        gHardwareManager.getSwitchState(KILL_KICK),
-        gHardwareManager.getSwitchState(KILL_MID),
-        gHardwareManager.getSwitchState(KILL_TOP)
-    );
+    const bool killSub  = gHardwareManager.getSwitchState(KILL_SUB);
+    const bool killKick = gHardwareManager.getSwitchState(KILL_KICK);
+    const bool killMid  = gHardwareManager.getSwitchState(KILL_MID);
+    const bool killTop  = gHardwareManager.getSwitchState(KILL_TOP);
+    gMasterFx.setKills(killSub, killKick, killMid, killTop);
 
     // --- Band Trim (SUB / KICK / MID / TOP) ---
     gMasterFx.setBandTrim(BandTrim::SUB,  potToGainDb(gHardwareManager.getPotValue(BTRIM_SUB),  kBandTrimGainDb));
@@ -414,6 +430,16 @@ void render(BelaContext* context, void* userData) {
         audioWrite(context, n, FX1_SEND_OUT, fxSend * startupGain);
         audioWrite(context, n, MASTER_OUT_L, out    * startupGain);
         audioWrite(context, n, MASTER_OUT_R, out    * startupGain);
+
+        // VU meter outputs — muted when the corresponding kill is active
+        float vuSub  = killSub  ? 0.f : gVuSubLpf.process(out);
+        float vuKick = killKick ? 0.f : gVuKickLpf.process(gVuKickHpf.process(out));
+        float vuMid  = killMid  ? 0.f : gVuMidLpf .process(gVuMidHpf .process(out));
+        float vuTop  = killTop  ? 0.f : gVuTopHpf.process(out);
+        audioWrite(context, n, VU_SUB_OUT,  vuSub  * startupGain);
+        audioWrite(context, n, VU_KICK_OUT, vuKick * startupGain);
+        audioWrite(context, n, VU_MID_OUT,  vuMid  * startupGain);
+        audioWrite(context, n, VU_TOP_OUT,  vuTop  * startupGain);
     }
 
     // --- Clip warnings (rate-limited) ---
