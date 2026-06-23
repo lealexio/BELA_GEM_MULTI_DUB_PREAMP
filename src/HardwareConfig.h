@@ -110,10 +110,10 @@ struct SwitchRef {
     bool portB    = false;
 };
 
-constexpr SwitchRef KILL_SUB  = {0, true,  false}; // PA1 → kill SUB  (< 80 Hz)
-constexpr SwitchRef KILL_KICK = {1, true,  false}; // PA0 → kill KICK (80–200 Hz)
-constexpr SwitchRef KILL_MID  = {2, false,  false}; // PA2 → kill MID  (200–1200 Hz)
-constexpr SwitchRef KILL_TOP  = {3, true, false}; // PA3 → kill TOP  (> 1200 Hz)
+constexpr SwitchRef KILL_SUB  = {0, false, false}; // PA0 → kill SUB  (< 80 Hz)
+constexpr SwitchRef KILL_KICK = {1, false, false}; // PA1 → kill KICK (80–200 Hz)
+constexpr SwitchRef KILL_MID  = {2, true,  false}; // PA2 → kill MID  (200–1200 Hz)
+constexpr SwitchRef KILL_TOP  = {3, false, false}; // PA3 → kill TOP  (> 1200 Hz)
 
 // Port A — FX send filter mode (both off = fullband)
 constexpr SwitchRef FX_FILTER_MIDS = {5, false, false}; // PA5 → FX send: mids only (250 Hz – 4 kHz)
