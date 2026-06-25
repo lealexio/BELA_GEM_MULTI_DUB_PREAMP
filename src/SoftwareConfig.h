@@ -52,10 +52,16 @@ constexpr float kJitterThreshold = 0.002f;
 /// Applied in scanStep() so all accessors benefit automatically.
 constexpr float kSnapRadiusEdge   = 0.04f;
 
-/// Half-width of the snap dead-zone around 0.5 for getCenteredPotValue().
-/// A pot within this radius of centre is returned exactly as 0.5
-/// ("no effect" for EQ / bipolar controls).
-constexpr float kSnapRadiusCenter = 0.03f;
+/// Exponent for the power curve applied to centred pots in getCenteredPotValue().
+/// The curve maps raw [0, 1] → output [0, 1] symmetrically around 0.5:
+///   - Near 0.5 : low sensitivity (small pot movements → minimal DSP change).
+///   - Near 0 or 1 : high sensitivity (same movement → larger DSP change).
+/// The derivative at 0.5 is zero for any exponent > 1, so ADC jitter at
+/// centre produces no audible effect — no hard snap required.
+///   1.0 → linear (no curve)
+///   2.0 → quadratic (recommended: gentle centre, fast extremes)
+///   3.0 → cubic (more pronounced)
+constexpr float kCenteredPotExponent = 2.0f;
 
 // ---------------------------------------------------------------------------
 // Channel EQ (ChannelStrip — 3-band parametric)
@@ -68,6 +74,11 @@ constexpr float kEqMidQ       = 1.4f;    // Mid band Q factor
 constexpr float kEqGainRangeDb = 6.f;    // Pot 0.0 → -kEqGainRangeDb dB
                                           // Pot 0.5 →  0 dB
                                           // Pot 1.0 → +kEqGainRangeDb dB
+
+/// Smoothing time for EQ gain changes (ms) — applied to all EQ classes.
+/// A one-pole filter per sample prevents abrupt biquad coefficient jumps
+/// from causing clicks when pot values change between render blocks.
+constexpr float kEqGainSmoothMs = 5.f;
 
 // ---------------------------------------------------------------------------
 // Noise Gate (per channel and FX return)
@@ -158,7 +169,7 @@ constexpr int kKillFilterStages = 2;
 // ---------------------------------------------------------------------------
 
 /// Gain range per band: pot 0.5 → 0 dB, pot 0.0 → -kBandTrimGainDb, pot 1.0 → +kBandTrimGainDb.
-constexpr float kBandTrimGainDb = 3.f;
+constexpr float kBandTrimGainDb = 6.f;
 
 /// Centre frequency for the KICK peaking filter: geometric mean of SUB/KICK boundary (80 Hz)
 /// and KICK/MID boundary (200 Hz).

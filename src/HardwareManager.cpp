@@ -62,7 +62,9 @@ float HardwareManager::getPotValue(int muxId, int potId) const {
 
 float HardwareManager::getCenteredPotValue(int muxId, int potId) const {
     float v = getPotValue(muxId, potId);
-    return (fabsf(v - 0.5f) <= kSnapRadiusCenter) ? 0.5f : v;
+    float t = (v - 0.5f) * 2.f;                                     // centre-relative [-1, +1]
+    float curved = (t < 0.f ? -1.f : 1.f) * powf(fabsf(t), kCenteredPotExponent);
+    return curved * 0.5f + 0.5f;
 }
 
 void HardwareManager::setMuxAddress(BelaContext* context, int frame, int channel) {

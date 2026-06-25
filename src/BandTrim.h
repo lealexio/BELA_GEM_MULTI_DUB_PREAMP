@@ -44,8 +44,12 @@ public:
     float process(float input);
 
 private:
-    float sampleRate_ = 44100.f;
+    float sampleRate_      = 44100.f;
+    float gainSmoothCoeff_ = 0.f;
 
     BiquadFilter filters_[kNumBands];
-    float        lastGainDb_[kNumBands] = {};
+
+    float targetGainDb_[kNumBands] = {}; // targets from setBand()
+    float smoothGainDb_[kNumBands] = {}; // per-sample smoothed gains
+    float lastGainDb_  [kNumBands] = {}; // gains at last biquad recompute
 };

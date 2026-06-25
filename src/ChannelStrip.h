@@ -60,10 +60,11 @@ public:
     bool gateIsOpen() const { return gate_.isOpen(); }
 
 private:
-    float sampleRate_  = 44100.f;
-    float inputGain_   = 1.f;
-    float fxSendLevel_ = 0.f;
-    float lastOut_     = 0.f; // stored by process(), read by fxOut()
+    float sampleRate_      = 44100.f;
+    float inputGain_       = 1.f;
+    float fxSendLevel_     = 0.f;
+    float lastOut_         = 0.f;   // stored by process(), read by fxOut()
+    float gainSmoothCoeff_ = 0.f;   // one-pole coefficient for EQ gain smoothing
 
     NoiseGate gate_;
 
@@ -71,7 +72,13 @@ private:
     BiquadFilter mid_;  // peaking EQ  (kEqMidFreq  Hz, kEqMidQ)
     BiquadFilter high_; // high shelf  (kEqHighFreq Hz)
 
-    float lastLow_  = 0.f; // cached EQ gains — used to skip redundant coefficient recalc
-    float lastMid_  = 0.f;
-    float lastHigh_ = 0.f;
+    float targetLow_  = 0.f; // target gains from setEqGains()
+    float targetMid_  = 0.f;
+    float targetHigh_ = 0.f;
+    float smoothLow_  = 0.f; // per-sample smoothed gains (advanced in process())
+    float smoothMid_  = 0.f;
+    float smoothHigh_ = 0.f;
+    float lastLow_    = 0.f; // gains at which biquad was last computed
+    float lastMid_    = 0.f;
+    float lastHigh_   = 0.f;
 };

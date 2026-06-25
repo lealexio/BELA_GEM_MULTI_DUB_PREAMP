@@ -48,12 +48,15 @@ public:
     float process(float input);
 
 private:
-    float sampleRate_ = 44100.f;
+    float sampleRate_      = 44100.f;
+    float gainSmoothCoeff_ = 0.f;
 
     BiquadFilter filters_[kNumBands];
 
-    float lastFreqPot_[kNumBands] = {-1.f, -1.f, -1.f, -1.f}; // -1 forces first-run update
-    float lastGainDb_[kNumBands]  = {0.f,  0.f,  0.f,  0.f};
+    float lastFreqPot_  [kNumBands] = {-1.f, -1.f, -1.f, -1.f}; // -1 forces first-run update
+    float targetGainDb_ [kNumBands] = {};  // targets from setBand()
+    float smoothGainDb_ [kNumBands] = {};  // per-sample smoothed gains
+    float lastGainDb_   [kNumBands] = {};  // gains at last biquad recompute
 
     /**
      * Logarithmic interpolation: maps t ∈ [0,1] to [fMin, fMax] on a log scale.

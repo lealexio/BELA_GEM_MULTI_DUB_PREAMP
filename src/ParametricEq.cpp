@@ -18,33 +18,41 @@ float ParametricEq::logInterp(float fMin, float fMax, float t) {
 }
 
 void ParametricEq::setup(float sampleRate) {
-    sampleRate_ = sampleRate;
-    // Initialise all bands at centre frequency, 0 dB gain (transparent)
+    sampleRate_      = sampleRate;
+    gainSmoothCoeff_ = 1.f - expf(-1.f / (kEqGainSmoothMs * 0.001f * sampleRate_));
     for(int i = 0; i < kNumBands; ++i) {
         float fc = logInterp(kFMin[i], kFMax[i], 0.5f);
         filters_[i].setPeaking(fc, 0.f, kMasterEqQ, sampleRate_);
-        lastFreqPot_[i] = 0.5f;
-        lastGainDb_[i]  = 0.f;
+        lastFreqPot_[i]  = 0.5f;
+        targetGainDb_[i] = smoothGainDb_[i] = lastGainDb_[i] = 0.f;
     }
 }
 
 void ParametricEq::setBand(Band band, float freqPot, float gainDb) {
-    bool freqChanged = fabsf(freqPot - lastFreqPot_[band]) > kFreqPotEpsilon;
-    bool gainChanged = fabsf(gainDb  - lastGainDb_[band])  > kGainDbEpsilon;
+    targetGainDb_[band] = gainDb; // smoother advances in process()
 
-    if(freqChanged || gainChanged) {
+    // Frequency changes are handled immediately at block rate; use current
+    // smoothed gain so the recompute doesn't introduce a gain discontinuity.
+    if(fabsf(freqPot - lastFreqPot_[band]) > kFreqPotEpsilon) {
         float fc = logInterp(kFMin[band], kFMax[band], freqPot);
-        filters_[band].setPeaking(fc, gainDb, kMasterEqQ, sampleRate_);
+        filters_[band].setPeaking(fc, smoothGainDb_[band], kMasterEqQ, sampleRate_);
         lastFreqPot_[band] = freqPot;
-        lastGainDb_[band]  = gainDb;
+        lastGainDb_[band]  = smoothGainDb_[band]; // sync last-computed gain
     }
 }
 
 float ParametricEq::process(float input) {
-    // Bypass entirely when all bands are at 0 dB — no phase coloration
     bool allFlat = true;
     for(int i = 0; i < kNumBands; ++i) {
-        if(fabsf(lastGainDb_[i]) > kGainDbEpsilon) { allFlat = false; break; }
+        smoothGainDb_[i] += gainSmoothCoeff_ * (targetGainDb_[i] - smoothGainDb_[i]);
+
+        if(fabsf(smoothGainDb_[i] - lastGainDb_[i]) > kGainDbEpsilon) {
+            float fc = logInterp(kFMin[i], kFMax[i], lastFreqPot_[i]);
+            filters_[i].setPeaking(fc, smoothGainDb_[i], kMasterEqQ, sampleRate_);
+            lastGainDb_[i] = smoothGainDb_[i];
+        }
+
+        if(fabsf(smoothGainDb_[i]) > kGainDbEpsilon) allFlat = false;
     }
     if(allFlat) return input;
 

@@ -72,7 +72,10 @@ public:
     }
 
     /**
-     * Returns the pot value snapped to exactly 0.5 when within kSnapRadiusCenter.
+     * Returns a power-curve-mapped pot value centred at 0.5.
+     * The exponent kCenteredPotExponent (> 1) gives low sensitivity near 0.5
+     * and high sensitivity near 0.0 / 1.0. The derivative at centre is zero,
+     * so ADC jitter produces no audible effect without any hard snap.
      * Use for EQ / bipolar controls where the centre position means "no effect".
      */
     float getCenteredPotValue(int muxId, int potId) const;

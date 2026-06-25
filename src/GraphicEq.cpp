@@ -13,24 +13,30 @@ float GraphicEq::bandFreq(int band) {
 }
 
 void GraphicEq::setup(float sampleRate) {
-    sampleRate_ = sampleRate;
+    sampleRate_      = sampleRate;
+    gainSmoothCoeff_ = 1.f - expf(-1.f / (kEqGainSmoothMs * 0.001f * sampleRate_));
     for(int i = 0; i < kNumBands; ++i) {
-        lastGainDb_[i] = 0.f;
+        targetGainDb_[i] = smoothGainDb_[i] = lastGainDb_[i] = 0.f;
         filters_[i].setPeaking(kBandFreqs[i], 0.f, kGEqQ, sampleRate_);
     }
 }
 
 void GraphicEq::setBandGainDb(int band, float gainDb) {
     if(band < 0 || band >= kNumBands) return;
-    if(fabsf(gainDb - lastGainDb_[band]) < kGEqUpdateEpsilonDb) return;
-    lastGainDb_[band] = gainDb;
-    filters_[band].setPeaking(kBandFreqs[band], gainDb, kGEqQ, sampleRate_);
+    targetGainDb_[band] = gainDb; // smoother advances in process()
 }
 
 float GraphicEq::process(float input) {
     float out = input;
     for(int i = 0; i < kNumBands; ++i) {
-        if(fabsf(lastGainDb_[i]) > kGEqUpdateEpsilonDb)
+        smoothGainDb_[i] += gainSmoothCoeff_ * (targetGainDb_[i] - smoothGainDb_[i]);
+
+        if(fabsf(smoothGainDb_[i] - lastGainDb_[i]) > kGEqUpdateEpsilonDb) {
+            filters_[i].setPeaking(kBandFreqs[i], smoothGainDb_[i], kGEqQ, sampleRate_);
+            lastGainDb_[i] = smoothGainDb_[i];
+        }
+
+        if(fabsf(smoothGainDb_[i]) > kGEqUpdateEpsilonDb)
             out = filters_[i].process(out);
     }
     return out;
