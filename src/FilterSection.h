@@ -53,8 +53,18 @@ private:
     BiquadFilter hpf_;
     BiquadFilter lpf_;
 
+    // Coefficient tracking: true once the biquad has been computed at least once.
     bool  hpfActive_ = false;
     bool  lpfActive_ = false;
+
+    // Per-sample one-pole mix ramp: 0 = fully dry, 1 = fully wet.
+    // Both biquads run at all times so their internal state stays warm;
+    // the ramp crossfades dry↔wet to avoid clicks on activation/deactivation.
+    float bypassRampCoeff_ = 0.f;
+    float hpfMix_    = 0.f;
+    float lpfMix_    = 0.f;
+    float hpfTarget_ = 0.f;
+    float lpfTarget_ = 0.f;
 
     float lastHpfFreq_ = -1.f; // cached pot values to skip redundant coefficient recalc
     float lastHpfRes_  = -1.f;

@@ -129,6 +129,10 @@ constexpr float kFilterQMax = 4.5f;  // maximum Q — pronounced resonance peak
 /// Pot value below which a filter is considered OFF and removed from the signal path.
 constexpr float kFilterOffThreshold = 0.01f;
 
+/// Crossfade time when toggling HPF or LPF on/off (ms).
+/// A one-pole ramp blends dry↔wet over this window, eliminating activation clicks.
+constexpr float kFilterBypassRampMs = 5.f;
+
 // ---------------------------------------------------------------------------
 // Kill switches — crossover frequencies (KillSwitch)
 // ---------------------------------------------------------------------------

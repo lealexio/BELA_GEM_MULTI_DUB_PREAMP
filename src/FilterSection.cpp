@@ -13,15 +13,18 @@ float FilterSection::linInterp(float qMin, float qMax, float t) {
 }
 
 void FilterSection::setup(float sampleRate) {
-    sampleRate_ = sampleRate;
-    hpfActive_  = false;
-    lpfActive_  = false;
+    sampleRate_      = sampleRate;
+    hpfActive_       = false;
+    lpfActive_       = false;
+    hpfMix_ = hpfTarget_ = 0.f;
+    lpfMix_ = lpfTarget_ = 0.f;
     lastHpfFreq_ = lastHpfRes_ = lastLpfFreq_ = lastLpfRes_ = -1.f;
+    bypassRampCoeff_ = 1.f - expf(-1.f / (kFilterBypassRampMs * 0.001f * sampleRate));
 }
 
 void FilterSection::setHpf(float freqPot, float resPot) {
     if(freqPot < kFilterOffThreshold) {
-        hpfActive_ = false;
+        hpfTarget_ = 0.f;
         return;
     }
 
@@ -36,11 +39,12 @@ void FilterSection::setHpf(float freqPot, float resPot) {
         lastHpfRes_  = resPot;
         hpfActive_   = true;
     }
+    hpfTarget_ = 1.f;
 }
 
 void FilterSection::setLpf(float freqPot, float resPot) {
     if(freqPot < kFilterOffThreshold) {
-        lpfActive_ = false;
+        lpfTarget_ = 0.f;
         return;
     }
 
@@ -56,11 +60,19 @@ void FilterSection::setLpf(float freqPot, float resPot) {
         lastLpfRes_  = resPot;
         lpfActive_   = true;
     }
+    lpfTarget_ = 1.f;
 }
 
 float FilterSection::process(float input) {
-    float out = input;
-    if(hpfActive_) out = hpf_.process(out);
-    if(lpfActive_) out = lpf_.process(out);
-    return out;
+    // Advance mix smoothers one step toward their targets.
+    hpfMix_ += bypassRampCoeff_ * (hpfTarget_ - hpfMix_);
+    lpfMix_ += bypassRampCoeff_ * (lpfTarget_ - lpfMix_);
+
+    // Both biquads run unconditionally so their internal state (z1/z2) stays
+    // warm at all times — no stale-state click on re-activation.
+    float afterHpf = hpf_.process(input);
+    float mid      = input + hpfMix_ * (afterHpf - input);   // dry↔wet HPF crossfade
+
+    float afterLpf = lpf_.process(mid);
+    return mid + lpfMix_ * (afterLpf - mid);                  // dry↔wet LPF crossfade
 }
