@@ -25,6 +25,10 @@ void ChannelStrip::setFxSendLevel(float level) {
     fxSendLevel_ = level;
 }
 
+void ChannelStrip::setFxSend2Level(float level) {
+    fxSendLevel2_ = level;
+}
+
 void ChannelStrip::setEqGains(float gainLowDb, float gainMidDb, float gainHighDb) {
     // Store targets only — smoothers advance per sample in process()
     targetLow_  = gainLowDb;

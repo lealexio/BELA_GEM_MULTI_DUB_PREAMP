@@ -7,6 +7,7 @@ void MasterFx::setup(float sampleRate) {
     bandTrim_.setup(sampleRate);
     kills_.setup(sampleRate);
     fxReturnGate_.setup(sampleRate);
+    fxReturnGate2_.setup(sampleRate);
 }
 
 void MasterFx::setParamEqBand(ParametricEq::Band band, float freqPot, float gainDb) {
@@ -39,6 +40,10 @@ void MasterFx::setMasterGain(float gain) {
 
 float MasterFx::processFxReturn(float sample) {
     return fxReturnGate_.process(sample);
+}
+
+float MasterFx::processFxReturn2(float sample) {
+    return fxReturnGate2_.process(sample);
 }
 
 float MasterFx::process(float input) {

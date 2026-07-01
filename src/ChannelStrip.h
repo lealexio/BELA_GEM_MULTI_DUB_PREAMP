@@ -8,8 +8,9 @@
  * Signal flow:
  *   IN ──► × inputGain_ ──► NoiseGate ──► EQ (low shelf / mid peak / high shelf)
  *                                              │
- *                                              ├──► dry out   (returned by process())
- *                                              └──► × fxSendLevel_ ──► FX send out (fxOut())
+ *                                              ├──► dry out            (returned by process())
+ *                                              ├──► × fxSendLevel_  ──► FX send 1 (fxOut())
+ *                                              └──► × fxSendLevel2_ ──► FX send 2 (fxOut2())
  *
  * EQ frequencies and ranges are configured in SoftwareConfig.h (kEqLowFreq, etc.).
  * The EQ is fully bypassed (no filter in signal path) when all gains are exactly 0 dB.
@@ -42,19 +43,31 @@ public:
     void setEqGains(float gainLowDb, float gainMidDb, float gainHighDb);
 
     /**
-     * Sets the post-fader FX send level.
+     * Sets the post-fader FX send 1 level.
      * @param level  0.0 = no send, 1.0 = full send (same level as dry out)
      */
     void setFxSendLevel(float level);
+
+    /**
+     * Sets the post-fader FX send 2 level.
+     * @param level  0.0 = no send, 1.0 = full send (same level as dry out)
+     */
+    void setFxSend2Level(float level);
 
     /** Process one sample through the full chain. Returns the dry output. */
     float process(float input);
 
     /**
-     * Returns the FX send sample corresponding to the last call to process().
+     * Returns the FX send 1 sample corresponding to the last call to process().
      * Must be called in the same sample iteration as process().
      */
-    float fxOut() const { return lastOut_ * fxSendLevel_; }
+    float fxOut()  const { return lastOut_ * fxSendLevel_;  }
+
+    /**
+     * Returns the FX send 2 sample corresponding to the last call to process().
+     * Must be called in the same sample iteration as process().
+     */
+    float fxOut2() const { return lastOut_ * fxSendLevel2_; }
 
     /** Returns true while the internal noise gate is open (signal detected). */
     bool gateIsOpen() const { return gate_.isOpen(); }
@@ -63,6 +76,7 @@ private:
     float sampleRate_      = 44100.f;
     float inputGain_       = 1.f;
     float fxSendLevel_     = 0.f;
+    float fxSendLevel2_    = 0.f;
     float lastOut_         = 0.f;   // stored by process(), read by fxOut()
     float gainSmoothCoeff_ = 0.f;   // one-pole coefficient for EQ gain smoothing
 

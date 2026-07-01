@@ -27,10 +27,15 @@ MasterFx        gMasterFx;
 DubSiren        gDubSiren;
 AuxiliaryTask   gI2cTask;
 
-// FX send band filters (used when PA5 or PA6 is active)
-BiquadFilter    gFxHpf4k;   // TOPS mode : HPF at kFxMidHighFreq
-BiquadFilter    gFxMidHpf;  // MIDS mode : HPF at kFxMidLowFreq
-BiquadFilter    gFxMidLpf;  // MIDS mode : LPF at kFxMidHighFreq
+// FX send 1 band filters (PA5 = MIDS, PA6 = TOPS)
+BiquadFilter    gFxHpf4k;    // TOPS mode : HPF at kFxMidHighFreq
+BiquadFilter    gFxMidHpf;   // MIDS mode : HPF at kFxMidLowFreq
+BiquadFilter    gFxMidLpf;   // MIDS mode : LPF at kFxMidHighFreq
+
+// FX send 2 band filters (PA4 = MIDS, PA7 = TOPS)
+BiquadFilter    gFx2Hpf4k;   // TOPS mode : HPF at kFxMidHighFreq
+BiquadFilter    gFx2MidHpf;  // MIDS mode : HPF at kFxMidLowFreq
+BiquadFilter    gFx2MidLpf;  // MIDS mode : LPF at kFxMidHighFreq
 
 // VU meter band-split filters (post-MasterFx, one biquad per crossover edge).
 // Outputs are muted when the corresponding kill switch is active.
@@ -158,6 +163,8 @@ static const NamedSwitch kNamedSwitches[] = {
     { "KILL_TOP",        KILL_TOP,        "KILL",    "open"     },
     { "FX_FILTER_MIDS",  FX_FILTER_MIDS,  "mids",    "fullband" },
     { "FX_FILTER_TOPS",  FX_FILTER_TOPS,  "tops",    "fullband" },
+    { "FX2_FILTER_MIDS", FX2_FILTER_MIDS, "mids",    "fullband" },
+    { "FX2_FILTER_TOPS", FX2_FILTER_TOPS, "tops",    "fullband" },
     { "SIREN_TRIGGER",   SIREN_TRIGGER,   "ON",      "off"      },
 };
 static constexpr int kNamedSwitchCount =
@@ -242,9 +249,13 @@ bool setup(BelaContext* context, void* userData) {
     gDubSiren.setup(context->audioSampleRate);
 
     float sr = context->audioSampleRate;
-    gFxHpf4k .setHighPass(kFxMidHighFreq, kFxFilterQ, sr); // TOPS: HPF @ 4 kHz
-    gFxMidHpf.setHighPass(kFxMidLowFreq,  kFxFilterQ, sr); // MIDS: HPF @ 250 Hz
-    gFxMidLpf.setLowPass (kFxMidHighFreq, kFxFilterQ, sr); // MIDS: LPF @ 4 kHz
+    gFxHpf4k .setHighPass(kFxMidHighFreq, kFxFilterQ, sr); // FX1 TOPS: HPF @ 4 kHz
+    gFxMidHpf.setHighPass(kFxMidLowFreq,  kFxFilterQ, sr); // FX1 MIDS: HPF @ 250 Hz
+    gFxMidLpf.setLowPass (kFxMidHighFreq, kFxFilterQ, sr); // FX1 MIDS: LPF @ 4 kHz
+
+    gFx2Hpf4k .setHighPass(kFxMidHighFreq, kFxFilterQ, sr); // FX2 TOPS: HPF @ 4 kHz
+    gFx2MidHpf.setHighPass(kFxMidLowFreq,  kFxFilterQ, sr); // FX2 MIDS: HPF @ 250 Hz
+    gFx2MidLpf.setLowPass (kFxMidHighFreq, kFxFilterQ, sr); // FX2 MIDS: LPF @ 4 kHz
 
     // VU meter crossover filters (Butterworth, no resonance)
     gVuSubLpf .setLowPass (kKillFc0, 0.707f, sr); // SUB  < 80 Hz
@@ -271,22 +282,24 @@ void render(BelaContext* context, void* userData) {
     gHardwareManager.scanStep(context);
 
     // --- Channel Strip 1 controls ---
-    gChannelStrip.setInputGain(gHardwareManager.getPotValue(CH1_INPUT_GAIN));
+    gChannelStrip.setInputGain(gHardwareManager.getPotValue(AUX1_INPUT_GAIN));
     gChannelStrip.setEqGains(
-        potToGainDb(gHardwareManager.getPotValue(CH1_EQ_LOW)),
-        potToGainDb(gHardwareManager.getPotValue(CH1_EQ_MID)),
-        potToGainDb(gHardwareManager.getPotValue(CH1_EQ_HIGH))
+        potToGainDb(gHardwareManager.getPotValue(AUX1_EQ_LOW)),
+        potToGainDb(gHardwareManager.getPotValue(AUX1_EQ_MID)),
+        potToGainDb(gHardwareManager.getPotValue(AUX1_EQ_HIGH))
     );
-    gChannelStrip.setFxSendLevel(gHardwareManager.getPotValue(CH1_FX_SEND));
+    gChannelStrip.setFxSendLevel(gHardwareManager.getPotValue(AUX1_FX_SEND));
+    gChannelStrip.setFxSend2Level(gHardwareManager.getPotValue(AUX1_FX2_SEND));
 
     // --- Channel Strip 2 controls ---
-    gChannelStrip2.setInputGain(gHardwareManager.getPotValue(CH2_INPUT_GAIN));
+    gChannelStrip2.setInputGain(gHardwareManager.getPotValue(AUX2_INPUT_GAIN));
     gChannelStrip2.setEqGains(
-        potToGainDb(gHardwareManager.getPotValue(CH2_EQ_LOW)),
-        potToGainDb(gHardwareManager.getPotValue(CH2_EQ_MID)),
-        potToGainDb(gHardwareManager.getPotValue(CH2_EQ_HIGH))
+        potToGainDb(gHardwareManager.getPotValue(AUX2_EQ_LOW)),
+        potToGainDb(gHardwareManager.getPotValue(AUX2_EQ_MID)),
+        potToGainDb(gHardwareManager.getPotValue(AUX2_EQ_HIGH))
     );
-    gChannelStrip2.setFxSendLevel(gHardwareManager.getPotValue(CH2_FX_SEND));
+    gChannelStrip2.setFxSendLevel(gHardwareManager.getPotValue(AUX2_FX_SEND));
+    gChannelStrip2.setFxSend2Level(gHardwareManager.getPotValue(AUX2_FX2_SEND));
 
     // --- AUX 3 controls ---
     gChannelStrip3.setInputGain(gHardwareManager.getPotValue(AUX3_INPUT_GAIN));
@@ -296,6 +309,7 @@ void render(BelaContext* context, void* userData) {
         potToGainDb(gHardwareManager.getPotValue(AUX3_EQ_HIGH))
     );
     gChannelStrip3.setFxSendLevel(gHardwareManager.getPotValue(AUX3_FX_SEND));
+    gChannelStrip3.setFxSend2Level(gHardwareManager.getPotValue(AUX3_FX2_SEND));
 
     // --- AUX 4 controls ---
     gChannelStrip4.setInputGain(gHardwareManager.getPotValue(AUX4_INPUT_GAIN));
@@ -305,6 +319,7 @@ void render(BelaContext* context, void* userData) {
         potToGainDb(gHardwareManager.getPotValue(AUX4_EQ_HIGH))
     );
     gChannelStrip4.setFxSendLevel(gHardwareManager.getPotValue(AUX4_FX_SEND));
+    gChannelStrip4.setFxSend2Level(gHardwareManager.getPotValue(AUX4_FX2_SEND));
 
     // --- Master parametric EQ ---
     gMasterFx.setParamEqBand(ParametricEq::SUB,
@@ -358,11 +373,10 @@ void render(BelaContext* context, void* userData) {
     // --- Master output gain ---
     gMasterFx.setMasterGain(gHardwareManager.getPotValue(MASTER_GAIN));
 
-    // --- FX send filter mode (read once per block) ---
+    // --- FX send 1 filter mode (PA5 = MIDS, PA6 = TOPS) ---
     const bool fxModeMids = gHardwareManager.getSwitchState(FX_FILTER_MIDS);
     const bool fxModeTops = gHardwareManager.getSwitchState(FX_FILTER_TOPS);
 
-    // Reset filter memory on mode change to avoid pops
     static bool prevFxMids = false;
     static bool prevFxTops = false;
     if(fxModeMids != prevFxMids || fxModeTops != prevFxTops) {
@@ -374,7 +388,25 @@ void render(BelaContext* context, void* userData) {
         const char* mode = fxModeTops ? "TOPS (>4kHz)"
                          : fxModeMids ? "MIDS (250Hz-4kHz)"
                                       : "FULLBAND";
-        rt_printf("[FX]  Send mode  →  %s\n", mode);
+        rt_printf("[FX1] Send mode  →  %s\n", mode);
+    }
+
+    // --- FX send 2 filter mode (PA4 = MIDS, PA7 = TOPS) ---
+    const bool fx2ModeMids = gHardwareManager.getSwitchState(FX2_FILTER_MIDS);
+    const bool fx2ModeTops = gHardwareManager.getSwitchState(FX2_FILTER_TOPS);
+
+    static bool prevFx2Mids = false;
+    static bool prevFx2Tops = false;
+    if(fx2ModeMids != prevFx2Mids || fx2ModeTops != prevFx2Tops) {
+        gFx2Hpf4k .reset();
+        gFx2MidHpf.reset();
+        gFx2MidLpf.reset();
+        prevFx2Mids = fx2ModeMids;
+        prevFx2Tops = fx2ModeTops;
+        const char* mode = fx2ModeTops ? "TOPS (>4kHz)"
+                         : fx2ModeMids ? "MIDS (250Hz-4kHz)"
+                                       : "FULLBAND";
+        rt_printf("[FX2] Send mode  →  %s\n", mode);
     }
 
     // --- Dub siren controls ---
@@ -391,8 +423,8 @@ void render(BelaContext* context, void* userData) {
     bool clipCh1 = false;
 
     for(unsigned int n = 0; n < context->audioFrames; n++) {
-        float in0 = readChannelInput(context, n, CH1_CONFIG);
-        float in1 = readChannelInput(context, n, CH2_CONFIG);
+        float in0 = readChannelInput(context, n, AUX1_CONFIG);
+        float in1 = readChannelInput(context, n, AUX2_CONFIG);
 
         if(fabsf(in0) >= kClipThreshold) clipCh0 = true;
         if(fabsf(in1) >= kClipThreshold) clipCh1 = true;
@@ -405,7 +437,7 @@ void render(BelaContext* context, void* userData) {
         // Siren: process before FX send to include its FX output
         float sirenOut = gDubSiren.process();
 
-        // FX send: all channel strips + siren → filtered by mode → OUT2
+        // FX send 1: all channel strips + siren → filtered by mode → OUT2
         float fxSend = gChannelStrip.fxOut()  + gChannelStrip2.fxOut()
                      + gChannelStrip3.fxOut() + gChannelStrip4.fxOut()
                      + gDubSiren.fxOut();
@@ -413,11 +445,21 @@ void render(BelaContext* context, void* userData) {
             fxSend = gFxHpf4k.process(fxSend);                         // > 4 kHz only
         else if(fxModeMids)
             fxSend = gFxMidLpf.process(gFxMidHpf.process(fxSend));    // 250 Hz – 4 kHz
-        // FX return: noise-gated to suppress idle hum from the effect unit
-        float fxReturn = gMasterFx.processFxReturn(audioRead(context, n, FX1_RETURN_IN));
 
-        // Master bus: all channels + siren + FX return → EQ → filters → kills
-        float out = gMasterFx.process(dry1 + dry2 + dry3 + dry4 + sirenOut + fxReturn);
+        // FX send 2: all channel strips → filtered by mode → OUT3
+        float fxSend2 = gChannelStrip.fxOut2()  + gChannelStrip2.fxOut2()
+                      + gChannelStrip3.fxOut2() + gChannelStrip4.fxOut2();
+        if(fx2ModeTops)
+            fxSend2 = gFx2Hpf4k.process(fxSend2);
+        else if(fx2ModeMids)
+            fxSend2 = gFx2MidLpf.process(gFx2MidHpf.process(fxSend2));
+
+        // FX returns: noise-gated to suppress idle hum from the effect unit
+        float fxReturn  = gMasterFx.processFxReturn (audioRead(context, n, FX1_RETURN_IN));
+        float fxReturn2 = gMasterFx.processFxReturn2(audioRead(context, n, FX2_RETURN_IN));
+
+        // Master bus: all channels + siren + FX returns → EQ → filters → kills
+        float out = gMasterFx.process(dry1 + dry2 + dry3 + dry4 + sirenOut + fxReturn + fxReturn2);
 
         // Startup mute ramp: linear fade 0→1 over kStartupRampMs to suppress DAC pop
         float startupGain = 1.f;
@@ -427,7 +469,8 @@ void render(BelaContext* context, void* userData) {
         }
 
         scope.log(dry1 + dry2 + fxReturn, out);
-        audioWrite(context, n, FX1_SEND_OUT, fxSend * startupGain);
+        audioWrite(context, n, FX1_SEND_OUT, fxSend  * startupGain);
+        audioWrite(context, n, FX2_SEND_OUT, fxSend2 * startupGain);
         audioWrite(context, n, MASTER_OUT_L, out    * startupGain);
         audioWrite(context, n, MASTER_OUT_R, out    * startupGain);
 

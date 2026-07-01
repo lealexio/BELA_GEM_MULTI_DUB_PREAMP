@@ -104,10 +104,16 @@ public:
     void setMasterGain(float gain);
 
     /**
-     * Applies the FX-return noise gate to one sample.
+     * Applies the FX return 1 noise gate to one sample.
      * Suppresses idle hum from the effect unit when no signal is fed.
      */
     float processFxReturn(float sample);
+
+    /**
+     * Applies the FX return 2 noise gate to one sample.
+     * Suppresses idle hum from the effect unit when no signal is fed.
+     */
+    float processFxReturn2(float sample);
 
     /**
      * Processes one master-bus sample: ParametricEq → FilterSection → KillSwitch.
@@ -122,6 +128,7 @@ private:
     BandTrim      bandTrim_;
     KillSwitch    kills_;
     NoiseGate     fxReturnGate_;
+    NoiseGate     fxReturnGate2_;
 
     float masterGain_ = 1.f;
 };

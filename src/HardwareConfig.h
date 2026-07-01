@@ -71,8 +71,8 @@ struct ChannelConfig {
     int audioOut;
 };
 
-constexpr ChannelConfig CH1_CONFIG  = { {0, -1}, MASTER_OUT_L };
-constexpr ChannelConfig CH2_CONFIG  = { {1, -1}, MASTER_OUT_R };
+constexpr ChannelConfig AUX1_CONFIG = { {0, -1}, MASTER_OUT_L };
+constexpr ChannelConfig AUX2_CONFIG = { {1, -1}, MASTER_OUT_R };
 constexpr ChannelConfig AUX3_CONFIG = { {2, -1}, MASTER_OUT_L }; // Bela IN2
 constexpr ChannelConfig AUX4_CONFIG = { {3, -1}, MASTER_OUT_R }; // Bela IN3
 
@@ -81,7 +81,10 @@ constexpr ChannelConfig AUX4_CONFIG = { {3, -1}, MASTER_OUT_R }; // Bela IN3
 // ---------------------------------------------------------------------------
 
 constexpr int FX1_SEND_OUT  = 2; // Bela OUT2
-constexpr int FX1_RETURN_IN = 9; // Bela IN9
+constexpr int FX1_RETURN_IN = 4; // Bela IN4
+
+constexpr int FX2_SEND_OUT  = 3; // Bela OUT3
+constexpr int FX2_RETURN_IN = 5; // Bela IN5
 
 // ---------------------------------------------------------------------------
 // VU meter outputs (Bela Gem Multi — 10 outputs available)
@@ -115,9 +118,13 @@ constexpr SwitchRef KILL_KICK = {1, false, false}; // PA1 → kill KICK (80–20
 constexpr SwitchRef KILL_MID  = {2, true,  false}; // PA2 → kill MID  (200–1200 Hz)
 constexpr SwitchRef KILL_TOP  = {3, false, false}; // PA3 → kill TOP  (> 1200 Hz)
 
-// Port A — FX send filter mode (both off = fullband)
-constexpr SwitchRef FX_FILTER_MIDS = {5, false, false}; // PA5 → FX send: mids only (250 Hz – 4 kHz)
-constexpr SwitchRef FX_FILTER_TOPS = {6, false, false}; // PA6 → FX send: tops only (> 4 kHz)
+// Port A — FX send 1 filter mode (both off = fullband)
+constexpr SwitchRef FX_FILTER_MIDS  = {5, false, false}; // PA5 → FX send 1: mids only (250 Hz – 4 kHz)
+constexpr SwitchRef FX_FILTER_TOPS  = {6, false, false}; // PA6 → FX send 1: tops only (> 4 kHz)
+
+// Port A — FX send 2 filter mode (both off = fullband)
+constexpr SwitchRef FX2_FILTER_TOPS = {4, false, false}; // PA4 → FX send 2: tops only (> 4 kHz)
+constexpr SwitchRef FX2_FILTER_MIDS = {7, false, false}; // PA7 → FX send 2: mids only (250 Hz – 4 kHz)
 
 // Port B switches
 constexpr SwitchRef SIREN_TRIGGER = {0, false, true}; // PB0 → dub siren gate
@@ -164,19 +171,21 @@ constexpr PotRef SIREN_MOD     = {0,  9, true, "SIREN_MOD"};     // LFO depth + 
 constexpr PotRef SIREN_GAIN    = {3,  0, true, "SIREN_GAIN"};    // siren output gain
 constexpr PotRef SIREN_FX_SEND = {3, 11, true, "SIREN_FX_SEND"}; // siren FX send level
 
-// Channel Strip 1 (IN0 → master)
-constexpr PotRef CH1_INPUT_GAIN = {3,  2, true,  "CH1_INPUT_GAIN"};
-constexpr PotRef CH1_EQ_MID     = {0,  5, true,  "CH1_EQ_MID",  true};
-constexpr PotRef CH1_EQ_LOW     = {0, 14, true,  "CH1_EQ_LOW",  true};
-constexpr PotRef CH1_EQ_HIGH    = {0,  3, true,  "CH1_EQ_HIGH", true};
-constexpr PotRef CH1_FX_SEND    = {3,  3, true,  "CH1_FX_SEND"};
+// AUX 1 (IN0 → master)
+constexpr PotRef AUX1_INPUT_GAIN = {3,  2, true,  "AUX1_INPUT_GAIN"};
+constexpr PotRef AUX1_EQ_MID     = {0,  5, true,  "AUX1_EQ_MID",  true};
+constexpr PotRef AUX1_EQ_LOW     = {0, 14, true,  "AUX1_EQ_LOW",  true};
+constexpr PotRef AUX1_EQ_HIGH    = {0,  3, true,  "AUX1_EQ_HIGH", true};
+constexpr PotRef AUX1_FX_SEND    = {3,  3, true,  "AUX1_FX_SEND"};
+constexpr PotRef AUX1_FX2_SEND   = {3,  4, true,  "AUX1_FX2_SEND"};
 
-// Channel Strip 2 (IN1 → master)
-constexpr PotRef CH2_INPUT_GAIN = {3,  7, true,  "CH2_INPUT_GAIN"};
-constexpr PotRef CH2_EQ_MID     = {0,  6, true,  "CH2_EQ_MID",  true};
-constexpr PotRef CH2_EQ_HIGH    = {1, 12, true,  "CH2_EQ_HIGH", true};
-constexpr PotRef CH2_EQ_LOW     = {0, 13, true,  "CH2_EQ_LOW",  true};
-constexpr PotRef CH2_FX_SEND    = {3,  6, true,  "CH2_FX_SEND"};
+// AUX 2 (IN1 → master)
+constexpr PotRef AUX2_INPUT_GAIN = {3,  7, true,  "AUX2_INPUT_GAIN"};
+constexpr PotRef AUX2_EQ_MID     = {0,  6, true,  "AUX2_EQ_MID",  true};
+constexpr PotRef AUX2_EQ_HIGH    = {1, 12, true,  "AUX2_EQ_HIGH", true};
+constexpr PotRef AUX2_EQ_LOW     = {0, 13, true,  "AUX2_EQ_LOW",  true};
+constexpr PotRef AUX2_FX_SEND    = {3,  6, true,  "AUX2_FX_SEND"};
+constexpr PotRef AUX2_FX2_SEND   = {3,  5, true,  "AUX2_FX2_SEND"};
 
 // AUX 3 (IN2 → master)
 constexpr PotRef AUX3_INPUT_GAIN = {3,  8, true,  "AUX3_INPUT_GAIN"};
@@ -184,6 +193,7 @@ constexpr PotRef AUX3_EQ_LOW     = {0, 12, true,  "AUX3_EQ_LOW",  true};
 constexpr PotRef AUX3_EQ_MID     = {0,  7, true,  "AUX3_EQ_MID",  true};
 constexpr PotRef AUX3_EQ_HIGH    = {1, 13, true,  "AUX3_EQ_HIGH", true};
 constexpr PotRef AUX3_FX_SEND    = {3,  9, true,  "AUX3_FX_SEND"};
+constexpr PotRef AUX3_FX2_SEND   = {3, 13, true,  "AUX3_FX2_SEND"};
 
 // AUX 4 (IN3 → master)
 constexpr PotRef AUX4_INPUT_GAIN = {3, 15, true,  "AUX4_INPUT_GAIN"};
@@ -191,6 +201,7 @@ constexpr PotRef AUX4_EQ_LOW     = {0, 11, true,  "AUX4_EQ_LOW",  true};
 constexpr PotRef AUX4_EQ_MID     = {0,  8, true,  "AUX4_EQ_MID",  true};
 constexpr PotRef AUX4_EQ_HIGH    = {1, 14, true,  "AUX4_EQ_HIGH", true};
 constexpr PotRef AUX4_FX_SEND    = {3, 14, true,  "AUX4_FX_SEND"};
+constexpr PotRef AUX4_FX2_SEND   = {3, 12, true,  "AUX4_FX2_SEND"};
 
 
 // Master parametric EQ
@@ -239,10 +250,10 @@ constexpr PotRef MASTER_LPF_FREQ    = {2,  5, false, "MASTER_LPF_FREQ"};
 
 constexpr PotRef kAllNamedPots[] = {
     // Channel strips
-    CH1_INPUT_GAIN, CH1_EQ_MID, CH1_EQ_LOW, CH1_EQ_HIGH, CH1_FX_SEND,
-    CH2_INPUT_GAIN, CH2_EQ_MID, CH2_EQ_HIGH, CH2_EQ_LOW, CH2_FX_SEND,
-    AUX3_INPUT_GAIN, AUX3_EQ_LOW, AUX3_EQ_MID, AUX3_EQ_HIGH, AUX3_FX_SEND,
-    AUX4_INPUT_GAIN, AUX4_EQ_LOW, AUX4_EQ_MID, AUX4_EQ_HIGH, AUX4_FX_SEND,
+    AUX1_INPUT_GAIN, AUX1_EQ_MID, AUX1_EQ_LOW, AUX1_EQ_HIGH, AUX1_FX_SEND, AUX1_FX2_SEND,
+    AUX2_INPUT_GAIN, AUX2_EQ_MID, AUX2_EQ_HIGH, AUX2_EQ_LOW, AUX2_FX_SEND, AUX2_FX2_SEND,
+    AUX3_INPUT_GAIN, AUX3_EQ_LOW, AUX3_EQ_MID, AUX3_EQ_HIGH, AUX3_FX_SEND, AUX3_FX2_SEND,
+    AUX4_INPUT_GAIN, AUX4_EQ_LOW, AUX4_EQ_MID, AUX4_EQ_HIGH, AUX4_FX_SEND, AUX4_FX2_SEND,
     // Master output
     MASTER_GAIN,
     // Master parametric EQ
