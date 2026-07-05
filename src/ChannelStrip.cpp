@@ -21,7 +21,7 @@ void ChannelStrip::setInputGain(float gain) {
     inputGain_ = gain;
 }
 
-void ChannelStrip::setFxSendLevel(float level) {
+void ChannelStrip::setFxSend1Level(float level) {
     fxSendLevel_ = level;
 }
 

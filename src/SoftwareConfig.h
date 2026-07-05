@@ -222,6 +222,16 @@ constexpr float kSirenGateAttackMs  = 5.f;
 constexpr float kSirenGateReleaseMs = 80.f;
 
 // ---------------------------------------------------------------------------
+// FX Send pot scaling
+// ---------------------------------------------------------------------------
+
+/// Pot position that is mapped to full send (1.0).
+/// Values above this ceiling are clamped to 1.0, so physical pot travel
+/// [0 → kFxSendPotCeiling] covers the full [0 → 1] send range.
+/// Example: 0.7 → 70 % pot travel already gives 100 % send.
+constexpr float kFxSendPotCeiling = 0.7f;
+
+// ---------------------------------------------------------------------------
 // FX Send filter modes (PA5 = mids only, PA6 = tops only)
 // ---------------------------------------------------------------------------
 

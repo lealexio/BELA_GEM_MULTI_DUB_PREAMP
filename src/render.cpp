@@ -78,6 +78,15 @@ static inline float potToGainDb(float pot, float rangeDb = kEqGainRangeDb) {
 }
 
 /**
+ * Scales a raw FX send pot value so that kFxSendPotCeiling maps to 1.0.
+ * Values above the ceiling are clamped to 1.0, giving full range over
+ * a reduced pot travel without any hard snap.
+ */
+static inline float scaleFxSendPot(float pot) {
+    return pot >= kFxSendPotCeiling ? 1.f : pot / kFxSendPotCeiling;
+}
+
+/**
  * Reads all valid audio inputs for the given config and returns their average.
  * Single input → direct pass-through. Two inputs → averaged to mono.
  */
@@ -289,8 +298,8 @@ void render(BelaContext* context, void* userData) {
         potToGainDb(gHardwareManager.getPotValue(AUX1_EQ_MID)),
         potToGainDb(gHardwareManager.getPotValue(AUX1_EQ_HIGH))
     );
-    gChannelStrip.setFxSendLevel(gHardwareManager.getPotValue(AUX1_FX_SEND));
-    gChannelStrip.setFxSend2Level(gHardwareManager.getPotValue(AUX1_FX2_SEND));
+    gChannelStrip.setFxSend1Level(scaleFxSendPot(gHardwareManager.getPotValue(AUX1_FX_SEND)));
+    gChannelStrip.setFxSend2Level(scaleFxSendPot(gHardwareManager.getPotValue(AUX1_FX2_SEND)));
 
     // --- Channel Strip 2 controls ---
     gChannelStrip2.setInputGain(gHardwareManager.getPotValue(AUX2_INPUT_GAIN));
@@ -299,8 +308,8 @@ void render(BelaContext* context, void* userData) {
         potToGainDb(gHardwareManager.getPotValue(AUX2_EQ_MID)),
         potToGainDb(gHardwareManager.getPotValue(AUX2_EQ_HIGH))
     );
-    gChannelStrip2.setFxSendLevel(gHardwareManager.getPotValue(AUX2_FX_SEND));
-    gChannelStrip2.setFxSend2Level(gHardwareManager.getPotValue(AUX2_FX2_SEND));
+    gChannelStrip2.setFxSend1Level(scaleFxSendPot(gHardwareManager.getPotValue(AUX2_FX_SEND)));
+    gChannelStrip2.setFxSend2Level(scaleFxSendPot(gHardwareManager.getPotValue(AUX2_FX2_SEND)));
 
     // --- AUX 3 controls ---
     gChannelStrip3.setInputGain(gHardwareManager.getPotValue(AUX3_INPUT_GAIN));
@@ -309,8 +318,8 @@ void render(BelaContext* context, void* userData) {
         potToGainDb(gHardwareManager.getPotValue(AUX3_EQ_MID)),
         potToGainDb(gHardwareManager.getPotValue(AUX3_EQ_HIGH))
     );
-    gChannelStrip3.setFxSendLevel(gHardwareManager.getPotValue(AUX3_FX_SEND));
-    gChannelStrip3.setFxSend2Level(gHardwareManager.getPotValue(AUX3_FX2_SEND));
+    gChannelStrip3.setFxSend1Level(scaleFxSendPot(gHardwareManager.getPotValue(AUX3_FX_SEND)));
+    gChannelStrip3.setFxSend2Level(scaleFxSendPot(gHardwareManager.getPotValue(AUX3_FX2_SEND)));
 
     // --- AUX 4 controls ---
     gChannelStrip4.setInputGain(gHardwareManager.getPotValue(AUX4_INPUT_GAIN));
@@ -319,8 +328,8 @@ void render(BelaContext* context, void* userData) {
         potToGainDb(gHardwareManager.getPotValue(AUX4_EQ_MID)),
         potToGainDb(gHardwareManager.getPotValue(AUX4_EQ_HIGH))
     );
-    gChannelStrip4.setFxSendLevel(gHardwareManager.getPotValue(AUX4_FX_SEND));
-    gChannelStrip4.setFxSend2Level(gHardwareManager.getPotValue(AUX4_FX2_SEND));
+    gChannelStrip4.setFxSend1Level(scaleFxSendPot(gHardwareManager.getPotValue(AUX4_FX_SEND)));
+    gChannelStrip4.setFxSend2Level(scaleFxSendPot(gHardwareManager.getPotValue(AUX4_FX2_SEND)));
 
     // --- Master parametric EQ ---
     gMasterFx.setParamEqBand(ParametricEq::SUB,
@@ -415,8 +424,8 @@ void render(BelaContext* context, void* userData) {
         gHardwareManager.getPotValue(SIREN_TYPE),
         gHardwareManager.getPotValue(SIREN_MOD),
         gHardwareManager.getPotValue(SIREN_GAIN),
-        gHardwareManager.getPotValue(SIREN_FX_SEND),
-        gHardwareManager.getPotValue(SIREN_FX2_SEND),
+        scaleFxSendPot(gHardwareManager.getPotValue(SIREN_FX_SEND)),
+        scaleFxSendPot(gHardwareManager.getPotValue(SIREN_FX2_SEND)),
         gHardwareManager.getSwitchState(SIREN_TRIGGER)
     );
 

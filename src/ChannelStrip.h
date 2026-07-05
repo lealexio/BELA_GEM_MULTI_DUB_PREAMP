@@ -46,7 +46,7 @@ public:
      * Sets the post-fader FX send 1 level.
      * @param level  0.0 = no send, 1.0 = full send (same level as dry out)
      */
-    void setFxSendLevel(float level);
+    void setFxSend1Level(float level);
 
     /**
      * Sets the post-fader FX send 2 level.
