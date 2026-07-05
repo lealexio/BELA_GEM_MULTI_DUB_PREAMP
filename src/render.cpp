@@ -388,7 +388,7 @@ void render(BelaContext* context, void* userData) {
         prevFxTops = fxModeTops;
         const char* mode = fxModeTops ? "TOPS (>4kHz)"
                          : fxModeMids ? "MIDS (250Hz-4kHz)"
-                                      : "FULLBAND";
+                                      : "MID+TOP (>250Hz)";
         rt_printf("[FX1] Send mode  →  %s\n", mode);
     }
 
@@ -406,7 +406,7 @@ void render(BelaContext* context, void* userData) {
         prevFx2Tops = fx2ModeTops;
         const char* mode = fx2ModeTops ? "TOPS (>4kHz)"
                          : fx2ModeMids ? "MIDS (250Hz-4kHz)"
-                                       : "FULLBAND";
+                                       : "MID+TOP (>250Hz)";
         rt_printf("[FX2] Send mode  →  %s\n", mode);
     }
 
@@ -444,18 +444,22 @@ void render(BelaContext* context, void* userData) {
                     + gChannelStrip3.fxOut() + gChannelStrip4.fxOut()
                     + gDubSiren.fxOut();
         if(fxModeTops)
-            fxSend = gFxHpf4k.process(fxSend);                         // > 4 kHz only
+            fxSend = gFxHpf4k.process(fxSend);                           // > 4 kHz only
         else if(fxModeMids)
-            fxSend = gFxMidLpf.process(gFxMidHpf.process(fxSend));    // 250 Hz – 4 kHz
+            fxSend = gFxMidLpf.process(gFxMidHpf.process(fxSend));      // 250 Hz – 4 kHz
+        else
+            fxSend = gFxMidHpf.process(fxSend);                          // > 250 Hz (MID+TOP)
 
         // FX send 2: all channel strips + siren fx2 → filtered by mode → OUT3
         float fxSend2 = gChannelStrip.fxOut2()  + gChannelStrip2.fxOut2()
                       + gChannelStrip3.fxOut2() + gChannelStrip4.fxOut2()
                       + gDubSiren.fxOut2();
         if(fx2ModeTops)
-            fxSend2 = gFx2Hpf4k.process(fxSend2);
+            fxSend2 = gFx2Hpf4k.process(fxSend2);                        // > 4 kHz only
         else if(fx2ModeMids)
-            fxSend2 = gFx2MidLpf.process(gFx2MidHpf.process(fxSend2));
+            fxSend2 = gFx2MidLpf.process(gFx2MidHpf.process(fxSend2));  // 250 Hz – 4 kHz
+        else
+            fxSend2 = gFx2MidHpf.process(fxSend2);                       // > 250 Hz (MID+TOP)
 
         // FX returns: noise-gated to suppress idle hum from the effect unit
         float fxReturn  = gMasterFx.processFxReturn (audioRead(context, n, FX1_RETURN_IN));
