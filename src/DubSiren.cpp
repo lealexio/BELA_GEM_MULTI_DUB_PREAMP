@@ -65,7 +65,7 @@ void DubSiren::setup(float sampleRate) {
 }
 
 void DubSiren::setControls(float typePot, float modPot, float gainPot,
-                            float fxSendPot, bool gate) {
+                            float fxSendPot, float fxSend2Pot, bool gate) {
     int newIdx = static_cast<int>(typePot * kNumPresets);
     if(newIdx >= kNumPresets) newIdx = kNumPresets - 1;
 
@@ -92,10 +92,11 @@ void DubSiren::setControls(float typePot, float modPot, float gainPot,
             : 0.f;
     }
 
-    mod_     = modPot;
-    gain_    = gainPot;
-    fxSend_  = fxSendPot;
-    gate_    = gate;
+    mod_      = modPot;
+    gain_     = gainPot;
+    fxSend_   = fxSendPot;
+    fxSend2_  = fxSend2Pot;
+    gate_     = gate;
 }
 
 float DubSiren::process() {
@@ -132,6 +133,7 @@ float DubSiren::process() {
     gateSmooth_ += coeff * (target - gateSmooth_);
 
     float signal = osc * gateSmooth_;
-    lastFxOut_   = signal * fxSend_ * kSirenGainScale;
+    lastFxOut_   = signal * fxSend_  * kSirenGainScale;
+    lastFxOut2_  = signal * fxSend2_ * kSirenGainScale;
     return signal * gain_ * kSirenGainScale;
 }

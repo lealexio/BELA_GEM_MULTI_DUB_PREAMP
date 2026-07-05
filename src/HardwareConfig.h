@@ -168,8 +168,9 @@ constexpr PotRef SIREN_MOD     = {0,  9, true, "SIREN_MOD"};     // LFO depth + 
 
 // --- MUX 3  (analog input A3) — siren + channel gain/send ---
 
-constexpr PotRef SIREN_GAIN    = {3,  0, true, "SIREN_GAIN"};    // siren output gain
-constexpr PotRef SIREN_FX_SEND = {3, 10, true, "SIREN_FX_SEND"}; // siren FX send level
+constexpr PotRef SIREN_GAIN     = {3,  0, true, "SIREN_GAIN"};     // siren output gain
+constexpr PotRef SIREN_FX_SEND  = {3, 11, true, "SIREN_FX_SEND"};  // siren FX send 1 level
+constexpr PotRef SIREN_FX2_SEND = {3, 10, true, "SIREN_FX2_SEND"}; // siren FX send 2 level
 
 // AUX 1 (IN0 → master)
 constexpr PotRef AUX1_INPUT_GAIN = {3,  2, true,  "AUX1_INPUT_GAIN"};
@@ -267,7 +268,7 @@ constexpr PotRef kAllNamedPots[] = {
     // Band Trim — speaker crossover gains
     BTRIM_SUB, BTRIM_KICK, BTRIM_MID, BTRIM_TOP,
     // Dub Siren
-    SIREN_TYPE, SIREN_MOD, SIREN_GAIN, SIREN_FX_SEND,
+    SIREN_TYPE, SIREN_MOD, SIREN_GAIN, SIREN_FX_SEND, SIREN_FX2_SEND,
     // Graphic EQ — 12 bands (40 Hz … 16 kHz)
     GEQ_40HZ, GEQ_60HZ, GEQ_80HZ, GEQ_100HZ, GEQ_125HZ, GEQ_250HZ,
     GEQ_500HZ, GEQ_1KHZ, GEQ_2KHZ, GEQ_4KHZ, GEQ_8KHZ, GEQ_16KHZ,

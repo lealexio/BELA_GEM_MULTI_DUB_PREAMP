@@ -415,6 +415,7 @@ void render(BelaContext* context, void* userData) {
         gHardwareManager.getPotValue(SIREN_MOD),
         gHardwareManager.getPotValue(SIREN_GAIN),
         gHardwareManager.getPotValue(SIREN_FX_SEND),
+        gHardwareManager.getPotValue(SIREN_FX2_SEND),
         gHardwareManager.getSwitchState(SIREN_TRIGGER)
     );
 
@@ -446,10 +447,10 @@ void render(BelaContext* context, void* userData) {
         else if(fxModeMids)
             fxSend = gFxMidLpf.process(gFxMidHpf.process(fxSend));    // 250 Hz – 4 kHz
 
-        // FX send 2: all channel strips + siren → filtered by mode → OUT3
+        // FX send 2: all channel strips + siren fx2 → filtered by mode → OUT3
         float fxSend2 = gChannelStrip.fxOut2()  + gChannelStrip2.fxOut2()
                       + gChannelStrip3.fxOut2() + gChannelStrip4.fxOut2()
-                      + gDubSiren.fxOut();
+                      + gDubSiren.fxOut2();
         if(fx2ModeTops)
             fxSend2 = gFx2Hpf4k.process(fxSend2);
         else if(fx2ModeMids)
