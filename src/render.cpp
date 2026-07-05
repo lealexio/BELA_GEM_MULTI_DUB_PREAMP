@@ -437,9 +437,10 @@ void render(BelaContext* context, void* userData) {
         // Siren: process before FX send to include its FX output
         float sirenOut = gDubSiren.process();
 
-        // FX send 1: all channel strips → filtered by mode → OUT2
-        float fxSend = gChannelStrip.fxOut()  + gChannelStrip2.fxOut()
-                     + gChannelStrip3.fxOut() + gChannelStrip4.fxOut();
+       // FX send 1: all channel strips + siren → filtered by mode → OUT2
+       float fxSend = gChannelStrip.fxOut()  + gChannelStrip2.fxOut()
+                    + gChannelStrip3.fxOut() + gChannelStrip4.fxOut()
+                    + gDubSiren.fxOut();
         if(fxModeTops)
             fxSend = gFxHpf4k.process(fxSend);                         // > 4 kHz only
         else if(fxModeMids)

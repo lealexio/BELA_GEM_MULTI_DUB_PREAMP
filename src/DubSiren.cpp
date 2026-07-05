@@ -66,16 +66,29 @@ void DubSiren::setup(float sampleRate) {
 
 void DubSiren::setControls(float typePot, float modPot, float gainPot,
                             float fxSendPot, bool gate) {
-    int idx = static_cast<int>(typePot * kNumPresets);
-    if(idx >= kNumPresets) idx = kNumPresets - 1;
+    int newIdx = static_cast<int>(typePot * kNumPresets);
+    if(newIdx >= kNumPresets) newIdx = kNumPresets - 1;
 
-    if(idx != presetIdx_) {
+    // Hysteresis: only accept a preset change when the pot has moved clearly
+    // past the zone boundary, preventing ADC jitter from toggling two presets.
+    if(newIdx != presetIdx_ && presetIdx_ >= 0) {
+        const float zoneWidth = 1.f / kNumPresets;
+        const float boundary  = (newIdx > presetIdx_)
+            ? newIdx        * zoneWidth   // rising boundary
+            : (newIdx + 1)  * zoneWidth;  // falling boundary
+        const bool  cleared   = (newIdx > presetIdx_)
+            ? (typePot >= boundary + kSirenPresetHysteresis)
+            : (typePot <= boundary - kSirenPresetHysteresis);
+        if(!cleared) newIdx = presetIdx_;
+    }
+
+    if(newIdx != presetIdx_) {
         // Reset phases on preset change to avoid a click from a stale phase
         oscPhase_  = 0.f;
         lfoPhase_  = 0.f;
-        presetIdx_ = idx;
-        dropDecayCoeff_ = (kPresets[idx].dropDecaySec > 0.f)
-            ? expf(-1.f / (kPresets[idx].dropDecaySec * sampleRate_))
+        presetIdx_ = newIdx;
+        dropDecayCoeff_ = (kPresets[newIdx].dropDecaySec > 0.f)
+            ? expf(-1.f / (kPresets[newIdx].dropDecaySec * sampleRate_))
             : 0.f;
     }
 

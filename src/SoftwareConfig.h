@@ -208,6 +208,14 @@ constexpr float kGEqUpdateEpsilonDb = 0.05f;
 // ---------------------------------------------------------------------------
 
 /// Time for the siren gate amplitude to ramp from 0 to 1 (trigger pressed).
+/// Hysteresis band applied to the siren preset selector.
+/// A preset change is only accepted when the pot has moved this far past the
+/// zone boundary into the new preset — prevents ADC jitter at boundaries from
+/// rapidly toggling between two presets and producing a double-siren effect.
+/// Each preset zone spans (1.0 / kNumPresets) ≈ 0.125 of pot travel.
+/// 0.03 ≈ 24 % of one zone — wide enough to absorb typical jitter.
+constexpr float kSirenPresetHysteresis = 0.03f;
+
 constexpr float kSirenGateAttackMs  = 5.f;
 
 /// Time for the siren gate amplitude to ramp from 1 to 0 (trigger released).
