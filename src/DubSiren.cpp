@@ -57,6 +57,11 @@ float DubSiren::lfoSample(int shape, float phase) {
 // Public interface
 // ---------------------------------------------------------------------------
 
+const char* DubSiren::getPresetName() const {
+    int idx = (presetIdx_ >= 0 && presetIdx_ < kNumPresets) ? presetIdx_ : 0;
+    return kPresets[idx].name;
+}
+
 void DubSiren::setup(float sampleRate) {
     sampleRate_    = sampleRate;
     attackCoeff_   = 1.f - expf(-1.f / (kSirenGateAttackMs  * 0.001f * sampleRate));

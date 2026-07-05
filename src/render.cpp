@@ -165,16 +165,17 @@ static const NamedSwitch kNamedSwitches[] = {
     { "FX_FILTER_TOPS",  FX_FILTER_TOPS,  "tops",    "fullband" },
     { "FX2_FILTER_MIDS", FX2_FILTER_MIDS, "mids",    "fullband" },
     { "FX2_FILTER_TOPS", FX2_FILTER_TOPS, "tops",    "fullband" },
-    { "SIREN_TRIGGER",   SIREN_TRIGGER,   "ON",      "off"      },
 };
 static constexpr int kNamedSwitchCount =
     sizeof(kNamedSwitches) / sizeof(kNamedSwitches[0]);
 
-/** Returns true if a (port, pin) pair is already covered by kNamedSwitches. */
+/** Returns true if a (port, pin) pair is already covered by kNamedSwitches or handled separately. */
 static bool isSwitchNamed(bool portB, int pin) {
     for(int i = 0; i < kNamedSwitchCount; ++i)
         if(kNamedSwitches[i].ref.portB == portB && kNamedSwitches[i].ref.pin == pin)
             return true;
+    // Handled by dedicated logging outside kNamedSwitches
+    if(portB == SIREN_TRIGGER.portB && pin == SIREN_TRIGGER.pin) return true;
     return false;
 }
 
@@ -499,6 +500,17 @@ void render(BelaContext* context, void* userData) {
     if(kDebug) {
         printChangedPots();
         printChangedSwitches();
+
+        // Siren trigger: log gate state with the active preset name
+        static bool prevSirenTrigger = false;
+        bool sirenTrigger = gHardwareManager.getSwitchState(SIREN_TRIGGER);
+        if(sirenTrigger != prevSirenTrigger) {
+            if(sirenTrigger)
+                rt_printf("[SW]  SIREN_TRIGGER      →  ON  [%s]\n", gDubSiren.getPresetName());
+            else
+                rt_printf("[SW]  SIREN_TRIGGER      →  off\n");
+            prevSirenTrigger = sirenTrigger;
+        }
     }
 }
 

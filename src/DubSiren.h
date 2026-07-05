@@ -59,6 +59,9 @@ public:
     /** Returns the FX send 2 sample for the last process() call. */
     float fxOut2() const { return lastFxOut2_; }
 
+    /** Returns the name of the currently selected preset (never nullptr). */
+    const char* getPresetName() const;
+
 private:
     float sampleRate_     = 44100.f;
 
