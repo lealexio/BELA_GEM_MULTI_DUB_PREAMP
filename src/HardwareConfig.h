@@ -169,7 +169,7 @@ constexpr PotRef SIREN_MOD     = {0,  9, true, "SIREN_MOD"};     // LFO depth + 
 // --- MUX 3  (analog input A3) — siren + channel gain/send ---
 
 constexpr PotRef SIREN_GAIN    = {3,  0, true, "SIREN_GAIN"};    // siren output gain
-constexpr PotRef SIREN_FX_SEND = {3, 11, true, "SIREN_FX_SEND"}; // siren FX send level
+constexpr PotRef SIREN_FX_SEND = {3, 10, true, "SIREN_FX_SEND"}; // siren FX send level
 
 // AUX 1 (IN0 → master)
 constexpr PotRef AUX1_INPUT_GAIN = {3,  2, true,  "AUX1_INPUT_GAIN"};
