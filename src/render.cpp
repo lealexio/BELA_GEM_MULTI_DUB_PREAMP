@@ -461,8 +461,15 @@ void render(BelaContext* context, void* userData) {
         float fxReturn  = gMasterFx.processFxReturn (audioRead(context, n, FX1_RETURN_IN));
         float fxReturn2 = gMasterFx.processFxReturn2(audioRead(context, n, FX2_RETURN_IN));
 
-        // Master bus: all channels + siren + FX returns → EQ → filters → kills
-        float out = gMasterFx.process(dry1 + dry2 + dry3 + dry4 + sirenOut + fxReturn + fxReturn2);
+        // Master bus mix — routing controlled by kFxReturnPostMaster (SoftwareConfig.h).
+        // POST (true) : FX returns bypass all master DSP; only masterGain applies.
+        // PRE  (false): FX returns enter the full chain (EQ → filters → kills).
+        float out;
+        if(kFxReturnPostMaster)
+            out = gMasterFx.process(dry1 + dry2 + dry3 + dry4 + sirenOut)
+                + (fxReturn + fxReturn2) * gMasterFx.getMasterGain();
+        else
+            out = gMasterFx.process(dry1 + dry2 + dry3 + dry4 + sirenOut + fxReturn + fxReturn2);
 
         // Startup mute ramp: linear fade 0→1 over kStartupRampMs to suppress DAC pop
         float startupGain = 1.f;

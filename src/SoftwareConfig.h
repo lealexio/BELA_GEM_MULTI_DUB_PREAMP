@@ -237,3 +237,16 @@ constexpr float kFxFilterQ = 0.707f;
 /// Master gain scale applied to both the dry output and FX send of the siren.
 /// Reduce if the siren is too loud relative to the channel strips.
 constexpr float kSirenGainScale = 0.1f;
+
+// ---------------------------------------------------------------------------
+// FX return routing
+// ---------------------------------------------------------------------------
+
+/// When true  : FX returns are injected POST-master (after EQ, filters, kills).
+///              The wet signal bypasses all master processing — only masterGain applies.
+///              Use this when the effect unit has its own character that should not
+///              be coloured by the master chain (HPF, EQ, kills…).
+///
+/// When false : FX returns are summed PRE-master, entering the full processing chain.
+///              Use this when you want kills and EQ to shape the wet return as well.
+constexpr bool kFxReturnPostMaster = true;

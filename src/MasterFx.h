@@ -37,10 +37,16 @@
  *            KillSwitch     ← setKills() once per block
  *                 │
  *                 ▼
+ *           × masterGain
+ *                 │
+ *         (FX returns added HERE in render.cpp — post-master, bypasses all DSP)
+ *                 │
+ *                 ▼
  *               OUT
  *
  *   effect unit (wet return)
- *       └──► processFxReturn() → NoiseGate → (summed in render.cpp)
+ *       └──► processFxReturn() → NoiseGate → summed post-master in render.cpp
+ *            getMasterGain() is used in render.cpp to scale FX returns by master gain
  *
  * To add a new master effect: create a dedicated object, instantiate it here,
  * and call it in the appropriate place in process().
@@ -98,10 +104,14 @@ public:
     void setKills(bool killSub, bool killKick, bool killMid, bool killTop);
 
     /**
-     * Sets the master output gain applied after the full processing chain.
-     * @param gain  [0.0–1.0]; 0.0 = total silence (dry + FX return)
+     * Sets the master output gain applied after the full dry processing chain.
+     * FX returns are also scaled by this gain in render.cpp (post-master injection).
+     * @param gain  [0.0–1.0]; 0.0 = total silence
      */
     void setMasterGain(float gain);
+
+    /** Returns the current master output gain (used in render.cpp to scale post-master FX returns). */
+    float getMasterGain() const { return masterGain_; }
 
     /**
      * Applies the FX return 1 noise gate to one sample.
@@ -116,8 +126,10 @@ public:
     float processFxReturn2(float sample);
 
     /**
-     * Processes one master-bus sample: ParametricEq → FilterSection → KillSwitch.
-     * @param input  Sum of all dry channel outputs (+ FX return if pre-kill)
+     * Processes one master-bus dry sample through the full chain:
+     *   ParametricEq → GraphicEq → FilterSection → BandTrim → KillSwitch → masterGain.
+     * FX returns must be added AFTER this call in render.cpp (post-master injection).
+     * @param input  Sum of all dry channel outputs (channels + siren, no FX return)
      */
     float process(float input);
 
