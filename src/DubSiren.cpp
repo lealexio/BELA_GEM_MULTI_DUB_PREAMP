@@ -11,23 +11,112 @@ struct SirenPreset {
     float       baseFreq;         // Hz
     int         oscWave;          // 0=sine  1=saw  2=square
     int         lfoShape;         // 0=sine  1=triangle  2=square
-    float       lfoRateMin;       // LFO Hz when mod=0 (depth will be 0)
+    float       lfoRateMin;       // LFO Hz when mod=0
     float       lfoRateMax;       // LFO Hz when mod=1
+    float       lfoDepthMinSemi;  // min LFO depth in semitones at mod=0 (never pure tone)
     float       lfoDepthMaxSemi;  // max LFO depth in semitones at mod=1
     float       dropSemitones;    // pitch drop on gate rising edge
     float       dropDecaySec;     // time for drop to decay to near-zero
 };
 
 static constexpr SirenPreset kPresets[DubSiren::kNumPresets] = {
-    // name         freq   osc lfo  rMin  rMax  dep   drop  decay
-    { "Classic",   300.f,  0,  0,  0.5f, 3.0f,  6.f,  4.f, 0.8f },
-    { "Whoop",     200.f,  1,  0,  0.3f, 2.0f, 12.f,  8.f, 1.2f },
-    { "Police",    500.f,  2,  2,  1.0f, 5.0f,  7.f,  0.f, 0.f  },
-    { "Submarine",  80.f,  0,  1,  0.2f, 1.0f,  8.f, 12.f, 2.0f },
-    { "Spaceship", 600.f,  0,  0,  2.0f, 8.0f,  5.f,  3.f, 0.5f },
-    { "Trumpet",   440.f,  1,  0,  0.5f, 4.0f,  4.f,  6.f, 0.3f },
-    { "Ghost",     180.f,  0,  1,  0.1f, 0.8f, 10.f,  6.f, 1.5f },
-    { "Laser",    1000.f,  2,  2,  3.0f,12.0f,  8.f, 12.f, 0.2f },
+    //  name        freq    osc lfo  rMin   rMax  depMin depMax  drop  decay
+    {
+        "Wail",
+        480.f,
+        0,          // sine osc
+        0,          // sine lfo
+        0.8f,       // rMin
+        5.0f,       // rMax
+        3.f,        // depMin
+        24.f,       // depMax
+        3.f,        // drop
+        3.6f        // decay
+    },
+    {
+        "Whoop",
+        200.f,
+        1,          // saw osc
+        0,          // sine lfo
+        0.5f,       // rMin
+        5.0f,       // rMax
+        3.f,        // depMin
+        48.f,       // depMax
+        8.f,        // drop
+        1.2f        // decay
+    },
+    {
+        "Police",
+        500.f,
+        2,          // square osc
+        2,          // square lfo
+        1.0f,       // rMin
+        5.0f,       // rMax
+        3.f,        // depMin
+        7.f,        // depMax
+        0.f,        // drop
+        0.f         // decay
+    },
+    {
+        "Scanner",
+        620.f,
+        1,          // saw osc
+        1,          // triangle lfo
+        3.0f,       // rMin
+        9.0f,       // rMax
+        4.f,        // depMin
+        14.f,       // depMax
+        6.f,        // drop
+        0.3f        // decay
+    },
+    {
+        "Spaceship",
+        600.f,
+        0,          // sine osc
+        0,          // sine lfo
+        2.0f,       // rMin
+        8.0f,       // rMax
+        1.f,        // depMin
+        5.f,        // depMax
+        3.f,        // drop
+        0.5f        // decay
+    },
+    {
+        "Trumpet",
+        440.f,
+        1,          // saw osc
+        0,          // sine lfo
+        0.5f,       // rMin
+        4.0f,       // rMax
+        1.f,        // depMin
+        4.f,        // depMax
+        6.f,        // drop
+        0.3f        // decay
+    },
+    {
+        "Riotgun",
+        800.f,
+        2,          // square osc
+        1,          // triangle lfo
+        6.0f,       // rMin
+        16.0f,      // rMax
+        6.f,        // depMin
+        20.f,       // depMax
+        10.f,       // drop
+        0.15f       // decay
+    },
+    {
+        "Laser",
+        1000.f,
+        2,          // square osc
+        2,          // square lfo
+        3.0f,       // rMin
+        12.0f,      // rMax
+        2.f,        // depMin
+        8.f,        // depMax
+        12.f,       // drop
+        0.2f        // decay
+    },
 };
 
 // ---------------------------------------------------------------------------
@@ -120,7 +209,7 @@ float DubSiren::process() {
     if(lfoPhase_ >= 1.f) lfoPhase_ -= 1.f;
 
     // Pitch (semitone offset from LFO + drop envelope)
-    float depthSemi = mod_ * p.lfoDepthMaxSemi;
+    float depthSemi = p.lfoDepthMinSemi + mod_ * (p.lfoDepthMaxSemi - p.lfoDepthMinSemi);
     float pitchSemi = lfoVal * depthSemi + pitchDropSemi_;
 
     // Oscillator

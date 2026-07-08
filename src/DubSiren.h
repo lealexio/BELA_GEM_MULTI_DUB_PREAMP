@@ -4,9 +4,9 @@
  * Monophonic dub siren: phase-accumulator oscillator modulated by an LFO.
  *
  * Eight factory presets are selectable via a pot (0.0–1.0 → 8 positions).
- * The Mod pot scales both the LFO rate and depth simultaneously so that
- * Mod=0 produces a pure unmodulated tone and Mod=1 gives the full character
- * of the selected preset.
+ * The Mod pot interpolates LFO depth between a per-preset minimum (mod=0)
+ * and maximum (mod=1), ensuring the siren is always modulated — no pure
+ * continuous tone is ever produced. LFO rate follows the same interpolation.
  *
  * A pitch-drop envelope is triggered on each gate rising edge, adding
  * a short downward sweep that decays back to the base pitch.
