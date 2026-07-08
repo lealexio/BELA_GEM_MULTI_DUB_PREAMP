@@ -82,18 +82,6 @@ static constexpr SirenPreset kPresets[DubSiren::kNumPresets] = {
         0.5f        // decay
     },
     {
-        "Trumpet",
-        440.f,
-        1,          // saw osc
-        0,          // sine lfo
-        0.5f,       // rMin
-        4.0f,       // rMax
-        1.f,        // depMin
-        4.f,        // depMax
-        6.f,        // drop
-        0.3f        // decay
-    },
-    {
         "Riotgun",
         800.f,
         2,          // square osc
