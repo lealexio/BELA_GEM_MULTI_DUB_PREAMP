@@ -28,7 +28,7 @@
 class DubSiren {
 public:
     /** Total number of factory presets. */
-    static constexpr int kNumPresets = 7;
+    static constexpr int kNumPresets = 6;
 
     /** Initialises oscillator, LFO, and envelope state. */
     void setup(float sampleRate);
