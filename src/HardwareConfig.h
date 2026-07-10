@@ -9,96 +9,89 @@
  *   HardwareConfig  → physical wiring, calibration, I/O indices
  *   SoftwareConfig  → DSP parameters, processing behaviour, debug settings
  *
- * How to add a new pot:
- *   1. Declare a constexpr PotRef with mux, pot, reversed, and name.
- *   2. Add it to kAllNamedPots[].
- *   3. Use it in render.cpp via gHardwareManager.getPotValue(MY_POT).
- *   getPotName() will automatically pick up the name — no switch/case to update.
+ * Runtime values (all extern) are defined in HardwareConfigData.cpp and
+ * populated from config.json by ConfigLoader::load() in setup().
+ * If config.json is absent the hardcoded defaults in HardwareConfigData.cpp
+ * are used unchanged — the device boots correctly with no JSON file present.
  *
- * How to add a new MUX:
- *   1. Increment kActiveMux.
- *   2. Add PotRef entries with mux = <new index>.
- *   3. Add them to kAllNamedPots[].
+ * How to add a new pot:
+ *   1. Declare an extern PotRef here.
+ *   2. Define it with default values in HardwareConfigData.cpp.
+ *   3. Add an entry for it in config.json under "pots".
+ *   4. Add it to the kAllNamedPots[] definition in HardwareConfigData.cpp.
+ *   5. Use it in render.cpp via gHardwareManager.getPotValue(MY_POT).
  */
 
 // ---------------------------------------------------------------------------
-// MUX topology
+// MUX topology — compile-time constants (used as array dimensions)
 // ---------------------------------------------------------------------------
 
 /// Maximum number of MUX chips the firmware can handle (sets array sizes).
 constexpr int kNumMux     = 4;
 
-/// Number of MUX chips physically wired to the Bela (≤ kNumMux).
-/// Increase this when you connect additional CD74HC4067 boards.
-constexpr int kActiveMux  = 4;
-
 /// Number of channels per MUX chip (CD74HC4067 = 16).
 constexpr int kPotsPerMux = 16;
 
 // ---------------------------------------------------------------------------
-// Potentiometer calibration
+// MUX topology — runtime (loaded from JSON "mux" object)
+// ---------------------------------------------------------------------------
+
+/// Number of MUX chips physically wired to the Bela (≤ kNumMux).
+extern int kActiveMux;
+
+// ---------------------------------------------------------------------------
+// Potentiometer calibration — runtime (loaded from JSON "calibration")
 // ---------------------------------------------------------------------------
 
 /// Voltage scaling factor: Bela ADC reference (4.096 V) ÷ MUX supply (3.3 V).
-constexpr float kPotScaleRecovery = 4.096f / 3.3f;
+extern float kPotScaleRecovery;
 
 /// Raw scaled value that maps to 1.0 (pots rarely reach the exact rail voltage).
-constexpr float kPotMax = 0.997f;
+extern float kPotMax;
 
 /// Raw scaled values at or below this threshold are clamped to 0.0.
-constexpr float kPotMin = 0.005f;
+extern float kPotMin;
 
 // ---------------------------------------------------------------------------
-// MCP23017 I2C configuration
+// MCP23017 I2C configuration — runtime (loaded from JSON "i2c")
 // ---------------------------------------------------------------------------
 
-constexpr const char* kI2cBus    = "/dev/i2c-1";
-constexpr uint8_t     kMcpAddress = 0x20; // A0=A1=A2=GND
+extern const char* kI2cBus;
+extern uint8_t     kMcpAddress;
 
 // ---------------------------------------------------------------------------
-// Master audio output routing
+// Audio routing — runtime (loaded from JSON "routing")
 // ---------------------------------------------------------------------------
 
-constexpr int MASTER_OUT_L = 0;
-constexpr int MASTER_OUT_R = 1;
+constexpr int kMasterOutsMax = 8; ///< Maximum number of master output channels.
+extern int MASTER_OUTS[kMasterOutsMax]; ///< List of Bela output indices the master is written to.
+extern int MASTER_OUTS_COUNT;           ///< Number of active entries in MASTER_OUTS[].
+
+extern int FX1_SEND_OUT;
+extern int FX1_RETURN_IN;
+extern int FX2_SEND_OUT;
+extern int FX2_RETURN_IN;
+
+extern int VU_SUB_OUT;
+extern int VU_KICK_OUT;
+extern int VU_MID_OUT;
+extern int VU_TOP_OUT;
 
 // ---------------------------------------------------------------------------
 // Audio routing — one entry per ChannelStrip instance
 // ---------------------------------------------------------------------------
 
 struct ChannelConfig {
-    int audioIns[2];
-    int audioOut;
+    int audioIns[2]; ///< Bela audio input indices (-1 = unused slot).
 };
 
-constexpr ChannelConfig AUX1_CONFIG = { {0, -1}, MASTER_OUT_L };
-constexpr ChannelConfig AUX2_CONFIG = { {1, -1}, MASTER_OUT_R };
-constexpr ChannelConfig AUX3_CONFIG = { {2, -1}, MASTER_OUT_L }; // Bela IN2
-constexpr ChannelConfig AUX4_CONFIG = { {3, -1}, MASTER_OUT_R }; // Bela IN3
+extern ChannelConfig AUX1_CONFIG;
+extern ChannelConfig AUX2_CONFIG;
+extern ChannelConfig AUX3_CONFIG;
+extern ChannelConfig AUX4_CONFIG;
 
 // ---------------------------------------------------------------------------
-// FX Send / Return routing
-// ---------------------------------------------------------------------------
-
-constexpr int FX1_SEND_OUT  = 2; // Bela OUT2
-constexpr int FX1_RETURN_IN = 4; // Bela IN4
-
-constexpr int FX2_SEND_OUT  = 3; // Bela OUT3
-constexpr int FX2_RETURN_IN = 5; // Bela IN5
-
-// ---------------------------------------------------------------------------
-// VU meter outputs (Bela Gem Multi — 10 outputs available)
-// ---------------------------------------------------------------------------
-
-// Band-split outputs: master mix post-MasterFx, filtered per crossover band.
-// Crossover frequencies match KillSwitch (kKillFc0/1/2 in SoftwareConfig.h).
-constexpr int VU_SUB_OUT  = 9; // Bela OUT9 — SUB band  (< 80 Hz)
-constexpr int VU_KICK_OUT = 8; // Bela OUT8 — KICK band (80–200 Hz)
-constexpr int VU_MID_OUT  = 7; // Bela OUT7 — MID band  (200–1200 Hz)
-constexpr int VU_TOP_OUT  = 6; // Bela OUT6 — TOP band  (> 1200 Hz)
-
-// ---------------------------------------------------------------------------
-// Switch mapping (MCP23017 PA pins)
+// Switch mapping (MCP23017 PA/PB pins)
 // ---------------------------------------------------------------------------
 
 /**
@@ -113,21 +106,17 @@ struct SwitchRef {
     bool portB    = false;
 };
 
-constexpr SwitchRef KILL_SUB  = {0, false, false}; // PA0 → kill SUB  (< 80 Hz)
-constexpr SwitchRef KILL_KICK = {1, false, false}; // PA1 → kill KICK (80–200 Hz)
-constexpr SwitchRef KILL_MID  = {2, true,  false}; // PA2 → kill MID  (200–1200 Hz)
-constexpr SwitchRef KILL_TOP  = {3, false, false}; // PA3 → kill TOP  (> 1200 Hz)
+extern SwitchRef KILL_SUB;
+extern SwitchRef KILL_KICK;
+extern SwitchRef KILL_MID;
+extern SwitchRef KILL_TOP;
 
-// Port A — FX send 1 filter mode (both off = fullband)
-constexpr SwitchRef FX_FILTER_MIDS  = {5, false, false}; // PA5 → FX send 1: mids only (250 Hz – 4 kHz)
-constexpr SwitchRef FX_FILTER_TOPS  = {6, false, false}; // PA6 → FX send 1: tops only (> 4 kHz)
+extern SwitchRef FX_FILTER_MIDS;
+extern SwitchRef FX_FILTER_TOPS;
+extern SwitchRef FX2_FILTER_TOPS;
+extern SwitchRef FX2_FILTER_MIDS;
 
-// Port A — FX send 2 filter mode (both off = fullband)
-constexpr SwitchRef FX2_FILTER_TOPS = {4, false, false}; // PA4 → FX send 2: tops only (> 4 kHz)
-constexpr SwitchRef FX2_FILTER_MIDS = {7, false, false}; // PA7 → FX send 2: mids only (250 Hz – 4 kHz)
-
-// Port B switches
-constexpr SwitchRef SIREN_TRIGGER = {0, false, true}; // PB0 → dub siren gate
+extern SwitchRef SIREN_TRIGGER;
 
 // ---------------------------------------------------------------------------
 // Potentiometer mapping
@@ -140,14 +129,11 @@ constexpr SwitchRef SIREN_TRIGGER = {0, false, true}; // PB0 → dub siren gate
  *   mux      : MUX chip index (0 … kActiveMux-1)
  *   pot      : channel on that MUX (0 … kPotsPerMux-1)
  *   reversed : true = invert the reading (physically rotated backwards)
- *   name     : human-readable label used in debug logs — must match the
- *              variable name so logs are unambiguous. nullptr = unlabelled.
- *   centered : true = snap dead-zone at 0.5 (use for EQ / bipolar controls).
+ *   name     : human-readable label used in debug logs and JSON key matching.
+ *              nullptr = unlabelled.
+ *   centered : true = apply power-curve around 0.5 (bipolar controls).
  *              getPotValue(PotRef) automatically calls getCenteredPotValue()
- *              when this flag is set — no need to call it explicitly in render.cpp.
- *
- * Single source of truth: the name lives here, not in a separate switch/case.
- * Add the pot to kAllNamedPots[] so getPotName() can find it automatically.
+ *              when this flag is set.
  */
 struct PotRef {
     int         mux;
@@ -157,134 +143,100 @@ struct PotRef {
     bool        centered = false;
 };
 
-// --- MUX 0  (analog input A0) ---
+// --- MUX 0 ---
+extern PotRef MASTER_GAIN;
+extern PotRef SIREN_TYPE;
+extern PotRef SIREN_MOD;
 
-// Master output
-constexpr PotRef MASTER_GAIN = {0, 1, true, "MASTER_GAIN"}; // master output gain (0 = silence)
-
-// Dub Siren controls
-constexpr PotRef SIREN_TYPE    = {0, 10, true, "SIREN_TYPE"};    // preset selector
-constexpr PotRef SIREN_MOD     = {0,  9, true, "SIREN_MOD"};     // LFO depth + rate
-
-// --- MUX 3  (analog input A3) — siren + channel gain/send ---
-
-constexpr PotRef SIREN_GAIN     = {3,  0, true, "SIREN_GAIN"};     // siren output gain
-constexpr PotRef SIREN_FX_SEND  = {3, 11, true, "SIREN_FX_SEND"};  // siren FX send 1 level
-constexpr PotRef SIREN_FX2_SEND = {3, 10, true, "SIREN_FX2_SEND"}; // siren FX send 2 level
+// --- MUX 3 — siren + channel gain/send ---
+extern PotRef SIREN_GAIN;
+extern PotRef SIREN_FX_SEND;
+extern PotRef SIREN_FX2_SEND;
 
 // AUX 1 (IN0 → master)
-constexpr PotRef AUX1_INPUT_GAIN = {3,  2, true,  "AUX1_INPUT_GAIN"};
-constexpr PotRef AUX1_EQ_MID     = {0,  5, true,  "AUX1_EQ_MID",  true};
-constexpr PotRef AUX1_EQ_LOW     = {0, 14, true,  "AUX1_EQ_LOW",  true};
-constexpr PotRef AUX1_EQ_HIGH    = {0,  3, true,  "AUX1_EQ_HIGH", true};
-constexpr PotRef AUX1_FX_SEND    = {3,  3, true,  "AUX1_FX_SEND"};
-constexpr PotRef AUX1_FX2_SEND   = {3,  4, true,  "AUX1_FX2_SEND"};
+extern PotRef AUX1_INPUT_GAIN;
+extern PotRef AUX1_EQ_MID;
+extern PotRef AUX1_EQ_LOW;
+extern PotRef AUX1_EQ_HIGH;
+extern PotRef AUX1_FX_SEND;
+extern PotRef AUX1_FX2_SEND;
 
 // AUX 2 (IN1 → master)
-constexpr PotRef AUX2_INPUT_GAIN = {3,  7, true,  "AUX2_INPUT_GAIN"};
-constexpr PotRef AUX2_EQ_MID     = {0,  6, true,  "AUX2_EQ_MID",  true};
-constexpr PotRef AUX2_EQ_HIGH    = {1, 12, true,  "AUX2_EQ_HIGH", true};
-constexpr PotRef AUX2_EQ_LOW     = {0, 13, true,  "AUX2_EQ_LOW",  true};
-constexpr PotRef AUX2_FX_SEND    = {3,  6, true,  "AUX2_FX_SEND"};
-constexpr PotRef AUX2_FX2_SEND   = {3,  5, true,  "AUX2_FX2_SEND"};
+extern PotRef AUX2_INPUT_GAIN;
+extern PotRef AUX2_EQ_MID;
+extern PotRef AUX2_EQ_HIGH;
+extern PotRef AUX2_EQ_LOW;
+extern PotRef AUX2_FX_SEND;
+extern PotRef AUX2_FX2_SEND;
 
 // AUX 3 (IN2 → master)
-constexpr PotRef AUX3_INPUT_GAIN = {3,  8, true,  "AUX3_INPUT_GAIN"};
-constexpr PotRef AUX3_EQ_LOW     = {0, 12, true,  "AUX3_EQ_LOW",  true};
-constexpr PotRef AUX3_EQ_MID     = {0,  7, true,  "AUX3_EQ_MID",  true};
-constexpr PotRef AUX3_EQ_HIGH    = {1, 13, true,  "AUX3_EQ_HIGH", true};
-constexpr PotRef AUX3_FX_SEND    = {3,  9, true,  "AUX3_FX_SEND"};
-constexpr PotRef AUX3_FX2_SEND   = {3, 13, true,  "AUX3_FX2_SEND"};
+extern PotRef AUX3_INPUT_GAIN;
+extern PotRef AUX3_EQ_LOW;
+extern PotRef AUX3_EQ_MID;
+extern PotRef AUX3_EQ_HIGH;
+extern PotRef AUX3_FX_SEND;
+extern PotRef AUX3_FX2_SEND;
 
 // AUX 4 (IN3 → master)
-constexpr PotRef AUX4_INPUT_GAIN = {3, 15, true,  "AUX4_INPUT_GAIN"};
-constexpr PotRef AUX4_EQ_LOW     = {0, 11, true,  "AUX4_EQ_LOW",  true};
-constexpr PotRef AUX4_EQ_MID     = {0,  8, true,  "AUX4_EQ_MID",  true};
-constexpr PotRef AUX4_EQ_HIGH    = {1, 14, true,  "AUX4_EQ_HIGH", true};
-constexpr PotRef AUX4_FX_SEND    = {3, 14, true,  "AUX4_FX_SEND"};
-constexpr PotRef AUX4_FX2_SEND   = {3, 12, true,  "AUX4_FX2_SEND"};
-
+extern PotRef AUX4_INPUT_GAIN;
+extern PotRef AUX4_EQ_LOW;
+extern PotRef AUX4_EQ_MID;
+extern PotRef AUX4_EQ_HIGH;
+extern PotRef AUX4_FX_SEND;
+extern PotRef AUX4_FX2_SEND;
 
 // Master parametric EQ
-constexpr PotRef MASTER_EQ_SUB_FREQ  = {2, 14, true, "MASTER_EQ_SUB_FREQ"};
-constexpr PotRef MASTER_EQ_SUB_GAIN  = {2, 13, true, "MASTER_EQ_SUB_GAIN",  true};
-constexpr PotRef MASTER_EQ_KICK_FREQ = {2,  8, true, "MASTER_EQ_KICK_FREQ"};
-constexpr PotRef MASTER_EQ_KICK_GAIN = {2,  9, true, "MASTER_EQ_KICK_GAIN", true};
-constexpr PotRef MASTER_EQ_MID_FREQ  = {3,  1, false, "MASTER_EQ_MID_FREQ"};
-constexpr PotRef MASTER_EQ_MID_GAIN  = {2,  7, true, "MASTER_EQ_MID_GAIN",  true};
-constexpr PotRef MASTER_EQ_TOP_FREQ  = {2,  3, true, "MASTER_EQ_TOP_FREQ"};
-constexpr PotRef MASTER_EQ_TOP_GAIN  = {2,  6, true, "MASTER_EQ_TOP_GAIN",  true};
+extern PotRef MASTER_EQ_SUB_FREQ;
+extern PotRef MASTER_EQ_SUB_GAIN;
+extern PotRef MASTER_EQ_KICK_FREQ;
+extern PotRef MASTER_EQ_KICK_GAIN;
+extern PotRef MASTER_EQ_MID_FREQ;
+extern PotRef MASTER_EQ_MID_GAIN;
+extern PotRef MASTER_EQ_TOP_FREQ;
+extern PotRef MASTER_EQ_TOP_GAIN;
 
-// --- Band Trim (4 bands, centered, ±3 dB) ---
-// MUX 1/C02-C05 — matched to speaker crossover frequencies
-constexpr PotRef BTRIM_TOP  = {1, 2, true, "BTRIM_TOP",  true}; // high-shelf  @ 1200 Hz
-constexpr PotRef BTRIM_MID  = {1, 3, true, "BTRIM_MID",  true}; // peaking     @ ~490 Hz
-constexpr PotRef BTRIM_KICK = {1, 4, true, "BTRIM_KICK", true}; // peaking     @ ~126 Hz
-constexpr PotRef BTRIM_SUB  = {1, 5, true, "BTRIM_SUB",  true}; // low-shelf   @ 80 Hz
+// Band Trim
+extern PotRef BTRIM_TOP;
+extern PotRef BTRIM_MID;
+extern PotRef BTRIM_KICK;
+extern PotRef BTRIM_SUB;
 
-// --- Graphic EQ (12 bands) — all centered (0.5 = 0 dB) ---
-// MUX 1 — low and mid bands
-constexpr PotRef GEQ_2KHZ  = {1,  0, true, "GEQ_2KHZ",  true};
-constexpr PotRef GEQ_8KHZ  = {1,  1, true, "GEQ_8KHZ",  true};
-constexpr PotRef GEQ_60HZ  = {1,  6, true, "GEQ_60HZ",  true};
-constexpr PotRef GEQ_40HZ  = {1,  7, true, "GEQ_40HZ",  true};
-constexpr PotRef GEQ_80HZ  = {1,  8, true, "GEQ_80HZ",  true};
-constexpr PotRef GEQ_100HZ = {1,  9, true, "GEQ_100HZ", true};
-constexpr PotRef GEQ_250HZ = {1, 10, true, "GEQ_250HZ", true};
-constexpr PotRef GEQ_125HZ = {1, 11, true, "GEQ_125HZ", true};
-constexpr PotRef GEQ_500HZ = {1, 15, true, "GEQ_500HZ", true};
-// MUX 2 — high bands (note: "1600hz" in user spec → interpreted as 16 kHz)
-constexpr PotRef GEQ_4KHZ  = {2,  0, true, "GEQ_4KHZ",  true};
-constexpr PotRef GEQ_1KHZ  = {2, 15, true, "GEQ_1KHZ",  true};
-constexpr PotRef GEQ_16KHZ = {2,  1, true, "GEQ_16KHZ", true};
+// Graphic EQ (12 bands)
+extern PotRef GEQ_2KHZ;
+extern PotRef GEQ_8KHZ;
+extern PotRef GEQ_60HZ;
+extern PotRef GEQ_40HZ;
+extern PotRef GEQ_80HZ;
+extern PotRef GEQ_100HZ;
+extern PotRef GEQ_250HZ;
+extern PotRef GEQ_125HZ;
+extern PotRef GEQ_500HZ;
+extern PotRef GEQ_4KHZ;
+extern PotRef GEQ_1KHZ;
+extern PotRef GEQ_16KHZ;
 
 // Master filter section (HPF + LPF)
-constexpr PotRef MASTER_HPF_FREQ = {2,  11, true, "MASTER_HPF_FREQ"};
-constexpr PotRef MASTER_HPF_RES  = {2, 12, true, "MASTER_HPF_RES"};
-constexpr PotRef MASTER_LPF_RES  = {2, 10, true, "MASTER_LPF_RES"};
-constexpr PotRef MASTER_LPF_FREQ    = {2,  5, false, "MASTER_LPF_FREQ"};
+extern PotRef MASTER_HPF_FREQ;
+extern PotRef MASTER_HPF_RES;
+extern PotRef MASTER_LPF_RES;
+extern PotRef MASTER_LPF_FREQ;
 
 // ---------------------------------------------------------------------------
-// All named pots — single registration point for debug name lookup.
-// Add every new PotRef here; getPotName() will find it automatically.
+// All named pots — runtime array, single registration point for name lookup.
+// Defined in HardwareConfigData.cpp; size tracked by kAllNamedPotsCount.
 // ---------------------------------------------------------------------------
 
-constexpr PotRef kAllNamedPots[] = {
-    // Channel strips
-    AUX1_INPUT_GAIN, AUX1_EQ_MID, AUX1_EQ_LOW, AUX1_EQ_HIGH, AUX1_FX_SEND, AUX1_FX2_SEND,
-    AUX2_INPUT_GAIN, AUX2_EQ_MID, AUX2_EQ_HIGH, AUX2_EQ_LOW, AUX2_FX_SEND, AUX2_FX2_SEND,
-    AUX3_INPUT_GAIN, AUX3_EQ_LOW, AUX3_EQ_MID, AUX3_EQ_HIGH, AUX3_FX_SEND, AUX3_FX2_SEND,
-    AUX4_INPUT_GAIN, AUX4_EQ_LOW, AUX4_EQ_MID, AUX4_EQ_HIGH, AUX4_FX_SEND, AUX4_FX2_SEND,
-    // Master output
-    MASTER_GAIN,
-    // Master parametric EQ
-    MASTER_EQ_SUB_FREQ,  MASTER_EQ_SUB_GAIN,
-    MASTER_EQ_KICK_FREQ, MASTER_EQ_KICK_GAIN,
-    MASTER_EQ_MID_FREQ,  MASTER_EQ_MID_GAIN,
-    MASTER_EQ_TOP_FREQ,  MASTER_EQ_TOP_GAIN,
-    // Master filter section
-    MASTER_HPF_FREQ, MASTER_HPF_RES,
-    MASTER_LPF_FREQ, MASTER_LPF_RES,
-    // Band Trim — speaker crossover gains
-    BTRIM_SUB, BTRIM_KICK, BTRIM_MID, BTRIM_TOP,
-    // Dub Siren
-    SIREN_TYPE, SIREN_MOD, SIREN_GAIN, SIREN_FX_SEND, SIREN_FX2_SEND,
-    // Graphic EQ — 12 bands (40 Hz … 16 kHz)
-    GEQ_40HZ, GEQ_60HZ, GEQ_80HZ, GEQ_100HZ, GEQ_125HZ, GEQ_250HZ,
-    GEQ_500HZ, GEQ_1KHZ, GEQ_2KHZ, GEQ_4KHZ, GEQ_8KHZ, GEQ_16KHZ,
-};
+constexpr int kAllNamedPotsMax = 64; ///< Upper bound — increase if more pots are added.
+extern PotRef kAllNamedPots[kAllNamedPotsMax];
+extern int    kAllNamedPotsCount;
 
 // ---------------------------------------------------------------------------
-// Debug logging exclusion list
+// Debug logging exclusion list — runtime array.
 // ---------------------------------------------------------------------------
 
-constexpr PotRef kIgnoredPots[] = {
-    {2, 2, false, nullptr}, // MUX2/C02 — unassigned / floating
-    {0, 2, false, nullptr}, // MUX0/C02 — unassigned / floating
-    {0, 4, false, nullptr}, // MUX0/C04 — unassigned / floating
-    {2, 4, false, nullptr}, // MUX2/C04 — unassigned / floating
-};
-constexpr int kIgnoredPotsCount = static_cast<int>(sizeof(kIgnoredPots) / sizeof(kIgnoredPots[0]));
+constexpr int kIgnoredPotsMax = 16;
+extern PotRef kIgnoredPots[kIgnoredPotsMax];
+extern int    kIgnoredPotsCount;
 
 // ---------------------------------------------------------------------------
 // Pot name lookup — no switch/case needed, name lives in the PotRef itself.
@@ -292,8 +244,9 @@ constexpr int kIgnoredPotsCount = static_cast<int>(sizeof(kIgnoredPots) / sizeof
 
 /// Returns the name of the pot at (mux, pot), or nullptr if unassigned.
 inline const char* getPotName(int mux, int pot) {
-    for(const auto& p : kAllNamedPots)
-        if(p.mux == mux && p.pot == pot) return p.name;
+    for(int i = 0; i < kAllNamedPotsCount; ++i)
+        if(kAllNamedPots[i].mux == mux && kAllNamedPots[i].pot == pot)
+            return kAllNamedPots[i].name;
     return nullptr;
 }
 

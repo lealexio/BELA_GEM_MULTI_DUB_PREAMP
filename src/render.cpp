@@ -17,6 +17,7 @@ https://bela.io
 #include "DubSiren.h"
 #include "HardwareConfig.h"
 #include "SoftwareConfig.h"
+#include "ConfigLoader.h"
 
 HardwareManager gHardwareManager;
 ChannelStrip    gChannelStrip;   // IN0 → master (CH1)
@@ -51,6 +52,9 @@ Scope scope;
 static unsigned int gClipWarnCounter     = 0;
 static int          gStartupRampRemaining = 0;
 static int          gStartupRampTotal     = 0;
+
+// Populated in setup() after ConfigLoader::load() — not recomputed every block.
+static PotRef gGeqPots[GraphicEq::kNumBands];
 
 // ---------------------------------------------------------------------------
 // I2C auxiliary task — reads MCP23017 in a non-RT thread every ~5 ms
@@ -114,9 +118,9 @@ static inline float readChannelInput(BelaContext* ctx, unsigned int frame,
  * Falls back to the raw value for unassigned pots.
  */
 static float logicalPotValue(int mux, int pot) {
-    for(const auto& ref : kAllNamedPots)
-        if(ref.mux == mux && ref.pot == pot)
-            return gHardwareManager.getPotValue(ref);
+    for(int i = 0; i < kAllNamedPotsCount; ++i)
+        if(kAllNamedPots[i].mux == mux && kAllNamedPots[i].pot == pot)
+            return gHardwareManager.getPotValue(kAllNamedPots[i]);
     return gHardwareManager.getPotValue(mux, pot);
 }
 
@@ -165,18 +169,10 @@ struct NamedSwitch {
     const char* inactiveLabel; // printed when logically inactive
 };
 
-static const NamedSwitch kNamedSwitches[] = {
-    { "KILL_KICK",       KILL_KICK,       "KILL",    "open"     },
-    { "KILL_SUB",        KILL_SUB,        "KILL",    "open"     },
-    { "KILL_MID",        KILL_MID,        "KILL",    "open"     },
-    { "KILL_TOP",        KILL_TOP,        "KILL",    "open"     },
-    { "FX_FILTER_MIDS",  FX_FILTER_MIDS,  "mids",    "fullband" },
-    { "FX_FILTER_TOPS",  FX_FILTER_TOPS,  "tops",    "fullband" },
-    { "FX2_FILTER_MIDS", FX2_FILTER_MIDS, "mids",    "fullband" },
-    { "FX2_FILTER_TOPS", FX2_FILTER_TOPS, "tops",    "fullband" },
-};
-static constexpr int kNamedSwitchCount =
-    sizeof(kNamedSwitches) / sizeof(kNamedSwitches[0]);
+// Populated in setup() after ConfigLoader::load() so that SwitchRef values
+// reflect any JSON overrides before the array is frozen for render().
+static NamedSwitch kNamedSwitches[8];
+static int         kNamedSwitchCount = 0;
 
 /** Returns true if a (port, pin) pair is already covered by kNamedSwitches or handled separately. */
 static bool isSwitchNamed(bool portB, int pin) {
@@ -190,7 +186,7 @@ static bool isSwitchNamed(bool portB, int pin) {
 
 /** Prints named switches (logical state) and unassigned pins (raw state) on change. */
 static void printChangedSwitches() {
-    static bool prevNamed[kNamedSwitchCount];
+    static bool prevNamed[8] = {};  // sized for kNamedSwitches[8]
     static int  prevRawA = -1;
     static int  prevRawB = -1;
     static bool initialised = false;
@@ -244,6 +240,28 @@ static void printChangedSwitches() {
 // ---------------------------------------------------------------------------
 
 bool setup(BelaContext* context, void* userData) {
+    // Load hardware mappings from JSON before any other initialisation.
+    // Falls back silently to compiled-in defaults if the file is absent.
+    ConfigLoader::load("/root/Bela/projects/BELA_GEM_MULTI_DUB_PREAMP/config.json");
+
+    // Populate the named-switch table after JSON overrides are applied.
+    kNamedSwitches[0] = { "KILL_KICK",       KILL_KICK,       "KILL",    "open"     };
+    kNamedSwitches[1] = { "KILL_SUB",        KILL_SUB,        "KILL",    "open"     };
+    kNamedSwitches[2] = { "KILL_MID",        KILL_MID,        "KILL",    "open"     };
+    kNamedSwitches[3] = { "KILL_TOP",        KILL_TOP,        "KILL",    "open"     };
+    kNamedSwitches[4] = { "FX_FILTER_MIDS",  FX_FILTER_MIDS,  "mids",    "fullband" };
+    kNamedSwitches[5] = { "FX_FILTER_TOPS",  FX_FILTER_TOPS,  "tops",    "fullband" };
+    kNamedSwitches[6] = { "FX2_FILTER_MIDS", FX2_FILTER_MIDS, "mids",    "fullband" };
+    kNamedSwitches[7] = { "FX2_FILTER_TOPS", FX2_FILTER_TOPS, "tops",    "fullband" };
+    kNamedSwitchCount = 8;
+
+    // Snapshot graphic EQ PotRefs once — avoids 12 struct copies every render block.
+    const PotRef geqInit[GraphicEq::kNumBands] = {
+        GEQ_40HZ, GEQ_60HZ, GEQ_80HZ, GEQ_100HZ, GEQ_125HZ, GEQ_250HZ,
+        GEQ_500HZ, GEQ_1KHZ, GEQ_2KHZ, GEQ_4KHZ, GEQ_8KHZ, GEQ_16KHZ
+    };
+    for(int i = 0; i < GraphicEq::kNumBands; ++i) gGeqPots[i] = geqInit[i];
+
     scope.setup(2, context->audioSampleRate);
 
     if(!gHardwareManager.setup(context)) {
@@ -350,12 +368,8 @@ void render(BelaContext* context, void* userData) {
     );
 
     // --- Master graphic EQ — 12 bands (centered=true in each PotRef → snap at 0.5) ---
-    static const PotRef kGeqPots[GraphicEq::kNumBands] = {
-        GEQ_40HZ, GEQ_60HZ, GEQ_80HZ, GEQ_100HZ, GEQ_125HZ, GEQ_250HZ,
-        GEQ_500HZ, GEQ_1KHZ, GEQ_2KHZ, GEQ_4KHZ, GEQ_8KHZ, GEQ_16KHZ
-    };
     for(int i = 0; i < GraphicEq::kNumBands; ++i)
-        gMasterFx.setGraphicEqBand(i, potToGainDb(gHardwareManager.getPotValue(kGeqPots[i]), kGEqGainRangeDb));
+        gMasterFx.setGraphicEqBand(i, potToGainDb(gHardwareManager.getPotValue(gGeqPots[i]), kGEqGainRangeDb));
 
     // --- Master filter section (HPF + LPF — pot at 0 = filter OFF) ---
     gMasterFx.setHpf(
@@ -494,8 +508,8 @@ void render(BelaContext* context, void* userData) {
         scope.log(dry1 + dry2 + fxReturn, out);
         audioWrite(context, n, FX1_SEND_OUT, fxSend  * startupGain);
         audioWrite(context, n, FX2_SEND_OUT, fxSend2 * startupGain);
-        audioWrite(context, n, MASTER_OUT_L, out    * startupGain);
-        audioWrite(context, n, MASTER_OUT_R, out    * startupGain);
+        for(int i = 0; i < MASTER_OUTS_COUNT; ++i)
+            audioWrite(context, n, MASTER_OUTS[i], out * startupGain);
 
         // VU meter outputs — muted when the corresponding kill is active
         float vuSub  = killSub  ? 0.f : gVuSubLpf.process(out);
