@@ -209,9 +209,6 @@ export function buildMetersPane() {
             peakDb.textContent = '-\u221e';
             getContext().meterPeakDbs[idx] = peakDb;
 
-            mwrap.appendChild(cnv);
-            mwrap.appendChild(peakDb);
-
             const clipLed = el('div', {
                 className: 'meter-clip-led',
                 id: 'mclip-' + idx,
@@ -221,6 +218,9 @@ export function buildMetersPane() {
             });
             clipLed.innerHTML = '<span class="meter-clip-led__bezel"></span><span class="meter-clip-led__core"></span>';
             getContext().meterClipLeds[idx] = clipLed;
+
+            mwrap.appendChild(cnv);
+            mwrap.appendChild(peakDb);
 
             ch.appendChild(mid);
             ch.appendChild(mwrap);

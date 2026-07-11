@@ -258,25 +258,24 @@ gap:12px;align-items:start;
 .meters-card{min-width:0}
 .meter-group{
 display:flex;flex-direction:column;gap:12px;
-align-items:stretch;padding:12px 4px 8px;
+align-items:stretch;padding:12px 2px 8px;
 }
 .meter-ch{
-display:flex;flex-direction:row;align-items:center;gap:10px;
-min-width:0;
+display:flex;flex-direction:row;align-items:center;gap:6px;
+width:100%;min-width:0;
 padding-top:18px;
 }
 .meter-id{
 display:flex;flex-direction:column;gap:2px;
-min-width:52px;flex-shrink:0;
+min-width:40px;flex-shrink:0;
 align-items:flex-end;text-align:right;
 }
 .meter-wrap{
-position:relative;flex:0 0 auto;
-width:300px;max-width:300px;
-height:44px;margin-bottom:2px;
+position:relative;flex:1 1 0;min-width:0;
+max-width:300px;height:44px;margin-bottom:2px;
 }
 .meter-canvas{
-display:block;width:300px;height:44px;
+display:block;width:100%;height:44px;
 border-radius:4px;
 }
 .meter-peak-db{
@@ -300,7 +299,7 @@ transition:color 120ms ease;
 .meter-peak-db.clip{color:#ff3b2a;font-weight:700}
 .meter-clip-led{
 position:relative;flex:0 0 auto;
-width:14px;height:14px;margin-left:2px;
+width:12px;height:12px;
 align-self:center;
 }
 .meter-clip-led__bezel{
@@ -309,7 +308,7 @@ background:linear-gradient(145deg,#3a3a3a 0%,#1a1a1a 55%,#2e2e2e 100%);
 box-shadow:inset 0 1px 2px rgba(255,255,255,.12),0 1px 2px rgba(0,0,0,.45);
 }
 .meter-clip-led__core{
-position:absolute;inset:3px;border-radius:50%;
+position:absolute;inset:2px;border-radius:50%;
 background:radial-gradient(circle at 35% 30%,#5a2018 0%,#2a0a06 70%,#180604 100%);
 box-shadow:inset 0 1px 3px rgba(0,0,0,.6);
 transition:background 120ms ease,box-shadow 120ms ease;
@@ -450,8 +449,6 @@ white-space:nowrap;text-overflow:ellipsis;overflow:hidden;
 }
 @media(max-width:720px){
 .sw-grid{grid-template-columns:1fr}
-.meter-wrap{width:min(300px,calc(100vw - 120px));max-width:min(300px,calc(100vw - 120px))}
-.meter-canvas{width:100%;max-width:300px}
 .mtable col.col-name{width:26%}
 .mtable col.col-num{width:11%}
 .mtable col.col-check{width:10%}
@@ -465,8 +462,8 @@ white-space:nowrap;text-overflow:ellipsis;overflow:hidden;
 .meters-columns{grid-template-columns:1fr 1fr}
 }
 @media(min-width:860px){
-.meter-wrap{width:320px;max-width:320px;height:48px}
-.meter-canvas{width:320px;height:48px}
+.meter-wrap{max-width:320px;height:48px}
+.meter-canvas{height:48px}
 }
 
 /* --- Master EQ curve --- */
