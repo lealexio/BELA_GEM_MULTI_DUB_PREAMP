@@ -73,6 +73,13 @@ var sketch = function(p) {
         'SIREN_TRIGGER'
     ]; // 9 entries
 
+    /** Switch groups for the Live tab UI (indices match SWITCH_NAMES). */
+    const SWITCH_GROUPS = [
+        { label: 'Band kill',      type: 'kill',  indices: [0, 1, 2, 3] },
+        { label: 'FX send filter', type: 'fx',    indices: [4, 5, 6, 7] },
+        { label: 'Siren',          type: 'siren', indices: [8]          }
+    ];
+
     /** Human-readable labels for the 13 audio peak channels. */
     const LEVEL_LABELS = [
         'IN 1','IN 2','IN 3','IN 4',
@@ -378,15 +385,50 @@ body > main{
     font-size:11px;color:#777;
 }
 
-/* --- Switch pills --- */
-#sw-pills{display:flex;flex-wrap:wrap;gap:6px;margin-top:2px}
-.sw-pill{
-    padding:4px 11px;border-radius:12px;font-size:11px;font-weight:700;
-    background:#eee;color:#888;letter-spacing:.03em;
-    transition:background .1s,color .1s;
+/* --- Switches (grouped tiles) --- */
+.sw-grid{
+    display:grid;grid-template-columns:repeat(3,1fr);
+    gap:10px;margin-top:6px;
 }
-.sw-pill.on{background:#1a1a2e;color:#fff}
-.sw-pill.kill.on{background:#e74c3c;color:#fff}
+.sw-group{
+    background:#f7f7f8;border:1px solid #e6e6e8;
+    border-radius:8px;padding:10px 12px 12px;
+}
+.sw-group-kill{border-top:2px solid rgba(231,76,60,.35)}
+.sw-group-fx{border-top:2px solid rgba(243,156,18,.35)}
+.sw-group-siren{border-top:2px solid rgba(41,128,185,.35)}
+.sw-group-title{
+    font-size:9px;font-weight:700;text-transform:uppercase;
+    letter-spacing:.09em;color:#888;margin-bottom:8px;
+}
+.sw-group-items{display:flex;flex-wrap:wrap;gap:6px}
+.sw-group-kill .sw-group-items,
+.sw-group-fx .sw-group-items{
+    display:grid;grid-template-columns:1fr 1fr;gap:6px;
+}
+.sw-tile{
+    display:flex;align-items:center;gap:8px;
+    padding:8px 10px;background:#fff;
+    border:1px solid #e4e4e6;border-radius:6px;
+    transition:border-color .15s,background .15s,box-shadow .15s;
+}
+.sw-tile.on{background:#fafafa;border-color:#d0d0d4}
+.sw-tile-kill.on{border-color:rgba(231,76,60,.45);background:#fff8f7}
+.sw-tile-fx.on{border-color:rgba(243,156,18,.4);background:#fffdf7}
+.sw-tile-siren.on{border-color:rgba(41,128,185,.45);background:#f7fbff}
+.sw-led{
+    flex-shrink:0;width:9px;height:9px;border-radius:50%;
+    background:#d8d8dc;
+    transition:background .15s,box-shadow .15s;
+}
+.sw-tile.on .sw-led{background:#1a1a2e;box-shadow:0 0 5px rgba(26,26,46,.35)}
+.sw-tile-kill.on .sw-led{background:#e74c3c;box-shadow:0 0 7px rgba(231,76,60,.45)}
+.sw-tile-fx.on .sw-led{background:#d68910;box-shadow:0 0 6px rgba(214,137,16,.4)}
+.sw-tile-siren.on .sw-led{background:#2980b9;box-shadow:0 0 7px rgba(41,128,185,.45)}
+.sw-tile-name{
+    font-size:10px;font-weight:700;color:#444;
+    letter-spacing:.04em;line-height:1.2;
+}
 
 /* --- Meters (canvas VU, horizontal) --- */
 #meters-wrap{display:flex;flex-direction:column;gap:8px}
@@ -549,6 +591,7 @@ body > main{
     #live-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
 }
 @media(max-width:720px){
+    .sw-grid{grid-template-columns:1fr}
     .mtable col.col-name{width:26%}
     .mtable col.col-num{width:11%}
     .mtable col.col-check{width:10%}
@@ -687,20 +730,50 @@ body > main{
         // Switches card (full width below grid)
         const swCard = el('div', {className:'card'});
         swCard.appendChild(cardTitle('Switches'));
-        const pills = el('div', {id:'sw-pills'});
+        const swGrid = el('div', {className:'sw-grid'});
         switchPills = [];
-        SWITCH_NAMES.forEach((name, i) => {
-            const killNames = ['KILL_SUB','KILL_KICK','KILL_MID','KILL_TOP'];
-            const isKill = killNames.includes(name);
-            const pill = el('div', {className:'sw-pill' + (isKill?' kill':'')});
-            pill.textContent = name.replace(/_/g, '\u202F');
-            pills.appendChild(pill);
-            switchPills.push(pill);
+
+        SWITCH_GROUPS.forEach(group => {
+            const grp = el('div', {className:'sw-group sw-group-' + group.type});
+            const gtitle = el('div', {className:'sw-group-title'});
+            gtitle.textContent = group.label;
+            grp.appendChild(gtitle);
+
+            const items = el('div', {className:'sw-group-items'});
+            group.indices.forEach(i => {
+                items.appendChild(buildSwitchTile(i, SWITCH_NAMES[i], group.type));
+            });
+            grp.appendChild(items);
+            swGrid.appendChild(grp);
         });
-        swCard.appendChild(pills);
+
+        swCard.appendChild(swGrid);
         pane.appendChild(swCard);
 
         return pane;
+    }
+
+    /** Returns a short display label for a switch name. */
+    function switchDisplayName(name) {
+        if(name.indexOf('KILL_') === 0) return name.slice(5);
+        if(name === 'FX_FILTER_MIDS')  return 'FX1 MIDS';
+        if(name === 'FX_FILTER_TOPS') return 'FX1 TOPS';
+        if(name === 'FX2_FILTER_TOPS') return 'FX2 TOPS';
+        if(name === 'FX2_FILTER_MIDS') return 'FX2 MIDS';
+        if(name === 'SIREN_TRIGGER') return 'GATE';
+        return name.replace(/_/g, ' ');
+    }
+
+    /** Builds one switch status tile with LED indicator. */
+    function buildSwitchTile(index, name, type) {
+        const tile = el('div', {className:'sw-tile sw-tile-' + type});
+        const led  = el('div', {className:'sw-led'});
+        const lbl  = el('span', {className:'sw-tile-name'});
+        lbl.textContent = switchDisplayName(name);
+        tile.appendChild(led);
+        tile.appendChild(lbl);
+        switchPills[index] = tile;
+        return tile;
     }
 
     // ---- Meters tab --------------------------------------------------------
@@ -1739,12 +1812,12 @@ body > main{
         }
     }
 
-    /** Updates switch pill colors from current switchStates. */
+    /** Updates switch tile states from current switchStates. */
     function updateSwitches() {
-        switchPills.forEach((pill, i) => {
-            const on = switchStates[i] > 0.5;
-            pill.classList.toggle('on', on);
-        });
+        for(let i = 0; i < SWITCH_NAMES.length; i++) {
+            const tile = switchPills[i];
+            if(tile) tile.classList.toggle('on', switchStates[i] > 0.5);
+        }
     }
 
     /** Converts a linear peak level to a 0–100 % bar height (-60 dBFS floor). */
