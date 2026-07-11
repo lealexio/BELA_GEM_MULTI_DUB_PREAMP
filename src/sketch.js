@@ -19,6 +19,9 @@ var sketch = function(p) {
     // Constants — must match render.cpp / HardwareConfigData.cpp exactly
     // -----------------------------------------------------------------------
 
+    /** Minimum pot travel (0–1) required to accept a detect hit. */
+    const DETECT_POT_MIN_DELTA = 0.25;
+
     const SIREN_PRESETS = ['Wail', 'Whoop', 'Police', 'Scanner', 'Riotgun', 'Laser'];
 
     /** Pot names in kAllNamedPots order (58 entries). */
@@ -116,6 +119,9 @@ var sketch = function(p) {
     let currentTab   = 0;
     let mappingBuilt = false;
 
+    /** Active detect session, or null. */
+    let detectMode     = null;
+
     // Cached DOM references
     let sirenDots    = [];
     let sirenNameEl  = null;
@@ -125,6 +131,7 @@ var sketch = function(p) {
     let consoleList  = null;
     let switchPills  = [];
     let downloadStatusEl = null;
+    let detectStatusEl   = null;
 
     // -----------------------------------------------------------------------
     // CSS injection
@@ -154,8 +161,8 @@ body > main{
 }
 #bela-gui{
     display:flex;flex-direction:column;
-    width:100%;max-width:none;
-    height:100vh;
+    width:100%;max-width:100%;
+    height:100vh;overflow-x:hidden;
 }
 
 /* Fixed top chrome — full viewport width without 100vw (no horizontal scroll). */
@@ -203,10 +210,12 @@ body > main{
     flex:1;
     padding:14px;
     overflow-y:auto;
+    overflow-x:hidden;
+    max-width:100%;
     /* Forces the flex child to shrink and scroll rather than expand the parent */
     min-height:0;
 }
-.tab-pane{display:none}
+.tab-pane{display:none;max-width:100%}
 .tab-pane.active{display:block}
 
 /* --- Cards --- */
@@ -322,6 +331,66 @@ body > main{
 .mtable tr.dup-conflict td{background:#fff5f5}
 .mtable tr.dup-conflict input[type=number],
 .mtable tr.dup-conflict select{border-color:#e74c3c;background:#fffafa}
+#detect-status{
+    display:none;font-size:12px;color:#1a5276;
+    background:#eaf4fb;border-left:3px solid #2980b9;
+    padding:8px 12px;border-radius:0 4px 4px 0;margin-bottom:12px;
+}
+#detect-status.show{display:block}
+#detect-status.err{color:#922;background:#fdecea;border-left-color:#e74c3c}
+.mtable tr.row-detecting td{
+    background:#fff8e6;
+    animation:detectPulse 0.9s ease-in-out infinite alternate;
+}
+@keyframes detectPulse{
+    from{background:#fff8e6}
+    to{background:#ffe9a8}
+}
+.btn-detect-row{
+    display:block;width:100%;margin:0 auto;
+    padding:4px 2px;background:#2980b9;color:#fff;
+    border:none;border-radius:4px;font-size:9px;font-weight:700;
+    cursor:pointer;letter-spacing:.02em;white-space:nowrap;
+    line-height:1.3;
+}
+.btn-detect-row:hover{background:#1f6391}
+.btn-detect-row:disabled{background:#ccc;cursor:default}
+.btn-detect-row.detect-active{
+    background:#fff;color:#e74c3c;border:2px solid #e74c3c;
+    font-size:12px;padding:2px 0;
+}
+.btn-detect-row.detect-active:hover{background:#fdecea}
+#pane-mapping{max-width:100%}
+.mtable-wrap{
+    width:100%;max-width:100%;
+    margin-bottom:4px;
+}
+.mtable{
+    width:100%;max-width:100%;
+    table-layout:fixed;
+    border-collapse:collapse;
+    font-size:12px;
+}
+.mtable col.col-name{width:32%}
+.mtable col.col-num{width:10%}
+.mtable col.col-check{width:9%}
+.mtable col.col-port{width:11%}
+.mtable col.col-detect{width:15%}
+.mtable th,.mtable td{
+    overflow:hidden;
+    vertical-align:middle;
+}
+.mtable th.detect-col,
+.mtable td.detect-cell{
+    text-align:center;
+    padding:4px 3px!important;
+}
+.mtable th.detect-col{
+    font-size:9px;line-height:1.2;text-align:center;
+    letter-spacing:.03em;white-space:normal;
+    word-break:break-word;
+}
+.mtable th.col-check,.mtable td.col-check{text-align:center}
 #mapping-toolbar{
     display:flex;align-items:center;gap:12px;
     margin-bottom:14px;flex-wrap:wrap;
@@ -338,27 +407,29 @@ body > main{
     font-size:11px;font-weight:700;text-transform:uppercase;
     letter-spacing:.08em;color:#999;margin:14px 0 7px;
 }
-.mtable{width:100%;border-collapse:collapse;font-size:12px}
 .mtable th{
     background:#f5f5f5;text-align:left;
-    padding:6px 10px;font-weight:700;
+    padding:6px 6px;font-weight:700;
     border-bottom:2px solid #ddd;color:#666;
-    font-size:10px;letter-spacing:.07em;text-transform:uppercase;
+    font-size:10px;letter-spacing:.05em;text-transform:uppercase;
 }
-.mtable td{padding:4px 10px;border-bottom:1px solid #f2f2f2}
+.mtable td{padding:4px 6px;border-bottom:1px solid #f2f2f2}
 .mtable tr:hover td{background:#fafafa}
 .mtable input[type=number]{
-    width:52px;padding:3px 6px;border:1px solid #ddd;
+    width:100%;min-width:0;max-width:100%;
+    padding:3px 4px;border:1px solid #ddd;
     border-radius:4px;font-size:12px;font-family:inherit;
 }
-.mtable input[type=checkbox]{width:16px;height:16px;cursor:pointer}
+.mtable input[type=checkbox]{width:16px;height:16px;cursor:pointer;margin:0 auto;display:block}
 .mtable select{
-    padding:3px 6px;border:1px solid #ddd;
+    width:100%;min-width:0;max-width:100%;
+    padding:3px 4px;border:1px solid #ddd;
     border-radius:4px;font-size:12px;font-family:inherit;
 }
 .pname{
     font-family:monospace;font-size:11px;
     font-weight:700;color:#1a1a2e;
+    white-space:nowrap;text-overflow:ellipsis;overflow:hidden;
 }
 .loading-cell{font-style:italic;color:#bbb;padding:10px}
 
@@ -366,6 +437,16 @@ body > main{
 @media(min-width:580px){
     #tab-content{padding:18px}
     #live-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+}
+@media(max-width:720px){
+    .mtable col.col-name{width:26%}
+    .mtable col.col-num{width:11%}
+    .mtable col.col-check{width:10%}
+    .mtable col.col-port{width:12%}
+    .mtable col.col-detect{width:16%}
+    .mtable th,.mtable td{padding-left:4px;padding-right:4px}
+    .mtable th{font-size:9px}
+    .mtable input[type=number],.mtable select{font-size:11px}
 }
 @media(min-width:860px){
     .meter-bar{height:190px}
@@ -550,6 +631,9 @@ body > main{
         conflicts.innerHTML = '<strong>Mapping conflicts</strong><ul id="mapping-conflicts-list"></ul>';
         pane.appendChild(conflicts);
 
+        const detectBanner = el('div', {id:'detect-status'});
+        pane.appendChild(detectBanner);
+
         const toolbar = el('div', {id:'mapping-toolbar'});
         const btn = el('button', {id:'btn-download'});
         btn.textContent = 'Download config.json';
@@ -558,6 +642,7 @@ body > main{
 
         downloadStatusEl = el('span', {id:'download-status'});
         toolbar.appendChild(downloadStatusEl);
+        detectStatusEl = detectBanner;
         pane.appendChild(toolbar);
 
         // Pots table
@@ -565,30 +650,50 @@ body > main{
         potTitle.textContent = 'Potentiometers';
         pane.appendChild(potTitle);
 
+        const potWrap = el('div', {className:'mtable-wrap'});
         const potTbl = el('table', {className:'mtable', id:'pot-table'});
         potTbl.innerHTML = `
+            <colgroup>
+                <col class="col-name">
+                <col class="col-num"><col class="col-num">
+                <col class="col-check"><col class="col-check">
+                <col class="col-detect">
+            </colgroup>
             <thead><tr>
-                <th>Name</th><th>MUX</th><th>Channel</th><th>Reversed</th><th>Centered</th>
+                <th>Name</th><th>MUX</th><th>Channel</th>
+                <th class="col-check">Reversed</th><th class="col-check">Centered</th>
+                <th class="detect-col">Auto detect</th>
             </tr></thead>
             <tbody id="pot-tbody">
-                <tr><td colspan="5" class="loading-cell">Waiting for connection…</td></tr>
+                <tr><td colspan="6" class="loading-cell">Waiting for connection…</td></tr>
             </tbody>`;
-        pane.appendChild(potTbl);
+        potWrap.appendChild(potTbl);
+        pane.appendChild(potWrap);
 
         // Switches table
         const swTitle = el('div', {className:'msec-title'});
         swTitle.textContent = 'Switches (MCP23017)';
         pane.appendChild(swTitle);
 
+        const swWrap = el('div', {className:'mtable-wrap'});
         const swTbl = el('table', {className:'mtable', id:'sw-table'});
         swTbl.innerHTML = `
+            <colgroup>
+                <col class="col-name">
+                <col class="col-num"><col class="col-port">
+                <col class="col-check">
+                <col class="col-detect">
+            </colgroup>
             <thead><tr>
-                <th>Name</th><th>Pin</th><th>Port</th><th>Reversed</th>
+                <th>Name</th><th>Pin</th><th>Port</th>
+                <th class="col-check">Reversed</th>
+                <th class="detect-col">Auto map</th>
             </tr></thead>
             <tbody id="sw-tbody">
-                <tr><td colspan="4" class="loading-cell">Waiting for connection…</td></tr>
+                <tr><td colspan="5" class="loading-cell">Waiting for connection…</td></tr>
             </tbody>`;
-        pane.appendChild(swTbl);
+        swWrap.appendChild(swTbl);
+        pane.appendChild(swWrap);
 
         return pane;
     }
@@ -598,6 +703,7 @@ body > main{
     // -----------------------------------------------------------------------
 
     function switchTab(idx) {
+        if(idx !== 2) cancelDetect();
         currentTab = idx;
         document.querySelectorAll('.tab-btn').forEach((b, i) =>
             b.classList.toggle('active', i === idx));
@@ -622,16 +728,20 @@ body > main{
                 const rev = potMapping[i*4+2] > 0.5;
                 const cen = potMapping[i*4+3] > 0.5;
                 const tr = document.createElement('tr');
+                tr.dataset.mapTable = 'pot';
+                tr.dataset.mapIndex = String(i);
                 tr.innerHTML =
-                    `<td class="pname">${name}</td>` +
+                    `<td class="pname" title="${name}">${name}</td>` +
                     `<td><input type="number" min="0" max="3"  value="${mux}" ` +
                     `data-i="${i}" data-f="mux" class="pi"></td>` +
                     `<td><input type="number" min="0" max="15" value="${pot}" ` +
                     `data-i="${i}" data-f="pot" class="pi"></td>` +
-                    `<td><input type="checkbox" ${rev?'checked':''} ` +
+                    `<td class="col-check"><input type="checkbox" ${rev?'checked':''} ` +
                     `data-i="${i}" data-f="rev" class="pi"></td>` +
-                    `<td><input type="checkbox" ${cen?'checked':''} ` +
-                    `data-i="${i}" data-f="cen" class="pi"></td>`;
+                    `<td class="col-check"><input type="checkbox" ${cen?'checked':''} ` +
+                    `data-i="${i}" data-f="cen" class="pi"></td>` +
+                    `<td class="detect-cell"></td>`;
+                tr.querySelector('.detect-cell').appendChild(createDetectButton('pot', i));
                 ptbody.appendChild(tr);
             });
         }
@@ -644,15 +754,19 @@ body > main{
                 const portB = switchMapping[i*3+1] > 0.5;
                 const rev   = switchMapping[i*3+2] > 0.5;
                 const tr = document.createElement('tr');
+                tr.dataset.mapTable = 'sw';
+                tr.dataset.mapIndex = String(i);
                 tr.innerHTML =
-                    `<td class="pname">${name}</td>` +
+                    `<td class="pname" title="${name}">${name}</td>` +
                     `<td><input type="number" min="0" max="7" value="${pin}" ` +
                     `data-i="${i}" data-f="pin" class="si"></td>` +
                     `<td><select data-i="${i}" data-f="port" class="si">` +
                     `<option value="0"${!portB?' selected':''}>A</option>` +
                     `<option value="1"${portB?' selected':''}>B</option></select></td>` +
-                    `<td><input type="checkbox" ${rev?'checked':''} ` +
-                    `data-i="${i}" data-f="rev" class="si"></td>`;
+                    `<td class="col-check"><input type="checkbox" ${rev?'checked':''} ` +
+                    `data-i="${i}" data-f="rev" class="si"></td>` +
+                    `<td class="detect-cell"></td>`;
+                tr.querySelector('.detect-cell').appendChild(createDetectButton('sw', i));
                 stbody.appendChild(tr);
             });
         }
@@ -739,6 +853,219 @@ body > main{
 
         banner.classList.add('show');
         list.innerHTML = messages.map(m => '<li>' + m + '</li>').join('');
+    }
+
+    /** Creates a per-row Detect / Cancel button. */
+    function createDetectButton(table, index) {
+        const btn = el('button', {className: 'btn-detect-row', type: 'button'});
+        btn.textContent = 'Map';
+        btn.title       = 'Detect control';
+        btn.dataset.table = table;
+        btn.dataset.index = String(index);
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if(detectMode &&
+               detectMode.table === table &&
+               detectMode.targetIndex === index)
+                cancelDetect();
+            else
+                startDetect(table, index);
+        });
+        return btn;
+    }
+
+    function showDetectStatus(msg, isError) {
+        if(!detectStatusEl) return;
+        detectStatusEl.textContent = msg;
+        detectStatusEl.className     = isError ? 'show err' : 'show';
+    }
+
+    function hideDetectStatus() {
+        if(!detectStatusEl) return;
+        detectStatusEl.textContent = '';
+        detectStatusEl.className   = '';
+    }
+
+    function setDetectUiActive(active) {
+        document.querySelectorAll('.btn-detect-row').forEach(btn => {
+            const t = btn.dataset.table;
+            const i = parseInt(btn.dataset.index, 10);
+            const isTarget = active && detectMode &&
+                             detectMode.table === t &&
+                             detectMode.targetIndex === i;
+            btn.textContent = isTarget ? '\u00d7' : 'Det';
+            btn.title       = isTarget ? 'Cancel detect' : 'Detect control';
+            btn.classList.toggle('detect-active', isTarget);
+            btn.disabled    = active && !isTarget;
+        });
+        document.querySelectorAll('#pot-tbody tr, #sw-tbody tr').forEach(row =>
+            row.classList.remove('row-detecting'));
+        if(active && detectMode) {
+            const tbody = detectMode.table === 'pot' ? '#pot-tbody' : '#sw-tbody';
+            const tr = document.querySelector(
+                `${tbody} tr[data-map-index="${detectMode.targetIndex}"]`);
+            if(tr) tr.classList.add('row-detecting');
+        }
+    }
+
+    /** Snapshots live pot/switch values for movement detection. */
+    function snapshotControlValues() {
+        const snapPot = new Float32Array(POT_NAMES.length);
+        const snapSw  = new Float32Array(SWITCH_NAMES.length);
+        for(let i = 0; i < POT_NAMES.length; i++)
+            snapPot[i] = potValues[i] != null ? potValues[i] : 0;
+        for(let i = 0; i < SWITCH_NAMES.length; i++)
+            snapSw[i] = switchStates[i] != null ? switchStates[i] : 0;
+        return {snapPot, snapSw};
+    }
+
+    /** Starts listening for a pot move (≥25%) or switch toggle for one row. */
+    function startDetect(table, index) {
+        if(detectMode) cancelDetect();
+        if(!mappingBuilt) {
+            showDetectStatus('Waiting for Bela mapping…', true);
+            return;
+        }
+        if(typeof Bela === 'undefined') {
+            showDetectStatus('Bela not connected', true);
+            return;
+        }
+
+        const {snapPot, snapSw} = snapshotControlValues();
+        detectMode = {table, targetIndex: index, snapPot, snapSw};
+
+        setDetectUiActive(true);
+        const targetName = table === 'pot' ? POT_NAMES[index] : SWITCH_NAMES[index];
+        if(table === 'pot') {
+            showDetectStatus(
+                'Move a pot at least 25% for ' + targetName + ' — ' +
+                'MUX/channel will be copied from the control you move.'
+            );
+        } else {
+            showDetectStatus(
+                'Toggle a switch for ' + targetName + ' — ' +
+                'pin/port will be copied from the switch you flip.'
+            );
+        }
+    }
+
+    /** Aborts an active detect session. */
+    function cancelDetect() {
+        if(!detectMode) return;
+        detectMode = null;
+        setDetectUiActive(false);
+        hideDetectStatus();
+    }
+
+    /** Sets one mapping form field and notifies conflict checker. */
+    function setMappingField(table, rowIndex, field, value) {
+        const cls = table === 'pot' ? 'pi' : 'si';
+        const inp = document.querySelector(`.${cls}[data-i="${rowIndex}"][data-f="${field}"]`);
+        if(!inp) return;
+        if(inp.type === 'checkbox')
+            inp.checked = !!value;
+        else
+            inp.value = value;
+        inp.dispatchEvent(new Event('input', {bubbles: true}));
+    }
+
+    /** Finds the pot index with the largest change since the detect snapshot. */
+    function findMovedPotIndex(snapPot) {
+        let bestIdx = -1;
+        let bestDelta = 0;
+        for(let i = 0; i < POT_NAMES.length; i++) {
+            const cur   = potValues[i] != null ? potValues[i] : 0;
+            const delta = Math.abs(cur - snapPot[i]);
+            if(delta > bestDelta) {
+                bestDelta = delta;
+                bestIdx   = i;
+            }
+        }
+        if(bestIdx < 0 || bestDelta < DETECT_POT_MIN_DELTA) return -1;
+        return bestIdx;
+    }
+
+    /** Finds a switch that toggled since the detect snapshot. */
+    function findToggledSwitchIndex(snapSw) {
+        for(let i = 0; i < SWITCH_NAMES.length; i++) {
+            const cur = switchStates[i] != null ? switchStates[i] : 0;
+            if((cur > 0.5) !== (snapSw[i] > 0.5)) return i;
+        }
+        return -1;
+    }
+
+    /** Reads mux/pot/rev/cen for one pot row from the mapping table. */
+    function readPotMappingRow(i) {
+        const muxInp = document.querySelector(`.pi[data-i="${i}"][data-f="mux"]`);
+        const potInp = document.querySelector(`.pi[data-i="${i}"][data-f="pot"]`);
+        const revInp = document.querySelector(`.pi[data-i="${i}"][data-f="rev"]`);
+        const cenInp = document.querySelector(`.pi[data-i="${i}"][data-f="cen"]`);
+        if(!muxInp || !potInp) return null;
+        return {
+            mux: parseInt(muxInp.value, 10) || 0,
+            pot: parseInt(potInp.value, 10) || 0,
+            rev: revInp ? revInp.checked : false,
+            cen: cenInp ? cenInp.checked : false
+        };
+    }
+
+    /** Reads pin/port/rev for one switch row from the mapping table. */
+    function readSwitchMappingRow(i) {
+        const pinInp  = document.querySelector(`.si[data-i="${i}"][data-f="pin"]`);
+        const portInp = document.querySelector(`.si[data-i="${i}"][data-f="port"]`);
+        const revInp  = document.querySelector(`.si[data-i="${i}"][data-f="rev"]`);
+        if(!pinInp || !portInp) return null;
+        return {
+            pin:  parseInt(pinInp.value, 10) || 0,
+            port: parseInt(portInp.value, 10) || 0,
+            rev:  revInp ? revInp.checked : false
+        };
+    }
+
+    /** Applies detect result to the selected row, then ends the session. */
+    function finishDetect(sourceIndex, sourceName) {
+        const dst = detectMode.targetIndex;
+        const table = detectMode.table;
+
+        if(table === 'pot') {
+            const src = readPotMappingRow(sourceIndex);
+            if(!src) { cancelDetect(); return; }
+            setMappingField('pot', dst, 'mux', src.mux);
+            setMappingField('pot', dst, 'pot', src.pot);
+            setMappingField('pot', dst, 'rev', src.rev);
+            setMappingField('pot', dst, 'cen', src.cen);
+            showDownloadStatus(
+                'Detected ' + sourceName + ' → MUX ' + src.mux + ' / ch ' + src.pot, false
+            );
+        } else {
+            const src = readSwitchMappingRow(sourceIndex);
+            if(!src) { cancelDetect(); return; }
+            setMappingField('sw', dst, 'pin', src.pin);
+            setMappingField('sw', dst, 'port', src.port);
+            setMappingField('sw', dst, 'rev', src.rev);
+            const portLabel = src.port > 0.5 ? 'B' : 'A';
+            showDownloadStatus(
+                'Detected ' + sourceName + ' → port ' + portLabel + ' / pin ' + src.pin, false
+            );
+        }
+
+        updateMappingConflicts();
+        cancelDetect();
+    }
+
+    /** Polls live buffers while detect mode is active. */
+    function updateDetectMode() {
+        if(!detectMode) return;
+
+        if(detectMode.table === 'pot') {
+            const srcIdx = findMovedPotIndex(detectMode.snapPot);
+            if(srcIdx >= 0)
+                finishDetect(srcIdx, POT_NAMES[srcIdx]);
+        } else {
+            const srcIdx = findToggledSwitchIndex(detectMode.snapSw);
+            if(srcIdx >= 0)
+                finishDetect(srcIdx, SWITCH_NAMES[srcIdx]);
+        }
     }
 
     // -----------------------------------------------------------------------
@@ -1103,6 +1430,7 @@ body > main{
 
         // Meters are DOM-heavy — only update when visible
         if(currentTab === 1) updateMeters();
+        if(detectMode) updateDetectMode();
     };
 };
 
