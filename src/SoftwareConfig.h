@@ -265,11 +265,12 @@ constexpr bool kFxReturnPostMaster = true;
 // Bela GUI web interface (sketch.js)
 // ---------------------------------------------------------------------------
 
-/// GUI send interval in audio samples (~16.7 ms @ 44.1 kHz → ~60 fps).
-constexpr int kGuiUpdateIntervalSamples = 735;
+/// GUI send interval in audio samples (~50 ms @ 44.1 kHz → ~20 fps).
+/// Lower rate keeps multi-client WiFi sessions stable on the embedded web server.
+constexpr int kGuiUpdateIntervalSamples = 2205;
 
-/// Resend static mapping/config-meta buffers every N GUI ticks (~250 ms @ 60 fps).
-constexpr int kGuiStaticBufSendDivisor = 15;
+/// Resend static mapping/config-meta buffers every N GUI ticks (~2 s @ 20 fps).
+constexpr int kGuiStaticBufSendDivisor = 40;
 
 /// Float count for GUI buffer 6 (mux, routing, ignoredPots). Must match sketch.js.
 constexpr int kGuiConfigMetaHeaderFloats = 21;

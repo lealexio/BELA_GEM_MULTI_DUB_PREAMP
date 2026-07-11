@@ -650,7 +650,7 @@ void render(BelaContext* context, void* userData) {
         gClipWarnCounter = 0;
     }
 
-    // --- GUI update (~60 fps) — count samples, not render blocks ---
+    // --- GUI update (~20 fps) — count samples, not render blocks ---
     gGuiUpdateSampleCount += (int)context->audioFrames;
     if(gGuiUpdateSampleCount >= kGuiUpdateIntervalSamples) {
         gGuiUpdateSampleCount -= kGuiUpdateIntervalSamples;

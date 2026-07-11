@@ -1420,7 +1420,7 @@ body > main{
         layoutTopChrome();
         window.addEventListener('resize', layoutTopChrome);
 
-        p.frameRate(60);
+        p.frameRate(20);
     };
 
     p.draw = function() {
