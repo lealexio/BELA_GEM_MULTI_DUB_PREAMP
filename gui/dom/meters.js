@@ -4,7 +4,8 @@ import {
     LEVEL_GROUPS, LEVEL_LABELS,
     VU_BOX_COUNT, VU_BOX_COUNT_RED, VU_BOX_COUNT_YELLOW,
     VU_BOX_GAP_FRACTION, VU_MAX, VU_CANVAS_W, VU_CANVAS_H,
-    METER_ATTACK, METER_RELEASE, PEAK_HOLD_MS, PEAK_DECAY
+    METER_ATTACK, METER_RELEASE, PEAK_HOLD_MS, PEAK_DECAY,
+    CLIP_THRESHOLD, CLIP_HOLD_MS
 } from '../config.js';
 import { el, cardTitle } from './utils.js';
 
@@ -211,8 +212,19 @@ export function buildMetersPane() {
             mwrap.appendChild(cnv);
             mwrap.appendChild(peakDb);
 
+            const clipLed = el('div', {
+                className: 'meter-clip-led',
+                id: 'mclip-' + idx,
+                title: 'Clip (≥ ' + (CLIP_THRESHOLD * 100).toFixed(0) + '% full scale)',
+                role: 'img',
+                'aria-label': 'Clip indicator off'
+            });
+            clipLed.innerHTML = '<span class="meter-clip-led__bezel"></span><span class="meter-clip-led__core"></span>';
+            getContext().meterClipLeds[idx] = clipLed;
+
             ch.appendChild(mid);
             ch.appendChild(mwrap);
+            ch.appendChild(clipLed);
             row.appendChild(ch);
         });
 
@@ -258,6 +270,11 @@ export function stopMeterAnim() {
     getContext().meterAnimId = null;
 }
 
+/** Returns true when a linear peak level is at or above the clip threshold. */
+export function isLevelClipping(raw) {
+    return raw >= CLIP_THRESHOLD;
+}
+
 /** Updates canvas VU meters with peak-hold and segmented box rendering. */
 export function updateMetersFrame() {
     const ctx = getContext();
@@ -276,6 +293,21 @@ export function updateMetersFrame() {
         } else if(now >= ctx.peakHoldExpire[i]) {
             ctx.peakHoldLevel[i] *= PEAK_DECAY;
         }
+
+        if(isLevelClipping(raw) || isLevelClipping(ctx.peakHoldLevel[i]))
+            ctx.clipHoldUntil[i] = now + CLIP_HOLD_MS;
+
+        const clipping = now < ctx.clipHoldUntil[i];
+
+        const clipLed = ctx.meterClipLeds[i];
+        if(clipLed) {
+            clipLed.classList.toggle('on', clipping);
+            clipLed.setAttribute('aria-label', clipping ? 'Clip indicator on' : 'Clip indicator off');
+        }
+        if(ctx.meterDbs[i])
+            ctx.meterDbs[i].classList.toggle('clip', clipping);
+        if(ctx.meterPeakDbs[i])
+            ctx.meterPeakDbs[i].classList.toggle('clip', clipping);
 
         const vu = ctx.meterVu[i];
         if(vu) {

@@ -246,6 +246,8 @@ var __belaPreampSketch = (() => {
   var METER_RELEASE = 0.14;
   var PEAK_HOLD_MS = 750;
   var PEAK_DECAY = 0.94;
+  var CLIP_THRESHOLD = 0.99;
+  var CLIP_HOLD_MS = 1500;
   var VU_BOX_COUNT = 30;
   var VU_BOX_COUNT_RED = 4;
   var VU_BOX_COUNT_YELLOW = 6;
@@ -269,10 +271,12 @@ var __belaPreampSketch = (() => {
       meterSmooth: new Float32Array(13).fill(0),
       peakHoldLevel: new Float32Array(13).fill(0),
       peakHoldExpire: new Float64Array(13).fill(0),
+      clipHoldUntil: new Float64Array(13).fill(0),
       meterAnimId: null,
       meterVu: [],
       meterPeakDbs: [],
       meterDbs: [],
+      meterClipLeds: [],
       recentChanges: [],
       prevPotValues: new Float32Array(58).fill(-1),
       prevPotValuesNormal: new Float32Array(58).fill(-1),
@@ -608,6 +612,32 @@ text-align:right;letter-spacing:.03em;
 .meter-db{
 font-size:9px;color:#888;font-family:monospace;
 text-align:right;line-height:1.2;
+transition:color 120ms ease;
+}
+.meter-db.clip{color:#ff3b2a;font-weight:700}
+.meter-peak-db.clip{color:#ff3b2a;font-weight:700}
+.meter-clip-led{
+position:relative;flex:0 0 auto;
+width:14px;height:14px;margin-left:2px;
+align-self:center;
+}
+.meter-clip-led__bezel{
+position:absolute;inset:0;border-radius:50%;
+background:linear-gradient(145deg,#3a3a3a 0%,#1a1a1a 55%,#2e2e2e 100%);
+box-shadow:inset 0 1px 2px rgba(255,255,255,.12),0 1px 2px rgba(0,0,0,.45);
+}
+.meter-clip-led__core{
+position:absolute;inset:3px;border-radius:50%;
+background:radial-gradient(circle at 35% 30%,#5a2018 0%,#2a0a06 70%,#180604 100%);
+box-shadow:inset 0 1px 3px rgba(0,0,0,.6);
+transition:background 120ms ease,box-shadow 120ms ease;
+}
+.meter-clip-led.on .meter-clip-led__core{
+background:radial-gradient(circle at 35% 28%,#ffb0a0 0%,#ff4028 35%,#c01808 85%);
+box-shadow:0 0 8px rgba(255,59,42,.85),0 0 14px rgba(255,59,42,.45),inset 0 -1px 2px rgba(0,0,0,.35);
+}
+.meter-clip-led.on .meter-clip-led__bezel{
+box-shadow:inset 0 1px 2px rgba(255,255,255,.18),0 0 6px rgba(255,59,42,.35);
 }
 
 /* --- Mapping --- */
@@ -1727,8 +1757,18 @@ border-radius:6px;background:#fafafa;
         getContext().meterPeakDbs[idx] = peakDb;
         mwrap.appendChild(cnv);
         mwrap.appendChild(peakDb);
+        const clipLed = el("div", {
+          className: "meter-clip-led",
+          id: "mclip-" + idx,
+          title: "Clip (\u2265 " + (CLIP_THRESHOLD * 100).toFixed(0) + "% full scale)",
+          role: "img",
+          "aria-label": "Clip indicator off"
+        });
+        clipLed.innerHTML = '<span class="meter-clip-led__bezel"></span><span class="meter-clip-led__core"></span>';
+        getContext().meterClipLeds[idx] = clipLed;
         ch.appendChild(mid);
         ch.appendChild(mwrap);
+        ch.appendChild(clipLed);
         row.appendChild(ch);
       });
       card.appendChild(row);
@@ -1763,6 +1803,9 @@ border-radius:6px;background:#fafafa;
     cancelAnimationFrame(getContext().meterAnimId);
     getContext().meterAnimId = null;
   }
+  function isLevelClipping(raw) {
+    return raw >= CLIP_THRESHOLD;
+  }
   function updateMetersFrame() {
     const ctx = getContext();
     const now = performance.now();
@@ -1777,6 +1820,18 @@ border-radius:6px;background:#fafafa;
       } else if (now >= ctx.peakHoldExpire[i]) {
         ctx.peakHoldLevel[i] *= PEAK_DECAY;
       }
+      if (isLevelClipping(raw) || isLevelClipping(ctx.peakHoldLevel[i]))
+        ctx.clipHoldUntil[i] = now + CLIP_HOLD_MS;
+      const clipping = now < ctx.clipHoldUntil[i];
+      const clipLed = ctx.meterClipLeds[i];
+      if (clipLed) {
+        clipLed.classList.toggle("on", clipping);
+        clipLed.setAttribute("aria-label", clipping ? "Clip indicator on" : "Clip indicator off");
+      }
+      if (ctx.meterDbs[i])
+        ctx.meterDbs[i].classList.toggle("clip", clipping);
+      if (ctx.meterPeakDbs[i])
+        ctx.meterPeakDbs[i].classList.toggle("clip", clipping);
       const vu = ctx.meterVu[i];
       if (vu) {
         vu.setTargets(

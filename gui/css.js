@@ -294,6 +294,32 @@ text-align:right;letter-spacing:.03em;
 .meter-db{
 font-size:9px;color:#888;font-family:monospace;
 text-align:right;line-height:1.2;
+transition:color 120ms ease;
+}
+.meter-db.clip{color:#ff3b2a;font-weight:700}
+.meter-peak-db.clip{color:#ff3b2a;font-weight:700}
+.meter-clip-led{
+position:relative;flex:0 0 auto;
+width:14px;height:14px;margin-left:2px;
+align-self:center;
+}
+.meter-clip-led__bezel{
+position:absolute;inset:0;border-radius:50%;
+background:linear-gradient(145deg,#3a3a3a 0%,#1a1a1a 55%,#2e2e2e 100%);
+box-shadow:inset 0 1px 2px rgba(255,255,255,.12),0 1px 2px rgba(0,0,0,.45);
+}
+.meter-clip-led__core{
+position:absolute;inset:3px;border-radius:50%;
+background:radial-gradient(circle at 35% 30%,#5a2018 0%,#2a0a06 70%,#180604 100%);
+box-shadow:inset 0 1px 3px rgba(0,0,0,.6);
+transition:background 120ms ease,box-shadow 120ms ease;
+}
+.meter-clip-led.on .meter-clip-led__core{
+background:radial-gradient(circle at 35% 28%,#ffb0a0 0%,#ff4028 35%,#c01808 85%);
+box-shadow:0 0 8px rgba(255,59,42,.85),0 0 14px rgba(255,59,42,.45),inset 0 -1px 2px rgba(0,0,0,.35);
+}
+.meter-clip-led.on .meter-clip-led__bezel{
+box-shadow:inset 0 1px 2px rgba(255,255,255,.18),0 0 6px rgba(255,59,42,.35);
 }
 
 /* --- Mapping --- */
