@@ -113,16 +113,27 @@ var sketch = function(p) {
     let configMeta    = null;                  // Float32Array — mux/routing/ignoredPots
     let muxRawValues  = null;                  // Float32Array(64) — raw MUX pot grid
 
-    // Peak-hold for meters (JS-side, display only)
-    const peakHold      = new Float32Array(13).fill(0);
-    const peakHoldTimer = new Int32Array(13).fill(0);
-    const PEAK_HOLD_FRAMES = 45; // ~0.75 s at 60 fps
-    const PEAK_DECAY         = 0.82; // fast peak-line fall after hold expires
+    // Peak-hold + ballistic smoothing for meters (JS-side, display only)
+    const meterSmooth      = new Float32Array(13).fill(0);
+    const peakHoldLevel    = new Float32Array(13).fill(0);
+    const peakHoldExpire   = new Float64Array(13).fill(0);
+    const METER_ATTACK     = 0.42;  // fast rise (~60 fps ballistic)
+    const METER_RELEASE    = 0.14;  // slow fall
+    const PEAK_HOLD_MS     = 750;
+    const PEAK_DECAY       = 0.94;
+    let   meterAnimId      = null;
 
-    // Cached meter DOM nodes (avoid getElementById every frame)
-    const meterFills = [];
-    const meterPeaks = [];
-    const meterDbs   = [];
+    /** Canvas VU meter layout — matches vumeter.js style. */
+    const VU_BOX_COUNT        = 30;
+    const VU_BOX_COUNT_RED    = 4;
+    const VU_BOX_COUNT_YELLOW = 6;
+    const VU_BOX_GAP_FRACTION = 0.25;
+    const VU_MAX              = 100;
+    const VU_CANVAS_W         = 44;
+
+    const meterVu      = [];
+    const meterPeakDbs = [];
+    const meterDbs     = [];
 
     // Console tracking
     let recentChanges         = [];
@@ -376,25 +387,28 @@ body > main{
 .sw-pill.on{background:#1a1a2e;color:#fff}
 .sw-pill.kill.on{background:#e74c3c;color:#fff}
 
-/* --- Meters --- */
-#meters-wrap{display:flex;flex-direction:column;gap:0}
-.meter-group{display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;padding:4px 0}
-.meter-ch{display:flex;flex-direction:column;align-items:center;gap:4px;min-width:46px}
-.meter-bar{
-    width:30px;height:150px;background:#e8e8e8;border-radius:4px;
-    overflow:hidden;position:relative;
-    display:flex;flex-direction:column;justify-content:flex-end;
+/* --- Meters (canvas VU) --- */
+#meters-wrap{display:flex;flex-direction:column;gap:8px}
+.meter-group{
+    display:flex;gap:14px;align-items:flex-end;flex-wrap:wrap;
+    padding:8px 4px 4px;
 }
-.meter-fill{
-    width:100%;height:0%;border-radius:4px 4px 0 0;
+.meter-ch{display:flex;flex-direction:column;align-items:center;gap:5px;min-width:96px}
+.meter-wrap{position:relative;height:150px}
+.meter-canvas{
+    display:block;width:44px;height:150px;
+    border-radius:4px;
 }
-.meter-peak{
-    position:absolute;left:2px;right:2px;height:2px;
-    background:#e74c3c;bottom:0%;pointer-events:none;
-    border-radius:2px;
+.meter-peak-db{
+    position:absolute;left:48px;
+    font-size:8px;font-family:monospace;color:#555;
+    transform:translateY(50%);
+    white-space:nowrap;pointer-events:none;
+    opacity:0;
+    transition:bottom 60ms linear,opacity 120ms ease;
 }
-.meter-lbl{font-size:9px;font-weight:700;color:#666;text-align:center;letter-spacing:.02em}
-.meter-db{font-size:9px;color:#999;font-family:monospace;min-width:36px;text-align:center}
+.meter-lbl{font-size:9px;font-weight:700;color:#555;text-align:center;letter-spacing:.03em}
+.meter-db{font-size:9px;color:#888;font-family:monospace;min-width:40px;text-align:center}
 
 /* --- Mapping --- */
 #mapping-note{
@@ -533,8 +547,10 @@ body > main{
     .mtable input[type=number],.mtable select{font-size:11px}
 }
 @media(min-width:860px){
-    .meter-bar{height:190px}
-    .meter-ch{min-width:52px}
+    .meter-wrap{height:190px}
+    .meter-canvas{width:48px;height:190px}
+    .meter-peak-db{left:52px}
+    .meter-ch{min-width:100px}
 }
         `;
         document.head.appendChild(s);
@@ -679,6 +695,170 @@ body > main{
 
     // ---- Meters tab --------------------------------------------------------
 
+    /**
+     * Creates a segmented canvas VU meter (vumeter.js style).
+     * Green/yellow/red zones are fixed; boxes light from the bottom up.
+     */
+    function createVuMeter(canvas, config) {
+        const max            = config.max || 100;
+        const boxCount       = config.boxCount || 15;
+        const boxCountRed    = config.boxCountRed || 2;
+        const boxCountYellow = config.boxCountYellow || 3;
+        const boxGapFraction = config.boxGapFraction || 0.25;
+
+        const redOn     = 'rgba(255,47,30,0.9)';
+        const redOff    = 'rgba(64,12,8,0.9)';
+        const yellowOn  = 'rgba(255,215,5,0.9)';
+        const yellowOff = 'rgba(64,53,0,0.9)';
+        const greenOn   = 'rgba(53,255,30,0.9)';
+        const greenOff  = 'rgba(13,64,8,0.9)';
+
+        const ctx = canvas.getContext('2d');
+        let width = 0;
+        let height = 0;
+        let boxHeight = 0;
+        let boxGapY = 0;
+        let boxWidth = 0;
+        let boxGapX = 0;
+
+        let curVal = 0;
+        let curPeakVal = 0;
+        let targetVal = 0;
+        let targetPeakVal = 0;
+
+        /** Recomputes canvas pixel size and box geometry from CSS dimensions. */
+        function resize() {
+            const dpr   = window.devicePixelRatio || 1;
+            const rect  = canvas.getBoundingClientRect();
+            const style = window.getComputedStyle(canvas);
+            let cssW = rect.width;
+            let cssH = rect.height;
+            // Hidden tab panes report 0×0 — fall back to CSS size.
+            if(cssW < 2) cssW = parseFloat(style.width)  || VU_CANVAS_W;
+            if(cssH < 2) cssH = parseFloat(style.height) || 150;
+
+            const newW = Math.max(1, Math.round(cssW));
+            const newH = Math.max(1, Math.round(cssH));
+            const pxW  = Math.round(newW * dpr);
+            const pxH  = Math.round(newH * dpr);
+
+            if(newW === width && newH === height &&
+               canvas.width === pxW && canvas.height === pxH)
+                return;
+
+            width  = newW;
+            height = newH;
+            canvas.width  = pxW;
+            canvas.height = pxH;
+            ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+            boxHeight = height / (boxCount + (boxCount + 1) * boxGapFraction);
+            boxGapY   = boxHeight * boxGapFraction;
+            boxWidth  = Math.max(8, width - boxGapY * 2);
+            boxGapX   = boxGapY;
+        }
+
+        /** Maps draw-loop index to logical box id (bottom = 1, top = boxCount). */
+        function getId(index) {
+            return Math.abs(index - (boxCount - 1)) + 1;
+        }
+
+        /** Returns true when a box should be lit at the current value. */
+        function isOn(id, val) {
+            const maxOn = Math.ceil((val / max) * boxCount);
+            return id <= maxOn;
+        }
+
+        /** Returns on/off fill colour for one box. */
+        function getBoxColor(id, val) {
+            if(id > boxCount - boxCountRed)
+                return isOn(id, val) ? redOn : redOff;
+            if(id > boxCount - boxCountRed - boxCountYellow)
+                return isOn(id, val) ? yellowOn : yellowOff;
+            return isOn(id, val) ? greenOn : greenOff;
+        }
+
+        /** Draws all segmented boxes for the current level. */
+        function drawBoxes(val) {
+            ctx.save();
+            ctx.translate(boxGapX, boxGapY);
+            for(let i = 0; i < boxCount; i++) {
+                const id = getId(i);
+                ctx.beginPath();
+                if(isOn(id, val)) {
+                    ctx.shadowBlur  = 10;
+                    ctx.shadowColor = getBoxColor(id, val);
+                } else {
+                    ctx.shadowBlur = 0;
+                }
+                ctx.rect(0, 0, boxWidth, boxHeight);
+                ctx.fillStyle = getBoxColor(id, val);
+                ctx.fill();
+                ctx.translate(0, boxHeight + boxGapY);
+            }
+            ctx.restore();
+        }
+
+        /** Draws the white peak-hold line and its dB label. */
+        function drawPeakIndicator(peakVal) {
+            if(peakVal < 1.5) return;
+
+            const innerTop = boxGapY;
+            const innerBot = height - boxGapY;
+            const y = innerBot - (peakVal / max) * (innerBot - innerTop);
+
+            ctx.save();
+            ctx.strokeStyle = '#fff';
+            ctx.shadowBlur  = 5;
+            ctx.shadowColor = '#fff';
+            ctx.lineWidth   = 2;
+            ctx.beginPath();
+            ctx.moveTo(boxGapX, y);
+            ctx.lineTo(boxGapX + boxWidth, y);
+            ctx.stroke();
+            ctx.restore();
+        }
+
+        return {
+            /** Sets target level and peak-hold percentages (0–max). */
+            setTargets(level, peak) {
+                targetVal     = Math.max(0, Math.min(max, level));
+                targetPeakVal = Math.max(0, Math.min(max, peak));
+            },
+
+            /** Returns smoothed peak position as 0–100 (for external label placement). */
+            getPeakPct() {
+                return curPeakVal;
+            },
+
+            /** Advances smoothing and redraws the meter. */
+            draw() {
+                resize();
+
+                if(curVal <= targetVal)
+                    curVal += (targetVal - curVal) / 5;
+                else
+                    curVal -= (curVal - targetVal) / 5;
+
+                if(curPeakVal <= targetPeakVal)
+                    curPeakVal += (targetPeakVal - curPeakVal) / 4;
+                else
+                    curPeakVal -= (curPeakVal - targetPeakVal) / 6;
+
+                ctx.save();
+                ctx.fillStyle = 'rgb(32,32,32)';
+                ctx.fillRect(0, 0, width, height);
+                ctx.restore();
+
+                drawBoxes(curVal);
+                drawPeakIndicator(curPeakVal);
+            },
+
+            /** Recomputes layout after a window resize. */
+            resize
+        };
+    }
+
     function buildMetersPane() {
         const pane = el('div', {id:'pane-meters', className:'tab-pane'});
         const wrap = el('div', {id:'meters-wrap'});
@@ -690,26 +870,33 @@ body > main{
 
             group.indices.forEach(idx => {
                 const ch = el('div', {className:'meter-ch'});
+                const mwrap = el('div', {className:'meter-wrap'});
 
-                const bar = el('div', {className:'meter-bar'});
-                const fill = el('div', {className:'meter-fill', id:'mf-'+idx});
-                fill.style.cssText = 'height:0%;background:#27ae60';
-                const peak = el('div', {className:'meter-peak', id:'mp-'+idx});
-                peak.style.bottom = '0%';
-                bar.appendChild(fill);
-                bar.appendChild(peak);
+                const cnv = el('canvas', {className:'meter-canvas', id:'mc-'+idx});
+                meterVu[idx] = createVuMeter(cnv, {
+                    boxCount:        VU_BOX_COUNT,
+                    boxCountRed:     VU_BOX_COUNT_RED,
+                    boxCountYellow:  VU_BOX_COUNT_YELLOW,
+                    boxGapFraction:  VU_BOX_GAP_FRACTION,
+                    max:             VU_MAX
+                });
+
+                const peakDb = el('div', {className:'meter-peak-db', id:'mpd-'+idx});
+                peakDb.style.bottom = '0%';
+                peakDb.textContent = '-\u221e';
+                meterPeakDbs[idx] = peakDb;
+
+                mwrap.appendChild(cnv);
+                mwrap.appendChild(peakDb);
 
                 const lbl = el('div', {className:'meter-lbl'});
                 lbl.textContent = LEVEL_LABELS[idx];
 
                 const dbv = el('div', {className:'meter-db', id:'md-'+idx});
                 dbv.textContent = '-\u221e';
+                meterDbs[idx] = dbv;
 
-                meterFills[idx] = fill;
-                meterPeaks[idx] = peak;
-                meterDbs[idx]   = dbv;
-
-                ch.appendChild(bar);
+                ch.appendChild(mwrap);
                 ch.appendChild(lbl);
                 ch.appendChild(dbv);
                 row.appendChild(ch);
@@ -818,6 +1005,12 @@ body > main{
             b.classList.toggle('active', i === idx));
         document.querySelectorAll('.tab-pane').forEach((p, i) =>
             p.classList.toggle('active', i === idx));
+        if(idx === 1) {
+            meterVu.forEach(vu => { if(vu) vu.resize(); });
+            startMeterAnim();
+        } else {
+            stopMeterAnim();
+        }
     }
 
     // -----------------------------------------------------------------------
@@ -1555,36 +1748,63 @@ body > main{
         return dB < -80 ? '-\u221e' : dB.toFixed(1) + '\u202FdB';
     }
 
-    /** Updates VU meter bars and peak-hold markers. Only called when Meters tab is active. */
-    function updateMeters() {
-        for(let i = 0; i < 13; i++) {
-            const raw    = audioLevels[i];
-            const barPct = levelToBarPct(raw);
-
-            // Peak hold: reset timer on new peak, else decay after hold expires
-            if(raw > peakHold[i]) {
-                peakHold[i]      = raw;
-                peakHoldTimer[i] = PEAK_HOLD_FRAMES;
-            } else if(peakHoldTimer[i] > 0) {
-                peakHoldTimer[i]--;
-            } else {
-                peakHold[i] *= PEAK_DECAY;
+    /** Starts the 60 fps meter animation loop while the Meters tab is visible. */
+    function startMeterAnim() {
+        if(meterAnimId != null) return;
+        function tick() {
+            if(currentTab !== 1) {
+                meterAnimId = null;
+                return;
             }
-            const pkPct = levelToBarPct(peakHold[i]);
+            updateMetersFrame();
+            meterAnimId = requestAnimationFrame(tick);
+        }
+        meterAnimId = requestAnimationFrame(tick);
+    }
 
-            // Colour ramp: green → yellow → red
-            let col;
-            if(barPct < 62)      col = '#27ae60';
-            else if(barPct < 85) col = '#f39c12';
-            else                 col = '#e74c3c';
+    /** Stops the meter animation loop. */
+    function stopMeterAnim() {
+        if(meterAnimId == null) return;
+        cancelAnimationFrame(meterAnimId);
+        meterAnimId = null;
+    }
 
-            const fill = meterFills[i];
-            const peak = meterPeaks[i];
-            const dblb = meterDbs[i];
+    /** Updates canvas VU meters with peak-hold and segmented box rendering. */
+    function updateMetersFrame() {
+        const now = performance.now();
 
-            if(fill) { fill.style.height = barPct + '%'; fill.style.background = col; }
-            if(peak) { peak.style.bottom = pkPct + '%'; }
-            if(dblb) { dblb.textContent = levelToDbLabel(raw); }
+        for(let i = 0; i < 13; i++) {
+            const raw = audioLevels[i];
+
+            const smooth = meterSmooth[i];
+            const coeff  = raw > smooth ? METER_ATTACK : METER_RELEASE;
+            meterSmooth[i] = smooth + (raw - smooth) * coeff;
+
+            if(raw > peakHoldLevel[i]) {
+                peakHoldLevel[i]  = raw;
+                peakHoldExpire[i] = now + PEAK_HOLD_MS;
+            } else if(now >= peakHoldExpire[i]) {
+                peakHoldLevel[i] *= PEAK_DECAY;
+            }
+
+            const vu = meterVu[i];
+            if(vu) {
+                vu.setTargets(
+                    levelToBarPct(meterSmooth[i]),
+                    levelToBarPct(peakHoldLevel[i])
+                );
+                vu.draw();
+            }
+
+            const peakDb = meterPeakDbs[i];
+            if(peakDb && vu) {
+                const pkPct = vu.getPeakPct();
+                peakDb.textContent = levelToDbLabel(peakHoldLevel[i]);
+                peakDb.style.bottom = pkPct.toFixed(2) + '%';
+                peakDb.style.opacity = pkPct > 1.5 ? '1' : '0';
+            }
+            if(meterDbs[i])
+                meterDbs[i].textContent = levelToDbLabel(meterSmooth[i]);
         }
     }
 
@@ -1742,7 +1962,10 @@ body > main{
         document.body.style.overflowX = 'hidden';
 
         layoutTopChrome();
-        window.addEventListener('resize', layoutTopChrome);
+        window.addEventListener('resize', () => {
+            layoutTopChrome();
+            meterVu.forEach(vu => { if(vu) vu.resize(); });
+        });
 
         p.frameRate(20);
     };
@@ -1793,8 +2016,8 @@ body > main{
         updateSwitches();
         updateBadge();
 
-        // Meters are DOM-heavy — only update when visible
-        if(currentTab === 1) updateMeters();
+        // Meters run on requestAnimationFrame when tab is active
+        if(currentTab === 1 && meterAnimId == null) startMeterAnim();
         if(detectMode) updateDetectMode();
     };
 };
