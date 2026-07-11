@@ -136,7 +136,7 @@ var sketch = function(p) {
     const VU_BOX_COUNT_YELLOW = 6;
     const VU_BOX_GAP_FRACTION = 0.25;
     const VU_MAX              = 100;
-    const VU_CANVAS_W         = 150;
+    const VU_CANVAS_W         = 300;
     const VU_CANVAS_H         = 44;
 
     const meterVu      = [];
@@ -269,8 +269,8 @@ body > main{
     padding:14px;margin-bottom:12px;
 }
 .card-title{
-    font-size:10px;font-weight:700;letter-spacing:.1em;
-    text-transform:uppercase;color:#999;margin-bottom:10px;
+    font-size:12px;font-weight:700;letter-spacing:.08em;
+    text-transform:uppercase;color:#3a3a44;margin-bottom:10px;
 }
 
 /* --- Siren --- */
@@ -282,7 +282,7 @@ body > main{
 #siren-hero-top{
     display:flex;align-items:center;justify-content:space-between;gap:10px;
 }
-#siren-name{font-size:26px;font-weight:700;color:#1a1a2e;line-height:1.1}
+#siren-name{font-size:17px;font-weight:700;color:#1a1a2e;line-height:1.2}
 #siren-gate{
     display:flex;align-items:center;gap:6px;flex-shrink:0;
 }
@@ -398,8 +398,8 @@ body > main{
 .sw-group-fx{border-top:2px solid rgba(243,156,18,.35)}
 .sw-group-siren{border-top:2px solid rgba(41,128,185,.35)}
 .sw-group-title{
-    font-size:9px;font-weight:700;text-transform:uppercase;
-    letter-spacing:.09em;color:#888;margin-bottom:8px;
+    font-size:11px;font-weight:700;text-transform:uppercase;
+    letter-spacing:.08em;color:#555;margin-bottom:8px;
 }
 .sw-group-items{display:flex;flex-wrap:wrap;gap:6px}
 .sw-group-kill .sw-group-items,
@@ -432,18 +432,32 @@ body > main{
 
 /* --- Meters (canvas VU, horizontal) --- */
 #meters-wrap{display:flex;flex-direction:column;gap:8px}
+.meters-columns{
+    display:grid;grid-template-columns:1fr;
+    gap:12px;align-items:start;
+}
+.meters-card{min-width:0}
 .meter-group{
     display:flex;flex-direction:column;gap:12px;
     align-items:stretch;padding:12px 4px 8px;
 }
 .meter-ch{
     display:flex;flex-direction:row;align-items:center;gap:10px;
-    min-width:0;width:100%;
+    min-width:0;
     padding-top:18px;
 }
-.meter-wrap{position:relative;flex:1;max-width:360px;height:44px;margin-bottom:2px}
+.meter-id{
+    display:flex;flex-direction:column;gap:2px;
+    min-width:52px;flex-shrink:0;
+    align-items:flex-end;text-align:right;
+}
+.meter-wrap{
+    position:relative;flex:0 0 auto;
+    width:300px;max-width:300px;
+    height:44px;margin-bottom:2px;
+}
 .meter-canvas{
-    display:block;width:100%;height:44px;
+    display:block;width:300px;height:44px;
     border-radius:4px;
 }
 .meter-peak-db{
@@ -457,11 +471,10 @@ body > main{
 .meter-lbl{
     font-size:9px;font-weight:700;color:#555;
     text-align:right;letter-spacing:.03em;
-    min-width:52px;flex-shrink:0;
 }
 .meter-db{
     font-size:9px;color:#888;font-family:monospace;
-    min-width:44px;text-align:left;flex-shrink:0;
+    text-align:right;line-height:1.2;
 }
 
 /* --- Mapping --- */
@@ -556,8 +569,8 @@ body > main{
 #download-status{font-size:12px;font-weight:600;color:#27ae60}
 #download-status.err{color:#e74c3c}
 .msec-title{
-    font-size:11px;font-weight:700;text-transform:uppercase;
-    letter-spacing:.08em;color:#999;margin:14px 0 7px;
+    font-size:12px;font-weight:700;text-transform:uppercase;
+    letter-spacing:.07em;color:#3a3a44;margin:14px 0 7px;
 }
 .mtable th{
     background:#f5f5f5;text-align:left;
@@ -592,6 +605,8 @@ body > main{
 }
 @media(max-width:720px){
     .sw-grid{grid-template-columns:1fr}
+    .meter-wrap{width:min(300px,calc(100vw - 120px));max-width:min(300px,calc(100vw - 120px))}
+    .meter-canvas{width:100%;max-width:300px}
     .mtable col.col-name{width:26%}
     .mtable col.col-num{width:11%}
     .mtable col.col-check{width:10%}
@@ -601,9 +616,12 @@ body > main{
     .mtable th{font-size:9px}
     .mtable input[type=number],.mtable select{font-size:11px}
 }
+@media(min-width:720px){
+    .meters-columns{grid-template-columns:1fr 1fr}
+}
 @media(min-width:860px){
-    .meter-wrap{height:48px}
-    .meter-canvas{height:48px}
+    .meter-wrap{width:320px;max-width:320px;height:48px}
+    .meter-canvas{width:320px;height:48px}
 }
         `;
         document.head.appendChild(s);
@@ -945,17 +963,26 @@ body > main{
     function buildMetersPane() {
         const pane = el('div', {id:'pane-meters', className:'tab-pane'});
         const wrap = el('div', {id:'meters-wrap'});
+        const columns = el('div', {className:'meters-columns'});
 
         LEVEL_GROUPS.forEach(group => {
-            const card = el('div', {className:'card'});
+            const card = el('div', {className:'card meters-card'});
             card.appendChild(cardTitle(group.label));
             const row = el('div', {className:'meter-group'});
 
             group.indices.forEach(idx => {
                 const ch = el('div', {className:'meter-ch'});
+                const mid = el('div', {className:'meter-id'});
 
                 const lbl = el('div', {className:'meter-lbl'});
                 lbl.textContent = LEVEL_LABELS[idx];
+
+                const dbv = el('div', {className:'meter-db', id:'md-'+idx});
+                dbv.textContent = '-\u221e';
+                meterDbs[idx] = dbv;
+
+                mid.appendChild(lbl);
+                mid.appendChild(dbv);
 
                 const mwrap = el('div', {className:'meter-wrap'});
 
@@ -976,20 +1003,16 @@ body > main{
                 mwrap.appendChild(cnv);
                 mwrap.appendChild(peakDb);
 
-                const dbv = el('div', {className:'meter-db', id:'md-'+idx});
-                dbv.textContent = '-\u221e';
-                meterDbs[idx] = dbv;
-
-                ch.appendChild(lbl);
+                ch.appendChild(mid);
                 ch.appendChild(mwrap);
-                ch.appendChild(dbv);
                 row.appendChild(ch);
             });
 
             card.appendChild(row);
-            wrap.appendChild(card);
+            columns.appendChild(card);
         });
 
+        wrap.appendChild(columns);
         pane.appendChild(wrap);
         return pane;
     }
