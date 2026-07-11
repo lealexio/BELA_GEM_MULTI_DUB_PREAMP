@@ -129,7 +129,8 @@ var sketch = function(p) {
     const VU_BOX_COUNT_YELLOW = 6;
     const VU_BOX_GAP_FRACTION = 0.25;
     const VU_MAX              = 100;
-    const VU_CANVAS_W         = 44;
+    const VU_CANVAS_W         = 150;
+    const VU_CANVAS_H         = 44;
 
     const meterVu      = [];
     const meterPeakDbs = [];
@@ -387,28 +388,39 @@ body > main{
 .sw-pill.on{background:#1a1a2e;color:#fff}
 .sw-pill.kill.on{background:#e74c3c;color:#fff}
 
-/* --- Meters (canvas VU) --- */
+/* --- Meters (canvas VU, horizontal) --- */
 #meters-wrap{display:flex;flex-direction:column;gap:8px}
 .meter-group{
-    display:flex;gap:14px;align-items:flex-end;flex-wrap:wrap;
-    padding:8px 4px 4px;
+    display:flex;flex-direction:column;gap:12px;
+    align-items:stretch;padding:12px 4px 8px;
 }
-.meter-ch{display:flex;flex-direction:column;align-items:center;gap:5px;min-width:96px}
-.meter-wrap{position:relative;height:150px}
+.meter-ch{
+    display:flex;flex-direction:row;align-items:center;gap:10px;
+    min-width:0;width:100%;
+    padding-top:18px;
+}
+.meter-wrap{position:relative;flex:1;max-width:360px;height:44px;margin-bottom:2px}
 .meter-canvas{
-    display:block;width:44px;height:150px;
+    display:block;width:100%;height:44px;
     border-radius:4px;
 }
 .meter-peak-db{
-    position:absolute;left:48px;
+    position:absolute;top:-15px;left:0;
     font-size:8px;font-family:monospace;color:#555;
-    transform:translateY(50%);
+    transform:translateX(-50%);
     white-space:nowrap;pointer-events:none;
     opacity:0;
-    transition:bottom 60ms linear,opacity 120ms ease;
+    transition:left 60ms linear,opacity 120ms ease;
 }
-.meter-lbl{font-size:9px;font-weight:700;color:#555;text-align:center;letter-spacing:.03em}
-.meter-db{font-size:9px;color:#888;font-family:monospace;min-width:40px;text-align:center}
+.meter-lbl{
+    font-size:9px;font-weight:700;color:#555;
+    text-align:right;letter-spacing:.03em;
+    min-width:52px;flex-shrink:0;
+}
+.meter-db{
+    font-size:9px;color:#888;font-family:monospace;
+    min-width:44px;text-align:left;flex-shrink:0;
+}
 
 /* --- Mapping --- */
 #mapping-note{
@@ -547,10 +559,8 @@ body > main{
     .mtable input[type=number],.mtable select{font-size:11px}
 }
 @media(min-width:860px){
-    .meter-wrap{height:190px}
-    .meter-canvas{width:48px;height:190px}
-    .meter-peak-db{left:52px}
-    .meter-ch{min-width:100px}
+    .meter-wrap{height:48px}
+    .meter-canvas{height:48px}
 }
         `;
         document.head.appendChild(s);
@@ -696,8 +706,8 @@ body > main{
     // ---- Meters tab --------------------------------------------------------
 
     /**
-     * Creates a segmented canvas VU meter (vumeter.js style).
-     * Green/yellow/red zones are fixed; boxes light from the bottom up.
+     * Creates a horizontal segmented canvas VU meter (vumeter.js style).
+     * Green/yellow/red zones are fixed; boxes light from left to right.
      */
     function createVuMeter(canvas, config) {
         const max            = config.max || 100;
@@ -735,7 +745,7 @@ body > main{
             let cssH = rect.height;
             // Hidden tab panes report 0×0 — fall back to CSS size.
             if(cssW < 2) cssW = parseFloat(style.width)  || VU_CANVAS_W;
-            if(cssH < 2) cssH = parseFloat(style.height) || 150;
+            if(cssH < 2) cssH = parseFloat(style.height) || VU_CANVAS_H;
 
             const newW = Math.max(1, Math.round(cssW));
             const newH = Math.max(1, Math.round(cssH));
@@ -752,15 +762,15 @@ body > main{
             canvas.height = pxH;
             ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
-            boxHeight = height / (boxCount + (boxCount + 1) * boxGapFraction);
-            boxGapY   = boxHeight * boxGapFraction;
-            boxWidth  = Math.max(8, width - boxGapY * 2);
-            boxGapX   = boxGapY;
+            boxWidth  = width / (boxCount + (boxCount + 1) * boxGapFraction);
+            boxGapX   = boxWidth * boxGapFraction;
+            boxHeight = Math.max(8, height - boxGapX * 2);
+            boxGapY   = boxGapX;
         }
 
-        /** Maps draw-loop index to logical box id (bottom = 1, top = boxCount). */
+        /** Maps draw-loop index to logical box id (left = 1, right = boxCount). */
         function getId(index) {
-            return Math.abs(index - (boxCount - 1)) + 1;
+            return index + 1;
         }
 
         /** Returns true when a box should be lit at the current value. */
@@ -778,7 +788,7 @@ body > main{
             return isOn(id, val) ? greenOn : greenOff;
         }
 
-        /** Draws all segmented boxes for the current level. */
+        /** Draws all segmented boxes for the current level (left → right). */
         function drawBoxes(val) {
             ctx.save();
             ctx.translate(boxGapX, boxGapY);
@@ -794,18 +804,18 @@ body > main{
                 ctx.rect(0, 0, boxWidth, boxHeight);
                 ctx.fillStyle = getBoxColor(id, val);
                 ctx.fill();
-                ctx.translate(0, boxHeight + boxGapY);
+                ctx.translate(boxWidth + boxGapX, 0);
             }
             ctx.restore();
         }
 
-        /** Draws the white peak-hold line and its dB label. */
+        /** Draws the white peak-hold line (vertical marker). */
         function drawPeakIndicator(peakVal) {
             if(peakVal < 1.5) return;
 
-            const innerTop = boxGapY;
-            const innerBot = height - boxGapY;
-            const y = innerBot - (peakVal / max) * (innerBot - innerTop);
+            const innerLeft  = boxGapX;
+            const innerRight = width - boxGapX;
+            const x = innerLeft + (peakVal / max) * (innerRight - innerLeft);
 
             ctx.save();
             ctx.strokeStyle = '#fff';
@@ -813,8 +823,8 @@ body > main{
             ctx.shadowColor = '#fff';
             ctx.lineWidth   = 2;
             ctx.beginPath();
-            ctx.moveTo(boxGapX, y);
-            ctx.lineTo(boxGapX + boxWidth, y);
+            ctx.moveTo(x, boxGapY);
+            ctx.lineTo(x, height - boxGapY);
             ctx.stroke();
             ctx.restore();
         }
@@ -870,6 +880,10 @@ body > main{
 
             group.indices.forEach(idx => {
                 const ch = el('div', {className:'meter-ch'});
+
+                const lbl = el('div', {className:'meter-lbl'});
+                lbl.textContent = LEVEL_LABELS[idx];
+
                 const mwrap = el('div', {className:'meter-wrap'});
 
                 const cnv = el('canvas', {className:'meter-canvas', id:'mc-'+idx});
@@ -882,22 +896,19 @@ body > main{
                 });
 
                 const peakDb = el('div', {className:'meter-peak-db', id:'mpd-'+idx});
-                peakDb.style.bottom = '0%';
+                peakDb.style.left = '0%';
                 peakDb.textContent = '-\u221e';
                 meterPeakDbs[idx] = peakDb;
 
                 mwrap.appendChild(cnv);
                 mwrap.appendChild(peakDb);
 
-                const lbl = el('div', {className:'meter-lbl'});
-                lbl.textContent = LEVEL_LABELS[idx];
-
                 const dbv = el('div', {className:'meter-db', id:'md-'+idx});
                 dbv.textContent = '-\u221e';
                 meterDbs[idx] = dbv;
 
-                ch.appendChild(mwrap);
                 ch.appendChild(lbl);
+                ch.appendChild(mwrap);
                 ch.appendChild(dbv);
                 row.appendChild(ch);
             });
@@ -1800,7 +1811,7 @@ body > main{
             if(peakDb && vu) {
                 const pkPct = vu.getPeakPct();
                 peakDb.textContent = levelToDbLabel(peakHoldLevel[i]);
-                peakDb.style.bottom = pkPct.toFixed(2) + '%';
+                peakDb.style.left = pkPct.toFixed(2) + '%';
                 peakDb.style.opacity = pkPct > 1.5 ? '1' : '0';
             }
             if(meterDbs[i])
