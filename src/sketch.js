@@ -1460,9 +1460,9 @@ body > main{
         if(hz >= 1000) {
             const k = hz / 1000;
             const n = k % 1 === 0 ? k.toFixed(0) : k.toFixed(1);
-            return n + ' kHz';
+            return n + 'kHz';
         }
-        return hz + ' Hz';
+        return hz + 'Hz';
     }
 
     /** Maps frequency (Hz) to canvas X using a log scale. */
@@ -1502,7 +1502,7 @@ body > main{
         const padL = 44;
         const padR = 14;
         const padT = 14;
-        const padB = 28;
+        const padB = 40;
         const plotX = padL;
         const plotY = padT;
         const plotW = cssW - padL - padR;
@@ -1552,9 +1552,10 @@ body > main{
 
         ctx.textAlign = 'center';
         ctx.textBaseline = 'top';
-        MASTER_EQ_FREQ_TICKS.forEach(hz => {
+        MASTER_EQ_FREQ_TICKS.forEach((hz, i) => {
             const x = masterEqFreqToX(hz, plotX, plotW);
-            ctx.fillText(formatMasterEqFreqLabel(hz), x, plotY + plotH + 6);
+            const labelY = plotY + plotH + 6 + (i % 2) * 12;
+            ctx.fillText(formatMasterEqFreqLabel(hz), x, labelY);
         });
 
         ctx.strokeStyle = '#e74c3c';
