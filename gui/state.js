@@ -1,0 +1,49 @@
+/** Runtime GUI state (mutable, shared across modules via context). */
+import { MASTER_EQ_CONFIG } from './config.js';
+
+/** Creates the initial mutable GUI state object. */
+export function createState() {
+    return {
+        potValues: new Float32Array(58),
+        switchStates: new Float32Array(9),
+        sirenState: new Float32Array(3),
+        audioLevels: new Float32Array(13),
+        potMapping: null,
+        switchMapping: null,
+        configMeta: null,
+        muxRawValues: null,
+        meterSmooth: new Float32Array(13).fill(0),
+        peakHoldLevel: new Float32Array(13).fill(0),
+        peakHoldExpire: new Float64Array(13).fill(0),
+        meterAnimId: null,
+        meterVu: [],
+        meterPeakDbs: [],
+        meterDbs: [],
+        recentChanges: [],
+        prevPotValues: new Float32Array(58).fill(-1),
+        prevPotValuesNormal: new Float32Array(58).fill(-1),
+        prevSwitchStates: new Float32Array(9).fill(-1),
+        prevMuxRawValues: null,
+        prevMuxRawValuesNormal: null,
+        consoleReady: false,
+        consoleFilterMode: 'normal',
+        currentTab: 0,
+        mappingBuilt: false,
+        detectMode: null,
+        masterEqCanvas: null,
+        masterEqCtx: null,
+        masterEqCurveDb: new Float32Array(MASTER_EQ_CONFIG.CURVE_POINTS),
+        sirenPresetPills: [],
+        sirenNameEl: null,
+        sirenGateEl: null,
+        sirenModFill: null,
+        sirenModLbl: null,
+        consoleList: null,
+        consoleFilterBtns: [],
+        switchPills: [],
+        downloadStatusEl: null,
+        detectStatusEl: null,
+        lastBelaRxMs: 0,
+        belaRxFingerprint: ''
+    };
+}

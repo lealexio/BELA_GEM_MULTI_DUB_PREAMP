@@ -31,6 +31,8 @@ NoiseGate.h/cpp         Gate professionnel (peak follower + state machine)
 Biquad.h/cpp            Filtre biquad IIR 2nd ordre (shelf, peak, LP, HP)
 HardwareConfig.h        Constantes PHYSIQUES : mapping pots/switches, routing I/O, I2C
 SoftwareConfig.h        Constantes DSP/COMPORTEMENT : EQ, gate, kills, siren, debug
+gui/                    Sources GUI Bela (ES modules) — éditer ici, pas sketch.js directement
+src/sketch.js           Bundle GUI généré (esbuild) — déployé sur Bela, ne pas éditer à la main
 ```
 
 **Règle de séparation des configs :**
@@ -209,3 +211,22 @@ Avec `kCenteredPotExponent = 2.0` : dérivée nulle au centre (insensible au jit
 
 ### ParametricEq : fréquence block-rate, gain per-sample
 Les changements de fréquence dans `ParametricEq::setBand()` sont traités immédiatement (taux block, ~5.8 ms) en utilisant le gain **lissé courant** (pas la cible) pour éviter une discontinuité de gain lors du recalcul. Les changements de gain sont lissés per-sample dans `process()` comme les autres EQ.
+
+---
+
+## GUI Bela (sketch.js)
+
+L'IDE Bela ne charge que `src/sketch.js`. Les sources vivent dans `gui/` à la racine (modules ES6, hors `src/` car non déployées).
+
+**Workflow :**
+1. Éditer les fichiers dans `gui/` (`main.js`, `config.js`, `dom/*`, `bela/*`)
+2. `npm run build:gui` — regénère `src/sketch.js` via esbuild
+3. Déployer / synchroniser le projet Bela (comme avant)
+
+**Structure GUI :**
+- `config.js` — constantes (must match `render.cpp` / `SoftwareConfig.h`)
+- `state.js` + `context.js` — état mutable partagé
+- `dom/` — onglets Live, Meters, Master EQ, Mapping, shell
+- `bela/connection.js` — badge LIVE/LAG/OFFLINE
+
+`npm run watch:gui` pour rebuild automatique en dev local.

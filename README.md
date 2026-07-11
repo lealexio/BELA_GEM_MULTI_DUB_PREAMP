@@ -50,6 +50,60 @@ IN9 (FX return) ──► NoiseGate ──┤
 | `Biquad.h/cpp` | 2nd-order IIR biquad filter (low/high shelf, peaking EQ, LP/HP) |
 | `HardwareConfig.h` | Hardware mapping: PotRef, SwitchRef, audio routing, I2C/MUX config |
 | `SoftwareConfig.h` | DSP parameters: EQ frequencies, gains, gate, kills, siren, debug |
+| `sketch.js` | Bela web GUI bundle (p5.js) — generated, deployed to the board |
+| `gui/` | GUI source modules (ES6) — edit here, rebuild with `npm run build:gui` |
+
+---
+
+## Bela web GUI
+
+The browser UI at `http://bela.local/gui/` is a **p5.js** sketch. The Bela IDE loads a single file: `src/sketch.js`. It does not support ES modules in the browser, so the GUI sources live in `gui/` at the repo root and are **bundled** into `src/sketch.js` before deployment.
+
+```
+gui/*.js  ──►  npm run build:gui  ──►  src/sketch.js  ──►  upload src/ to Bela
+  (edit)         (dev machine)         (deploy)
+```
+
+The GUI has four tabs: **Live** (siren, console, switches), **Meters** (canvas VU meters), **Master EQ** (theoretical magnitude curve from pot/switch buffers), and **Mapping** (pot/switch detect + config JSON export). Constants in `gui/config.js` must stay in sync with `render.cpp`, `HardwareConfig.h`, and `SoftwareConfig.h`.
+
+### Build commands
+
+One-time setup (Node.js required on your dev machine only — not on the Bela board):
+
+```bash
+npm install
+```
+
+Production bundle (run after any change under `gui/`):
+
+```bash
+npm run build:gui
+```
+
+Watch mode (rebuilds `src/sketch.js` on every save while editing):
+
+```bash
+npm run watch:gui
+```
+
+### Deploy workflow
+
+1. Edit files in `gui/` (`main.js`, `config.js`, `dom/*`, `bela/*`).
+2. Run `npm run build:gui` (or keep `npm run watch:gui` running).
+3. Sync **`src/`** to Bela as usual — same as before. Only `src/sketch.js` is used by the GUI; `gui/` is dev-only and does not need to be on the board.
+
+Do **not** edit `src/sketch.js` by hand — it is auto-generated (see the header comment at the top of the file).
+
+### GUI module layout
+
+| Path | Role |
+|---|---|
+| `gui/main.js` | p5.js entry point (`setup` / `draw`) |
+| `gui/config.js` | Pot/switch names, Master EQ constants, buffer layout |
+| `gui/state.js` + `gui/context.js` | Shared mutable runtime state |
+| `gui/css.js` | Injected styles |
+| `gui/dom/` | Tab panes, shell, meters, Master EQ curve, mapping |
+| `gui/bela/connection.js` | LIVE / LAG / OFFLINE connection badge |
 
 ---
 

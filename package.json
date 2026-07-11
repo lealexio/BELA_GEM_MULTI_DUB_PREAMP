@@ -1,0 +1,11 @@
+{
+  "name": "bela-dub-preamp-gui",
+  "private": true,
+  "scripts": {
+    "build:gui": "node scripts/build-gui.mjs",
+    "watch:gui": "node scripts/build-gui.mjs --watch"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.0"
+  }
+}
