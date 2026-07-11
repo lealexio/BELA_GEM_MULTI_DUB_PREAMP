@@ -134,7 +134,7 @@ var sketch = function(p) {
     let detectMode     = null;
 
     // Cached DOM references
-    let sirenDots    = [];
+    let sirenPresetPills = [];
     let sirenNameEl  = null;
     let sirenGateEl  = null;
     let sirenModFill = null;
@@ -247,39 +247,64 @@ body > main{
 }
 
 /* --- Siren --- */
-#siren-body{display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap}
-#siren-dots{display:flex;gap:8px;flex-wrap:wrap}
-.sdot{
-    width:54px;height:54px;border-radius:50%;
-    background:#ebebeb;border:2px solid #ccc;
-    display:flex;align-items:center;justify-content:center;
-    flex-direction:column;font-size:9px;font-weight:700;color:#777;
-    line-height:1.25;text-align:center;
-    transition:background .2s,border-color .2s,box-shadow .2s;
+#siren-body{display:flex;flex-direction:column;gap:12px}
+#siren-hero{
+    background:#f7f7f9;border-radius:6px;padding:12px 14px;
+    border-left:3px solid #1a1a2e;
 }
-.sdot.active{
-    background:#1a1a2e;border-color:#e74c3c;color:#fff;
-    box-shadow:0 0 12px rgba(231,76,60,.45);
+#siren-hero-top{
+    display:flex;align-items:center;justify-content:space-between;gap:10px;
 }
-.sdot.gate{box-shadow:0 0 22px rgba(231,76,60,.85),0 0 44px rgba(231,76,60,.3)!important}
-#siren-info{flex:1;min-width:150px}
-#siren-name{font-size:28px;font-weight:700;color:#1a1a2e;margin-bottom:8px}
+#siren-name{font-size:26px;font-weight:700;color:#1a1a2e;line-height:1.1}
+#siren-gate{
+    display:flex;align-items:center;gap:6px;flex-shrink:0;
+}
 #siren-gate-dot{
     display:inline-block;width:10px;height:10px;border-radius:50%;
-    background:#ccc;vertical-align:middle;margin-right:6px;
+    background:#ccc;
     transition:background .1s,box-shadow .1s;
 }
 #siren-gate-dot.on{background:#e74c3c;box-shadow:0 0 8px rgba(231,76,60,.8)}
-.gate-lbl{font-size:12px;color:#999;vertical-align:middle}
+.gate-lbl{font-size:11px;font-weight:700;color:#999;letter-spacing:.04em}
+#siren-mod-row{
+    display:flex;align-items:center;gap:10px;margin-top:10px;
+}
+.siren-mod-label{
+    flex:0 0 auto;font-size:10px;font-weight:700;color:#888;
+    letter-spacing:.05em;text-transform:uppercase;
+}
 #siren-mod-track{
-    margin-top:10px;height:6px;background:#eee;
-    border-radius:3px;overflow:hidden;
+    flex:1;height:6px;background:#e0e0e0;
+    border-radius:3px;overflow:hidden;min-width:0;
 }
 #siren-mod-fill{
-    height:100%;width:0%;background:#1a1a2e;
+    display:block;height:100%;width:0%;background:#1a1a2e;
     border-radius:3px;transition:width .04s;
 }
-#siren-mod-lbl{font-size:11px;color:#aaa;margin-top:4px}
+#siren-mod-lbl{
+    flex:0 0 36px;font-size:11px;font-weight:700;color:#666;
+    font-family:monospace;text-align:right;
+}
+#siren-presets{
+    display:flex;gap:4px;flex-wrap:nowrap;width:100%;
+}
+.spreset{
+    flex:1 1 0;min-width:0;
+    padding:7px 2px;border-radius:6px;
+    background:#eee;border:1px solid #ddd;
+    font-size:9px;font-weight:700;color:#888;
+    text-align:center;letter-spacing:.02em;
+    line-height:1.2;white-space:nowrap;overflow:hidden;
+    text-overflow:ellipsis;
+    transition:background .15s,color .15s,border-color .15s,box-shadow .15s;
+}
+.spreset.active{
+    background:#1a1a2e;border-color:#1a1a2e;color:#fff;
+}
+.spreset.active.gate{
+    border-color:#e74c3c;
+    box-shadow:0 0 10px rgba(231,76,60,.55);
+}
 
 /* --- Console --- */
 .console-header{
@@ -369,6 +394,8 @@ body > main{
     border-left:3px solid #f39c12;padding:8px 12px;
     border-radius:0 4px 4px 0;margin-bottom:12px;
 }
+#mapping-note a{color:#1a5276;font-weight:700;text-decoration:underline}
+#mapping-note a:hover{color:#0d3d56}
 #mapping-conflicts{
     display:none;font-size:12px;color:#922;
     background:#fdecea;border-left:3px solid #e74c3c;
@@ -559,34 +586,39 @@ body > main{
 
         const sirenBody = el('div', {id:'siren-body'});
 
-        const dotsDiv = el('div', {id:'siren-dots'});
-        sirenDots = [];
-        SIREN_PRESETS.forEach((name, i) => {
-            const d = el('div', {className:'sdot'});
-            d.innerHTML = `<span style="font-size:11px;opacity:.7">${i+1}</span><span>${name}</span>`;
-            dotsDiv.appendChild(d);
-            sirenDots.push(d);
-        });
-
-        const info = el('div', {id:'siren-info'});
-        info.innerHTML = `
-            <div id="siren-name">—</div>
-            <div style="margin-top:8px">
-                <span id="siren-gate-dot"></span>
-                <span class="gate-lbl">Gate</span>
+        const hero = el('div', {id:'siren-hero'});
+        hero.innerHTML = `
+            <div id="siren-hero-top">
+                <div id="siren-name">—</div>
+                <div id="siren-gate">
+                    <span id="siren-gate-dot"></span>
+                    <span class="gate-lbl">Gate</span>
+                </div>
             </div>
-            <div id="siren-mod-track"><div id="siren-mod-fill"></div></div>
-            <div id="siren-mod-lbl">Mod: 0%</div>
+            <div id="siren-mod-row">
+                <span class="siren-mod-label">Mod</span>
+                <div id="siren-mod-track"><div id="siren-mod-fill"></div></div>
+                <span id="siren-mod-lbl">0%</span>
+            </div>
         `;
+        sirenBody.appendChild(hero);
 
-        sirenBody.appendChild(dotsDiv);
-        sirenBody.appendChild(info);
+        const presetsDiv = el('div', {id:'siren-presets'});
+        sirenPresetPills = [];
+        SIREN_PRESETS.forEach((name) => {
+            const pill = el('div', {className:'spreset'});
+            pill.textContent = name;
+            pill.title = name;
+            presetsDiv.appendChild(pill);
+            sirenPresetPills.push(pill);
+        });
+        sirenBody.appendChild(presetsDiv);
         sirenCard.appendChild(sirenBody);
 
-        sirenNameEl  = info.querySelector('#siren-name');
-        sirenGateEl  = info.querySelector('#siren-gate-dot');
-        sirenModFill = info.querySelector('#siren-mod-fill');
-        sirenModLbl  = info.querySelector('#siren-mod-lbl');
+        sirenNameEl  = hero.querySelector('#siren-name');
+        sirenGateEl  = hero.querySelector('#siren-gate-dot');
+        sirenModFill = hero.querySelector('#siren-mod-fill');
+        sirenModLbl  = hero.querySelector('#siren-mod-lbl');
 
         // Console card
         const consoleCard = el('div', {className:'card'});
@@ -689,10 +721,11 @@ body > main{
         const pane = el('div', {id:'pane-mapping', className:'tab-pane'});
 
         const note = el('div', {id:'mapping-note'});
-        note.textContent =
+        note.innerHTML =
             'Current mapping loaded from config.json on the Bela. ' +
             'Edit the values below, then download the file — ' +
-            'replace config.json in the project folder and restart.';
+            'replace config.json in the project folder and restart. ' +
+            '<a href="http://bela.local/" target="_blank" rel="noopener noreferrer">Open Bela IDE</a>';
         pane.appendChild(note);
 
         const conflicts = el('div', {id:'mapping-conflicts'});
@@ -1284,15 +1317,15 @@ body > main{
         const gate = sirenState[1] > 0.5;
         const mod  = sirenState[2];
 
-        sirenDots.forEach((d, i) => {
+        sirenPresetPills.forEach((pill, i) => {
             const isActive = (i === idx);
-            d.className = 'sdot' + (isActive ? ' active' : '') + (isActive && gate ? ' gate' : '');
+            pill.className = 'spreset' + (isActive ? ' active' : '') + (isActive && gate ? ' gate' : '');
         });
 
         if(sirenNameEl)  sirenNameEl.textContent  = SIREN_PRESETS[idx];
         if(sirenGateEl)  sirenGateEl.className     = gate ? 'on' : '';
         if(sirenModFill) sirenModFill.style.width  = (mod * 100).toFixed(1) + '%';
-        if(sirenModLbl)  sirenModLbl.textContent   = 'Mod: ' + Math.round(mod * 100) + '%';
+        if(sirenModLbl)  sirenModLbl.textContent   = Math.round(mod * 100) + '%';
     }
 
     /** Resyncs pot baselines from current live values. */
