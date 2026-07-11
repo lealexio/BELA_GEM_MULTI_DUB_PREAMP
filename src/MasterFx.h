@@ -1,6 +1,7 @@
 #pragma once
 #include "KillSwitch.h"
 #include "NoiseGate.h"
+#include "BrickwallLimiter.h"
 #include "ParametricEq.h"
 #include "FilterSection.h"
 #include "GraphicEq.h"
@@ -16,6 +17,7 @@
  *   4. BandTrim       : 4-band ±3 dB gain trim at speaker crossover frequencies
  *   5. KillSwitch     : 4-band crossover kill
  *   6. NoiseGate      : FX return noise suppression (separate path)
+ *   7. BrickwallLimiter : output peak protection (called from render.cpp on final mix)
  *
  * Signal flow:
  *   channel strips (dry mix)
@@ -40,6 +42,9 @@
  *           × masterGain
  *                 │
  *         (FX returns added HERE in render.cpp — post-master, bypasses all DSP)
+ *                 │
+ *                 ▼
+ *         BrickwallLimiter  ← limitOutput() in render.cpp on final sum
  *                 │
  *                 ▼
  *               OUT
@@ -126,6 +131,12 @@ public:
     float processFxReturn2(float sample);
 
     /**
+     * Applies the brickwall output limiter to one sample.
+     * Call on the final mixed master output in render.cpp (after FX return injection).
+     */
+    float limitOutput(float sample);
+
+    /**
      * Processes one master-bus dry sample through the full chain:
      *   ParametricEq → GraphicEq → FilterSection → BandTrim → KillSwitch → masterGain.
      * FX returns must be added AFTER this call in render.cpp (post-master injection).
@@ -139,8 +150,9 @@ private:
     FilterSection filters_;
     BandTrim      bandTrim_;
     KillSwitch    kills_;
-    NoiseGate     fxReturnGate_;
-    NoiseGate     fxReturnGate2_;
+    NoiseGate         fxReturnGate_;
+    NoiseGate         fxReturnGate2_;
+    BrickwallLimiter  outputLimiter_;
 
     float masterGain_ = 1.f;
 };

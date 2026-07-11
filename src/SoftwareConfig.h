@@ -249,6 +249,21 @@ constexpr float kFxFilterQ = 0.707f;
 constexpr float kSirenGainScale = 0.1f;
 
 // ---------------------------------------------------------------------------
+// Master output limiter
+// ---------------------------------------------------------------------------
+
+/// Peak ceiling in linear full scale. 0.99 ≈ -0.1 dBFS — matches kClipThreshold
+/// headroom so the DAC never receives a hard-clipped sample.
+constexpr float kLimiterCeiling = 0.99f;
+
+/// Gain release time (ms) when the signal drops back below the ceiling.
+/// Slower release avoids audible pumping on sustained limiting.
+constexpr float kLimiterReleaseMs = 100.f;
+
+/// Set to false to bypass the master output limiter (debug only).
+constexpr bool kLimiterEnabled = true;
+
+// ---------------------------------------------------------------------------
 // FX return routing
 // ---------------------------------------------------------------------------
 

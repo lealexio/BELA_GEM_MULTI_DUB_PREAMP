@@ -602,6 +602,8 @@ void render(BelaContext* context, void* userData) {
         else
             out = gMasterFx.process(dry1 + dry2 + dry3 + dry4 + sirenOut + fxReturn + fxReturn2);
 
+        out = gMasterFx.limitOutput(out);
+
         // Startup mute ramp: linear fade 0→1 over kStartupRampMs to suppress DAC pop
         float startupGain = 1.f;
         if(gStartupRampRemaining > 0) {
