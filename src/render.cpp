@@ -9,8 +9,12 @@ https://bela.io
 
 #include <Bela.h>
 #include <libraries/Scope/Scope.h>
+#include <libraries/Gui/Gui.h>
 #include <cmath>
 #include <unistd.h>
+#include <cstdio>
+#include <cstring>
+#include <vector>
 #include "HardwareManager.h"
 #include "ChannelStrip.h"
 #include "MasterFx.h"
@@ -48,6 +52,71 @@ BiquadFilter    gVuMidLpf;  // MID  : LPF  @ kKillFc2 (1200 Hz)
 BiquadFilter    gVuTopHpf;  // TOP  : HPF  @ kKillFc2 (1200 Hz)
 
 Scope scope;
+
+// ---------------------------------------------------------------------------
+// Bela GUI — data bridge between render() and the browser UI (sketch.js)
+// ---------------------------------------------------------------------------
+
+Gui gGui;
+
+// Pre-allocated send buffers (sized in setup, written in render, never resized).
+static std::vector<float> gPotValuesBuf;      // [kAllNamedPotsCount]
+static std::vector<float> gSwitchBuf;         // [9]
+static std::vector<float> gSirenBuf;          // [3] presetIdx / gate / mod
+static std::vector<float> gAudioLevelsBuf;    // [13] peak levels
+static std::vector<float> gPotMappingBuf;     // [kAllNamedPotsCount×4] pot mapping for GUI
+static std::vector<float> gSwitchMappingBuf;  // [9×3] switch mapping for GUI
+static std::vector<float> gConfigMetaBuf;     // [kGuiConfigMetaSize] mux/routing/ignoredPots
+
+// Per-block peak accumulators — one entry per tracked audio channel.
+// Index map: 0-3 = in0-in3 | 4-5 = fxRet1-2 | 6 = master out
+//            7-8 = fxSend1-2 | 9-12 = vuSub/Kick/Mid/Top
+static float gAudioPeaks[13] = {};
+
+static int  gGuiUpdateSampleCount = 0;      // accumulates context->audioFrames per block
+static int  gGuiStaticSendCount   = kGuiStaticBufSendDivisor; // force static send on first tick
+
+// Path built in setup() from context->projectName — never hardcoded.
+static char kGuiConfigPath[256] = {};
+
+// Switch globals in the same order as the JS SWITCH_NAMES array.
+static SwitchRef* const kGuiSwitchRefs[9] = {
+    &KILL_SUB, &KILL_KICK, &KILL_MID, &KILL_TOP,
+    &FX_FILTER_MIDS, &FX_FILTER_TOPS, &FX2_FILTER_TOPS, &FX2_FILTER_MIDS,
+    &SIREN_TRIGGER
+};
+
+/** Fills gConfigMetaBuf with mux/calibration/routing/ignoredPots (buffer 6 layout). */
+static void fillConfigMetaBuf() {
+    gConfigMetaBuf.assign(kGuiConfigMetaSize, 0.f);
+    gConfigMetaBuf[0]  = (float)kActiveMux;
+    gConfigMetaBuf[1]  = kPotScaleRecovery;
+    gConfigMetaBuf[2]  = kPotMax;
+    gConfigMetaBuf[3]  = kPotMin;
+    gConfigMetaBuf[4]  = (float)kMcpAddress;
+    gConfigMetaBuf[5]  = (float)MASTER_OUTS_COUNT;
+    gConfigMetaBuf[6]  = (float)(MASTER_OUTS_COUNT > 0 ? MASTER_OUTS[0] : 0);
+    gConfigMetaBuf[7]  = (float)(MASTER_OUTS_COUNT > 1 ? MASTER_OUTS[1] : 0);
+    gConfigMetaBuf[8]  = (float)FX1_SEND_OUT;
+    gConfigMetaBuf[9]  = (float)FX2_SEND_OUT;
+    gConfigMetaBuf[10] = (float)VU_SUB_OUT;
+    gConfigMetaBuf[11] = (float)VU_KICK_OUT;
+    gConfigMetaBuf[12] = (float)VU_MID_OUT;
+    gConfigMetaBuf[13] = (float)VU_TOP_OUT;
+    gConfigMetaBuf[14] = (float)FX1_RETURN_IN;
+    gConfigMetaBuf[15] = (float)FX2_RETURN_IN;
+    gConfigMetaBuf[16] = (float)AUX1_CONFIG.audioIns[0];
+    gConfigMetaBuf[17] = (float)AUX2_CONFIG.audioIns[0];
+    gConfigMetaBuf[18] = (float)AUX3_CONFIG.audioIns[0];
+    gConfigMetaBuf[19] = (float)AUX4_CONFIG.audioIns[0];
+    gConfigMetaBuf[20] = (float)kIgnoredPotsCount;
+    for(int i = 0; i < kIgnoredPotsCount; ++i) {
+        gConfigMetaBuf[21 + i*2 + 0] = (float)kIgnoredPots[i].mux;
+        gConfigMetaBuf[21 + i*2 + 1] = (float)kIgnoredPots[i].pot;
+    }
+}
+
+// ---------------------------------------------------------------------------
 
 static unsigned int gClipWarnCounter     = 0;
 static int          gStartupRampRemaining = 0;
@@ -240,9 +309,13 @@ static void printChangedSwitches() {
 // ---------------------------------------------------------------------------
 
 bool setup(BelaContext* context, void* userData) {
+    // Build project-directory paths from the runtime project name so the code
+    // works regardless of what the project was named in Bela IDE.
+    snprintf(kGuiConfigPath, sizeof(kGuiConfigPath),
+             "/root/Bela/projects/%s/config.json", context->projectName);
+
     // Load hardware mappings from JSON before any other initialisation.
-    // Falls back silently to compiled-in defaults if the file is absent.
-    ConfigLoader::load("/root/Bela/projects/BELA_GEM_MULTI_DUB_PREAMP/config.json");
+    ConfigLoader::load(kGuiConfigPath);
 
     // Populate the named-switch table after JSON overrides are applied.
     kNamedSwitches[0] = { "KILL_KICK",       KILL_KICK,       "KILL",    "open"     };
@@ -302,6 +375,33 @@ bool setup(BelaContext* context, void* userData) {
 
     gI2cTask = Bela_createAuxiliaryTask(readI2cTask, 50, "i2c-reader", nullptr);
     Bela_scheduleAuxiliaryTask(gI2cTask);
+
+    // ---- GUI setup --------------------------------------------------------
+    // Allocate live send buffers (never resized after this point).
+    gPotValuesBuf.assign(kAllNamedPotsCount, 0.f);
+    gSwitchBuf.assign(9, 0.f);
+    gSirenBuf.assign(3, 0.f);
+    gAudioLevelsBuf.assign(13, 0.f);
+
+    // Fill static mapping buffers from the (possibly JSON-overridden) globals.
+    gPotMappingBuf.resize(kAllNamedPotsCount * 4);
+    for(int i = 0; i < kAllNamedPotsCount; ++i) {
+        gPotMappingBuf[i*4 + 0] = (float)kAllNamedPots[i].mux;
+        gPotMappingBuf[i*4 + 1] = (float)kAllNamedPots[i].pot;
+        gPotMappingBuf[i*4 + 2] = kAllNamedPots[i].reversed ? 1.f : 0.f;
+        gPotMappingBuf[i*4 + 3] = kAllNamedPots[i].centered ? 1.f : 0.f;
+    }
+    gSwitchMappingBuf.resize(9 * 3);
+    for(int i = 0; i < 9; ++i) {
+        gSwitchMappingBuf[i*3 + 0] = (float)kGuiSwitchRefs[i]->pin;
+        gSwitchMappingBuf[i*3 + 1] = kGuiSwitchRefs[i]->portB    ? 1.f : 0.f;
+        gSwitchMappingBuf[i*3 + 2] = kGuiSwitchRefs[i]->reversed ? 1.f : 0.f;
+    }
+
+    fillConfigMetaBuf();
+
+    gGui.setup(context->projectName);
+    // -----------------------------------------------------------------------
 
     return true;
 }
@@ -454,10 +554,12 @@ void render(BelaContext* context, void* userData) {
         if(fabsf(in0) >= kClipThreshold) clipCh0 = true;
         if(fabsf(in1) >= kClipThreshold) clipCh1 = true;
 
+        float in2  = readChannelInput(context, n, AUX3_CONFIG);
+        float in3  = readChannelInput(context, n, AUX4_CONFIG);
         float dry1 = gChannelStrip.process(in0);
         float dry2 = gChannelStrip2.process(in1);
-        float dry3 = gChannelStrip3.process(readChannelInput(context, n, AUX3_CONFIG));
-        float dry4 = gChannelStrip4.process(readChannelInput(context, n, AUX4_CONFIG));
+        float dry3 = gChannelStrip3.process(in2);
+        float dry4 = gChannelStrip4.process(in3);
 
         // Siren: process before FX send to include its FX output
         float sirenOut = gDubSiren.process();
@@ -520,6 +622,24 @@ void render(BelaContext* context, void* userData) {
         audioWrite(context, n, VU_KICK_OUT, vuKick * startupGain);
         audioWrite(context, n, VU_MID_OUT,  vuMid  * startupGain);
         audioWrite(context, n, VU_TOP_OUT,  vuTop  * startupGain);
+
+        // GUI peak tracking — one max(|x|) per channel per update interval.
+        // Uses pre-gain values so the meters reflect true DSP levels.
+        #define GUI_PEAK(i, x) { float _a = fabsf(x); if(_a > gAudioPeaks[i]) gAudioPeaks[i] = _a; }
+        GUI_PEAK(0,  in0)
+        GUI_PEAK(1,  in1)
+        GUI_PEAK(2,  in2)
+        GUI_PEAK(3,  in3)
+        GUI_PEAK(4,  fxReturn)
+        GUI_PEAK(5,  fxReturn2)
+        GUI_PEAK(6,  out)
+        GUI_PEAK(7,  fxSend)
+        GUI_PEAK(8,  fxSend2)
+        GUI_PEAK(9,  vuSub)
+        GUI_PEAK(10, vuKick)
+        GUI_PEAK(11, vuMid)
+        GUI_PEAK(12, vuTop)
+        #undef GUI_PEAK
     }
 
     // --- Clip warnings (rate-limited) ---
@@ -528,6 +648,53 @@ void render(BelaContext* context, void* userData) {
         if(clipCh0) rt_printf("WARNING Canal 0 clipping\n");
         if(clipCh1) rt_printf("WARNING Canal 1 clipping\n");
         gClipWarnCounter = 0;
+    }
+
+    // --- GUI update (~60 fps) — count samples, not render blocks ---
+    gGuiUpdateSampleCount += (int)context->audioFrames;
+    if(gGuiUpdateSampleCount >= kGuiUpdateIntervalSamples) {
+        gGuiUpdateSampleCount -= kGuiUpdateIntervalSamples;
+
+        // Buffer 0: all pot values in kAllNamedPots order
+        for(int i = 0; i < kAllNamedPotsCount; ++i)
+            gPotValuesBuf[i] = gHardwareManager.getPotValue(kAllNamedPots[i]);
+        gGui.sendBuffer(0, gPotValuesBuf);
+
+        // Buffer 1: switch states
+        gSwitchBuf[0] = gHardwareManager.getSwitchState(KILL_SUB)        ? 1.f : 0.f;
+        gSwitchBuf[1] = gHardwareManager.getSwitchState(KILL_KICK)       ? 1.f : 0.f;
+        gSwitchBuf[2] = gHardwareManager.getSwitchState(KILL_MID)        ? 1.f : 0.f;
+        gSwitchBuf[3] = gHardwareManager.getSwitchState(KILL_TOP)        ? 1.f : 0.f;
+        gSwitchBuf[4] = gHardwareManager.getSwitchState(FX_FILTER_MIDS)  ? 1.f : 0.f;
+        gSwitchBuf[5] = gHardwareManager.getSwitchState(FX_FILTER_TOPS)  ? 1.f : 0.f;
+        gSwitchBuf[6] = gHardwareManager.getSwitchState(FX2_FILTER_TOPS) ? 1.f : 0.f;
+        gSwitchBuf[7] = gHardwareManager.getSwitchState(FX2_FILTER_MIDS) ? 1.f : 0.f;
+        gSwitchBuf[8] = gHardwareManager.getSwitchState(SIREN_TRIGGER)   ? 1.f : 0.f;
+        gGui.sendBuffer(1, gSwitchBuf);
+
+        // Buffer 2: siren state [presetIdx, gate, mod]
+        float sirenTypePot = gHardwareManager.getPotValue(SIREN_TYPE);
+        gSirenBuf[0] = floorf(sirenTypePot * (float)DubSiren::kNumPresets);
+        if(gSirenBuf[0] >= (float)DubSiren::kNumPresets)
+            gSirenBuf[0] = (float)(DubSiren::kNumPresets - 1);
+        gSirenBuf[1] = gHardwareManager.getSwitchState(SIREN_TRIGGER) ? 1.f : 0.f;
+        gSirenBuf[2] = gHardwareManager.getPotValue(SIREN_MOD);
+        gGui.sendBuffer(2, gSirenBuf);
+
+        // Buffer 3: audio peak levels — copy accumulators, then reset
+        for(int i = 0; i < 13; ++i) {
+            gAudioLevelsBuf[i] = gAudioPeaks[i];
+            gAudioPeaks[i]     = 0.f;
+        }
+        gGui.sendBuffer(3, gAudioLevelsBuf);
+
+        // Buffers 4+5+6: mapping + config metadata — resend periodically for (re)connects.
+        if(++gGuiStaticSendCount >= kGuiStaticBufSendDivisor) {
+            gGuiStaticSendCount = 0;
+            gGui.sendBuffer(4, gPotMappingBuf);
+            gGui.sendBuffer(5, gSwitchMappingBuf);
+            gGui.sendBuffer(6, gConfigMetaBuf);
+        }
     }
 
     // --- Debug logging ---
@@ -550,4 +717,5 @@ void render(BelaContext* context, void* userData) {
 
 void cleanup(BelaContext* context, void* userData) {
     gHardwareManager.closeMcp23017();
+    gGui.cleanup();
 }

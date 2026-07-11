@@ -1,5 +1,5 @@
 {
-  "_comment": "Dub Preamp BELA GEM MULTI — hardware mapping config. Edit this file to remap pots/switches without recompiling. Restart the Bela project to apply changes.",
+  "_comment": "Dub Preamp BELA GEM MULTI -- hardware mapping config. Edit this file to remap pots/switches without recompiling. Restart the Bela project to apply changes.",
 
   "mux": {
     "activeMux": 4

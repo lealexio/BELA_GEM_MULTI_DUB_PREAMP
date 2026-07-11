@@ -16,7 +16,7 @@
 // ---------------------------------------------------------------------------
 
 /// Set to true to enable real-time pot/switch logging in render().
-constexpr bool kDebug = true;
+constexpr bool kDebug = false;
 
 /// Minimum absolute pot movement required to emit a debug log line.
 /// Prevents log spam from ADC jitter on pots that are not touched.
@@ -260,3 +260,17 @@ constexpr float kSirenGainScale = 0.1f;
 /// When false : FX returns are summed PRE-master, entering the full processing chain.
 ///              Use this when you want kills and EQ to shape the wet return as well.
 constexpr bool kFxReturnPostMaster = true;
+
+// ---------------------------------------------------------------------------
+// Bela GUI web interface (sketch.js)
+// ---------------------------------------------------------------------------
+
+/// GUI send interval in audio samples (~16.7 ms @ 44.1 kHz → ~60 fps).
+constexpr int kGuiUpdateIntervalSamples = 735;
+
+/// Resend static mapping/config-meta buffers every N GUI ticks (~250 ms @ 60 fps).
+constexpr int kGuiStaticBufSendDivisor = 15;
+
+/// Float count for GUI buffer 6 (mux, routing, ignoredPots). Must match sketch.js.
+constexpr int kGuiConfigMetaHeaderFloats = 21;
+constexpr int kGuiConfigMetaSize         = kGuiConfigMetaHeaderFloats + 32; // 16 ignored pairs max
