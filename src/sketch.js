@@ -22,6 +22,10 @@ var sketch = function(p) {
     /** Minimum pot travel (0–1) required to accept a detect hit. */
     const DETECT_POT_MIN_DELTA = 0.25;
 
+    /** Console pot change thresholds — detailed catches ADC jitter, normal filters it. */
+    const CONSOLE_POT_MIN_DELTA_DETAILED = 0.003;
+    const CONSOLE_POT_MIN_DELTA_NORMAL   = 0.02;
+
     const SIREN_PRESETS = ['Wail', 'Whoop', 'Police', 'Scanner', 'Riotgun', 'Laser'];
 
     /** Pot names in kAllNamedPots order (58 entries). */
@@ -110,11 +114,13 @@ var sketch = function(p) {
     const meterDbs   = [];
 
     // Console tracking
-    let recentChanges    = [];
-    let prevPotValues    = new Float32Array(58).fill(-1);
-    let prevSwitchStates = new Float32Array(9).fill(-1);
-    let consoleReady     = false;
-    const MAX_CONSOLE    = 14;
+    let recentChanges         = [];
+    let prevPotValues         = new Float32Array(58).fill(-1);
+    let prevPotValuesNormal   = new Float32Array(58).fill(-1);
+    let prevSwitchStates      = new Float32Array(9).fill(-1);
+    let consoleReady          = false;
+    let consoleFilterMode     = 'normal';
+    const MAX_CONSOLE         = 10;
 
     let currentTab   = 0;
     let mappingBuilt = false;
@@ -128,7 +134,8 @@ var sketch = function(p) {
     let sirenGateEl  = null;
     let sirenModFill = null;
     let sirenModLbl  = null;
-    let consoleList  = null;
+    let consoleList       = null;
+    let consoleFilterBtns = [];
     let switchPills  = [];
     let downloadStatusEl = null;
     let detectStatusEl   = null;
@@ -265,24 +272,42 @@ body > main{
 #siren-mod-lbl{font-size:11px;color:#aaa;margin-top:4px}
 
 /* --- Console --- */
+.console-header{
+    display:flex;align-items:center;justify-content:space-between;
+    gap:8px;margin-bottom:10px;
+}
+.console-header .card-title{margin-bottom:0}
+.console-filter{display:flex;gap:4px}
+.console-filter-btn{
+    padding:3px 10px;font-size:10px;font-weight:700;color:#888;
+    cursor:pointer;border:1px solid #ddd;border-radius:10px;
+    background:#f5f5f5;letter-spacing:.03em;
+    transition:background .1s,color .1s,border-color .1s;
+}
+.console-filter-btn:hover{color:#333;border-color:#bbb}
+.console-filter-btn.active{
+    background:#1a1a2e;color:#fff;border-color:#1a1a2e;
+}
 #console-list{list-style:none}
 .crow{
     display:flex;align-items:center;gap:8px;
     padding:4px 0;border-bottom:1px solid #f0f0f0;
 }
 .crow:last-child{border-bottom:none}
+.crow.empty{opacity:0.25}
+.crow.empty .cname,
+.crow.empty .cval{color:transparent}
 .cname{
     flex:0 0 175px;font-family:monospace;font-size:11px;
     font-weight:600;color:#1a1a2e;white-space:nowrap;overflow:hidden;
 }
 .ctrack{flex:1;height:5px;background:#eee;border-radius:3px;overflow:hidden}
-.cfill{height:100%;background:#2980b9;border-radius:3px}
+.cfill{height:100%;background:#1a1a2e;border-radius:3px}
 .crow.sw .cfill{background:#e74c3c}
 .cval{
     flex:0 0 46px;text-align:right;font-family:monospace;
     font-size:11px;color:#777;
 }
-#console-empty{font-size:12px;color:#bbb;font-style:italic;padding:6px 0}
 
 /* --- Switch pills --- */
 #sw-pills{display:flex;flex-wrap:wrap;gap:6px;margin-top:2px}
@@ -541,12 +566,29 @@ body > main{
 
         // Console card
         const consoleCard = el('div', {className:'card'});
-        consoleCard.appendChild(cardTitle('Console — last change'));
+        const consoleHdr = el('div', {className:'console-header'});
+        consoleHdr.appendChild(cardTitle('Console — last change'));
+        const filterBar = el('div', {className:'console-filter'});
+        consoleFilterBtns = [];
+        [
+            { mode: 'normal',   label: 'Normal'   },
+            { mode: 'detailed', label: 'Détaillé' }
+        ].forEach(({ mode, label }) => {
+            const btn = el('button', {
+                type: 'button',
+                className: 'console-filter-btn' + (mode === consoleFilterMode ? ' active' : '')
+            });
+            btn.textContent = label;
+            btn.dataset.mode = mode;
+            btn.addEventListener('click', () => setConsoleFilterMode(mode));
+            filterBar.appendChild(btn);
+            consoleFilterBtns.push(btn);
+        });
+        consoleHdr.appendChild(filterBar);
+        consoleCard.appendChild(consoleHdr);
         consoleList = el('ul', {id:'console-list'});
-        const empty = el('li', {id:'console-empty'});
-        empty.textContent = 'Waiting for data…';
-        consoleList.appendChild(empty);
         consoleCard.appendChild(consoleList);
+        renderConsole();
 
         grid.appendChild(sirenCard);
         grid.appendChild(consoleCard);
@@ -1229,15 +1271,51 @@ body > main{
         if(sirenModLbl)  sirenModLbl.textContent   = 'Mod: ' + Math.round(mod * 100) + '%';
     }
 
+    /** Resyncs pot baselines from current live values. */
+    function syncConsolePotBaselines() {
+        prevPotValues.set(potValues);
+        prevPotValuesNormal.set(potValues);
+    }
+
+    /** Switches console filter mode and clears stale entries. */
+    function setConsoleFilterMode(mode) {
+        if(mode !== 'normal' && mode !== 'detailed') return;
+        if(mode === consoleFilterMode) return;
+        consoleFilterMode = mode;
+        consoleFilterBtns.forEach(btn => {
+            btn.classList.toggle('active', btn.dataset.mode === mode);
+        });
+        recentChanges = [];
+        syncConsolePotBaselines();
+        renderConsole();
+    }
+
+    /** Builds one console row — filled from entry or empty placeholder slot. */
+    function buildConsoleRow(entry) {
+        const isSw  = entry && entry.type === 'sw';
+        const li    = el('li', {className: 'crow' + (entry ? (isSw ? ' sw' : '') : ' empty')});
+        const pct   = entry ? (entry.value * 100).toFixed(1) : '0';
+        const cval  = entry ? entry.value.toFixed(3) : '\u00a0';
+        const cname = entry ? entry.name : '\u00a0';
+        li.innerHTML =
+            `<span class="cname">${cname}</span>` +
+            `<span class="ctrack"><span class="cfill" style="width:${pct}%"></span></span>` +
+            `<span class="cval">${cval}</span>`;
+        return li;
+    }
+
     /** Detects changed pots/switches and updates the console. */
     function updateConsole() {
         const now = Date.now();
         let dirty = false;
+        const isNormal = consoleFilterMode === 'normal';
+        const potDelta = isNormal ? CONSOLE_POT_MIN_DELTA_NORMAL : CONSOLE_POT_MIN_DELTA_DETAILED;
+        const potPrev  = isNormal ? prevPotValuesNormal : prevPotValues;
 
         for(let i = 0; i < POT_NAMES.length; i++) {
             const v = potValues[i];
-            if(Math.abs(v - prevPotValues[i]) > 0.003) {
-                prevPotValues[i] = v;
+            if(Math.abs(v - potPrev[i]) >= potDelta) {
+                potPrev[i] = v;
                 pushConsoleEntry({name: POT_NAMES[i], value: v, type: 'pot', ts: now});
                 dirty = true;
             }
@@ -1262,18 +1340,10 @@ body > main{
 
     function renderConsole() {
         if(!consoleList) return;
-        const emptyLi = document.getElementById('console-empty');
-        if(emptyLi) emptyLi.remove();
         consoleList.innerHTML = '';
-        recentChanges.forEach(e => {
-            const li  = el('li', {className:'crow' + (e.type==='sw'?' sw':'')});
-            const pct = (e.value * 100).toFixed(0);
-            li.innerHTML =
-                `<span class="cname">${e.name}</span>` +
-                `<span class="ctrack"><span class="cfill" style="width:${pct}%"></span></span>` +
-                `<span class="cval">${e.value.toFixed(3)}</span>`;
-            consoleList.appendChild(li);
-        });
+        for(let i = 0; i < MAX_CONSOLE; i++) {
+            consoleList.appendChild(buildConsoleRow(recentChanges[i] || null));
+        }
     }
 
     /** Updates switch pill colors from current switchStates. */
@@ -1432,9 +1502,10 @@ body > main{
         if(b[0]) {
             if(!consoleReady) {
                 // First frame — capture baseline so console doesn't flood with 58 entries
-                prevPotValues    = new Float32Array(b[0]);
-                prevSwitchStates = new Float32Array(b[1] || switchStates);
-                consoleReady     = true;
+                prevPotValues       = new Float32Array(b[0]);
+                prevPotValuesNormal = new Float32Array(b[0]);
+                prevSwitchStates    = new Float32Array(b[1] || switchStates);
+                consoleReady        = true;
             }
             potValues   = b[0];
         }
