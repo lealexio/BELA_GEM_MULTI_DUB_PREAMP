@@ -67,6 +67,7 @@ static std::vector<float> gAudioLevelsBuf;    // [13] peak levels
 static std::vector<float> gPotMappingBuf;     // [kAllNamedPotsCount×4] pot mapping for GUI
 static std::vector<float> gSwitchMappingBuf;  // [9×3] switch mapping for GUI
 static std::vector<float> gConfigMetaBuf;     // [kGuiConfigMetaSize] mux/routing/ignoredPots
+static std::vector<float> gMuxRawBuf;         // [kGuiMuxRawBufSize] raw pot values per MUX channel
 
 // Per-block peak accumulators — one entry per tracked audio channel.
 // Index map: 0-3 = in0-in3 | 4-5 = fxRet1-2 | 6 = master out
@@ -382,6 +383,7 @@ bool setup(BelaContext* context, void* userData) {
     gSwitchBuf.assign(9, 0.f);
     gSirenBuf.assign(3, 0.f);
     gAudioLevelsBuf.assign(13, 0.f);
+    gMuxRawBuf.assign(kGuiMuxRawBufSize, 0.f);
 
     // Fill static mapping buffers from the (possibly JSON-overridden) globals.
     gPotMappingBuf.resize(kAllNamedPotsCount * 4);
@@ -687,6 +689,12 @@ void render(BelaContext* context, void* userData) {
             gAudioPeaks[i]     = 0.f;
         }
         gGui.sendBuffer(3, gAudioLevelsBuf);
+
+        // Buffer 7: raw MUX grid (unmapped pot discovery in GUI)
+        for(int m = 0; m < kActiveMux; ++m)
+            for(int p = 0; p < kPotsPerMux; ++p)
+                gMuxRawBuf[m * kPotsPerMux + p] = gHardwareManager.getPotValue(m, p);
+        gGui.sendBuffer(7, gMuxRawBuf);
 
         // Buffers 4+5+6: mapping + config metadata — resend periodically for (re)connects.
         if(++gGuiStaticSendCount >= kGuiStaticBufSendDivisor) {

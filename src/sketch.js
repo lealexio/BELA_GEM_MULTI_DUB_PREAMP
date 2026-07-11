@@ -11,6 +11,7 @@
  *   [4] Float32[58×4]    — pot mapping [mux,pot,rev,cen]×58
  *   [5] Float32[9×3]     — switch mapping [pin,portB,rev]×9
  *   [6] Float32[N]       — config metadata (mux, routing, ignoredPots)
+ *   [7] Float32[64]      — raw MUX grid [mux×16+pot], normalised 0–1 (unmapped discovery)
  */
 
 var sketch = function(p) {
@@ -21,6 +22,10 @@ var sketch = function(p) {
 
     /** Minimum pot travel (0–1) required to accept a detect hit. */
     const DETECT_POT_MIN_DELTA = 0.25;
+
+    /** MUX grid layout — must match kNumMux × kPotsPerMux in HardwareConfig.h. */
+    const MUX_POTS_PER_MUX = 16;
+    const MUX_RAW_SIZE     = 64;
 
     /** Console pot change thresholds — detailed catches ADC jitter, normal filters it. */
     const CONSOLE_POT_MIN_DELTA_DETAILED = 0.003;
@@ -106,6 +111,7 @@ var sketch = function(p) {
     let potMapping    = null;                  // Float32Array(58×4)
     let switchMapping = null;                  // Float32Array(9×3)
     let configMeta    = null;                  // Float32Array — mux/routing/ignoredPots
+    let muxRawValues  = null;                  // Float32Array(64) — raw MUX pot grid
 
     // Peak-hold for meters (JS-side, display only)
     const peakHold      = new Float32Array(13).fill(0);
@@ -123,6 +129,8 @@ var sketch = function(p) {
     let prevPotValues         = new Float32Array(58).fill(-1);
     let prevPotValuesNormal   = new Float32Array(58).fill(-1);
     let prevSwitchStates      = new Float32Array(9).fill(-1);
+    let prevMuxRawValues      = null;
+    let prevMuxRawValuesNormal = null;
     let consoleReady          = false;
     let consoleFilterMode     = 'normal';
     const MAX_CONSOLE         = 10;
@@ -1009,15 +1017,59 @@ body > main{
         }
     }
 
+    /** Returns flat index into the MUX raw grid buffer. */
+    function muxRawIndex(mux, pot) {
+        return mux * MUX_POTS_PER_MUX + pot;
+    }
+
+    /** Returns active MUX count from config metadata (fallback: 4). */
+    function getActiveMuxCount() {
+        if(configMeta && configMeta.length > CONFIG_META.ACTIVE_MUX)
+            return Math.max(1, Math.round(configMeta[CONFIG_META.ACTIVE_MUX]));
+        return 4;
+    }
+
+    /** Returns true when a physical MUX channel is in the ignored-pots list. */
+    function isPotIgnored(mux, pot) {
+        if(!configMeta) return false;
+        const count = Math.round(configMeta[CONFIG_META.IGNORED_COUNT]);
+        for(let i = 0; i < count; i++) {
+            const base = CONFIG_META.IGNORED_BASE + i * 2;
+            if(Math.round(configMeta[base]) === mux &&
+               Math.round(configMeta[base + 1]) === pot)
+                return true;
+        }
+        return false;
+    }
+
+    /** Returns true when a MUX channel is already assigned to a named pot. */
+    function isPotMapped(mux, pot) {
+        if(!potMapping) return false;
+        for(let i = 0; i < POT_NAMES.length; i++) {
+            if(Math.round(potMapping[i * 4]) === mux &&
+               Math.round(potMapping[i * 4 + 1]) === pot)
+                return true;
+        }
+        return false;
+    }
+
+    /** Human-readable label for an unmapped physical pot (0-based MUX/channel, matches mapping table). */
+    function formatUnmappedPotLabel(mux, pot) {
+        return 'N/A MUX' + mux + ' CH' + String(pot).padStart(2, '0');
+    }
+
     /** Snapshots live pot/switch values for movement detection. */
     function snapshotControlValues() {
         const snapPot = new Float32Array(POT_NAMES.length);
         const snapSw  = new Float32Array(SWITCH_NAMES.length);
+        const snapMuxRaw = new Float32Array(MUX_RAW_SIZE);
         for(let i = 0; i < POT_NAMES.length; i++)
             snapPot[i] = potValues[i] != null ? potValues[i] : 0;
         for(let i = 0; i < SWITCH_NAMES.length; i++)
             snapSw[i] = switchStates[i] != null ? switchStates[i] : 0;
-        return {snapPot, snapSw};
+        for(let i = 0; i < MUX_RAW_SIZE; i++)
+            snapMuxRaw[i] = muxRawValues ? muxRawValues[i] : 0;
+        return {snapPot, snapSw, snapMuxRaw};
     }
 
     /** Starts listening for a pot move (≥25%) or switch toggle for one row. */
@@ -1032,15 +1084,15 @@ body > main{
             return;
         }
 
-        const {snapPot, snapSw} = snapshotControlValues();
-        detectMode = {table, targetIndex: index, snapPot, snapSw};
+        const {snapPot, snapSw, snapMuxRaw} = snapshotControlValues();
+        detectMode = {table, targetIndex: index, snapPot, snapSw, snapMuxRaw};
 
         setDetectUiActive(true);
         const targetName = table === 'pot' ? POT_NAMES[index] : SWITCH_NAMES[index];
         if(table === 'pot') {
             showDetectStatus(
-                'Move a pot at least 25% for ' + targetName + ' — ' +
-                'MUX/channel will be copied from the control you move.'
+                'Move any pot at least 25% for ' + targetName + ' — ' +
+                'MUX/channel will be detected automatically.'
             );
         } else {
             showDetectStatus(
@@ -1068,6 +1120,30 @@ body > main{
         else
             inp.value = value;
         inp.dispatchEvent(new Event('input', {bubbles: true}));
+    }
+
+    /** Finds the MUX channel with the largest raw change since the detect snapshot. */
+    function findMovedMuxPot(snapMuxRaw) {
+        if(!muxRawValues) return null;
+        const activeMux = getActiveMuxCount();
+        let bestMux = -1;
+        let bestPot = -1;
+        let bestDelta = 0;
+        for(let m = 0; m < activeMux; m++) {
+            for(let p = 0; p < MUX_POTS_PER_MUX; p++) {
+                if(isPotIgnored(m, p)) continue;
+                const idx   = muxRawIndex(m, p);
+                const cur   = muxRawValues[idx] != null ? muxRawValues[idx] : 0;
+                const delta = Math.abs(cur - snapMuxRaw[idx]);
+                if(delta > bestDelta) {
+                    bestDelta = delta;
+                    bestMux   = m;
+                    bestPot   = p;
+                }
+            }
+        }
+        if(bestMux < 0 || bestDelta < DETECT_POT_MIN_DELTA) return null;
+        return {mux: bestMux, pot: bestPot, label: formatUnmappedPotLabel(bestMux, bestPot)};
     }
 
     /** Finds the pot index with the largest change since the detect snapshot. */
@@ -1123,6 +1199,32 @@ body > main{
         };
     }
 
+    /** Applies a detected physical MUX channel to the selected pot row. */
+    function finishDetectPotFromPhysical(mux, pot, label) {
+        const dst = detectMode.targetIndex;
+        setMappingField('pot', dst, 'mux', mux);
+        setMappingField('pot', dst, 'pot', pot);
+
+        if(potMapping) {
+            for(let i = 0; i < POT_NAMES.length; i++) {
+                if(Math.round(potMapping[i * 4]) === mux &&
+                   Math.round(potMapping[i * 4 + 1]) === pot) {
+                    const src = readPotMappingRow(i);
+                    if(src) {
+                        setMappingField('pot', dst, 'rev', src.rev);
+                        setMappingField('pot', dst, 'cen', src.cen);
+                    }
+                    break;
+                }
+            }
+        }
+
+        showDownloadStatus(
+            'Detected ' + label + ' → MUX ' + mux + ' / ch ' + pot, false
+        );
+        cancelDetect();
+    }
+
     /** Applies detect result to the selected row, then ends the session. */
     function finishDetect(sourceIndex, sourceName) {
         const dst = detectMode.targetIndex;
@@ -1159,9 +1261,9 @@ body > main{
         if(!detectMode) return;
 
         if(detectMode.table === 'pot') {
-            const srcIdx = findMovedPotIndex(detectMode.snapPot);
-            if(srcIdx >= 0)
-                finishDetect(srcIdx, POT_NAMES[srcIdx]);
+            const hit = findMovedMuxPot(detectMode.snapMuxRaw);
+            if(hit)
+                finishDetectPotFromPhysical(hit.mux, hit.pot, hit.label);
         } else {
             const srcIdx = findToggledSwitchIndex(detectMode.snapSw);
             if(srcIdx >= 0)
@@ -1332,6 +1434,10 @@ body > main{
     function syncConsolePotBaselines() {
         prevPotValues.set(potValues);
         prevPotValuesNormal.set(potValues);
+        if(muxRawValues && prevMuxRawValues) {
+            prevMuxRawValues.set(muxRawValues);
+            prevMuxRawValuesNormal.set(muxRawValues);
+        }
     }
 
     /** Switches console filter mode and clears stale entries. */
@@ -1387,6 +1493,28 @@ body > main{
                 prevSwitchStates[i] = v;
                 pushConsoleEntry({name: SWITCH_NAMES[i], value: v, type: 'sw', ts: now});
                 dirty = true;
+            }
+        }
+
+        if(muxRawValues && prevMuxRawValues && prevMuxRawValuesNormal) {
+            const muxPrev = isNormal ? prevMuxRawValuesNormal : prevMuxRawValues;
+            const activeMux = getActiveMuxCount();
+            for(let m = 0; m < activeMux; m++) {
+                for(let p = 0; p < MUX_POTS_PER_MUX; p++) {
+                    if(isPotIgnored(m, p) || isPotMapped(m, p)) continue;
+                    const idx = muxRawIndex(m, p);
+                    const v   = muxRawValues[idx];
+                    if(Math.abs(v - muxPrev[idx]) >= potDelta) {
+                        muxPrev[idx] = v;
+                        pushConsoleEntry({
+                            name: formatUnmappedPotLabel(m, p),
+                            value: v,
+                            type: 'pot',
+                            ts: now
+                        });
+                        dirty = true;
+                    }
+                }
             }
         }
 
@@ -1637,6 +1765,10 @@ body > main{
                 prevPotValues       = new Float32Array(b[0]);
                 prevPotValuesNormal = new Float32Array(b[0]);
                 prevSwitchStates    = new Float32Array(b[1] || switchStates);
+                if(b[7]) {
+                    prevMuxRawValues       = new Float32Array(b[7]);
+                    prevMuxRawValuesNormal = new Float32Array(b[7]);
+                }
                 consoleReady        = true;
             }
             potValues   = b[0];
@@ -1644,6 +1776,13 @@ body > main{
         if(b[1]) switchStates = b[1];
         if(b[2]) sirenState   = b[2];
         if(b[3]) audioLevels  = b[3];
+        if(b[7]) {
+            if(!prevMuxRawValues) {
+                prevMuxRawValues       = new Float32Array(b[7]);
+                prevMuxRawValuesNormal = new Float32Array(b[7]);
+            }
+            muxRawValues = b[7];
+        }
         if(b[4] && !potMapping)    { potMapping    = Float32Array.from(b[4]); tryBuildMappingTable(); }
         if(b[5] && !switchMapping) { switchMapping = Float32Array.from(b[5]); tryBuildMappingTable(); }
         if(b[6] && !configMeta)    { configMeta    = Float32Array.from(b[6]); }
