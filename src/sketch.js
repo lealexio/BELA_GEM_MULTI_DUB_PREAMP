@@ -26,6 +26,11 @@ var sketch = function(p) {
     const CONSOLE_POT_MIN_DELTA_DETAILED = 0.003;
     const CONSOLE_POT_MIN_DELTA_NORMAL   = 0.02;
 
+    /** No fresh Bela data for this long → badge OFFLINE. */
+    const BELA_OFFLINE_TIMEOUT_MS = 1000;
+    /** Nominal GUI tick ~50 ms @ 20 fps; gap above this → badge LAG (orange). */
+    const BELA_LAG_THRESHOLD_MS = 180;
+
     const SIREN_PRESETS = ['Wail', 'Whoop', 'Police', 'Scanner', 'Riotgun', 'Laser'];
 
     /** Pot names in kAllNamedPots order (58 entries). */
@@ -140,6 +145,10 @@ var sketch = function(p) {
     let downloadStatusEl = null;
     let detectStatusEl   = null;
 
+    // Bela connection watchdog (buffers stay cached after stop — need fresh-data detection)
+    let lastBelaRxMs      = 0;
+    let belaRxFingerprint = '';
+
     // -----------------------------------------------------------------------
     // CSS injection
     // -----------------------------------------------------------------------
@@ -196,6 +205,7 @@ body > main{
     padding:2px 8px;border-radius:10px;letter-spacing:.06em;
 }
 .badge.live{background:#27ae60}
+.badge.lag{background:#e67e22}
 
 /* --- Tab bar --- */
 #tab-bar{
@@ -294,7 +304,6 @@ body > main{
     padding:4px 0;border-bottom:1px solid #f0f0f0;
 }
 .crow:last-child{border-bottom:none}
-.crow.empty{opacity:0.25}
 .crow.empty .cname,
 .crow.empty .cval{color:transparent}
 .cname{
@@ -302,8 +311,23 @@ body > main{
     font-weight:600;color:#1a1a2e;white-space:nowrap;overflow:hidden;
 }
 .ctrack{flex:1;height:5px;background:#eee;border-radius:3px;overflow:hidden}
-.cfill{height:100%;background:#1a1a2e;border-radius:3px}
+.cfill{
+    display:block;height:100%;min-width:0;
+    background:#1a1a2e;border-radius:3px;
+    transition:width .15s ease;
+}
 .crow.sw .cfill{background:#e74c3c}
+.crow.empty .ctrack{background:#ececec}
+.crow.empty .cfill-loading{
+    width:20%;background:#999;
+    transition:none;
+    animation:consoleBarFade 2s ease-in-out infinite;
+    animation-delay:calc(var(--slot, 0) * 0.15s);
+}
+@keyframes consoleBarFade{
+    0%,100%{width:12%;opacity:.3}
+    50%{width:58%;opacity:.85}
+}
 .cval{
     flex:0 0 46px;text-align:right;font-family:monospace;
     font-size:11px;color:#777;
@@ -1291,15 +1315,19 @@ body > main{
     }
 
     /** Builds one console row — filled from entry or empty placeholder slot. */
-    function buildConsoleRow(entry) {
-        const isSw  = entry && entry.type === 'sw';
-        const li    = el('li', {className: 'crow' + (entry ? (isSw ? ' sw' : '') : ' empty')});
-        const pct   = entry ? (entry.value * 100).toFixed(1) : '0';
-        const cval  = entry ? entry.value.toFixed(3) : '\u00a0';
+    function buildConsoleRow(entry, slot) {
+        const isSw    = entry && entry.type === 'sw';
+        const isEmpty = !entry;
+        const li = el('li', {className: 'crow' + (isEmpty ? ' empty' : (isSw ? ' sw' : ''))});
+        if(isEmpty) li.style.setProperty('--slot', String(slot));
+        const pct  = entry ? Math.min(100, Math.max(0, entry.value * 100)).toFixed(1) : '0';
+        const cval = entry ? entry.value.toFixed(3) : '\u00a0';
         const cname = entry ? entry.name : '\u00a0';
+        const fillCls = isEmpty ? 'cfill cfill-loading' : 'cfill';
+        const fillStyle = isEmpty ? '' : ` style="width:${pct}%"`;
         li.innerHTML =
             `<span class="cname">${cname}</span>` +
-            `<span class="ctrack"><span class="cfill" style="width:${pct}%"></span></span>` +
+            `<span class="ctrack"><span class="${fillCls}"${fillStyle}></span></span>` +
             `<span class="cval">${cval}</span>`;
         return li;
     }
@@ -1342,7 +1370,7 @@ body > main{
         if(!consoleList) return;
         consoleList.innerHTML = '';
         for(let i = 0; i < MAX_CONSOLE; i++) {
-            consoleList.appendChild(buildConsoleRow(recentChanges[i] || null));
+            consoleList.appendChild(buildConsoleRow(recentChanges[i] || null, i));
         }
     }
 
@@ -1400,12 +1428,77 @@ body > main{
     }
 
     /** Updates the LIVE / OFFLINE badge in the header. */
+    function belaSocketOpen() {
+        if(typeof Bela === 'undefined') return false;
+        const ws = Bela.socket || Bela.ws || (Bela.data && Bela.data.socket);
+        if(ws && typeof ws.readyState === 'number')
+            return ws.readyState === WebSocket.OPEN;
+        return true;
+    }
+
+    /** Builds a lightweight fingerprint from live buffers (pots + audio peaks). */
+    function sampleBelaFingerprint(b) {
+        const parts = [];
+        if(b[0]) {
+            parts.push('p');
+            for(let i = 0; i < Math.min(6, b[0].length); i++)
+                parts.push(b[0][i].toFixed(4));
+        }
+        if(b[3]) {
+            parts.push('a');
+            for(let i = 0; i < b[3].length; i++)
+                parts.push(b[3][i].toFixed(5));
+        }
+        return parts.join(',');
+    }
+
+    /** Records timestamp when Bela data changes (detects project stop / WS drop). */
+    function updateBelaRxWatchdog(b) {
+        if(!b || !b[0]) return;
+        const now = Date.now();
+        const fp = sampleBelaFingerprint(b);
+        if(fp !== belaRxFingerprint) {
+            belaRxFingerprint = fp;
+            lastBelaRxMs = now;
+        } else if(lastBelaRxMs === 0) {
+            belaRxFingerprint = fp;
+            lastBelaRxMs = now;
+        }
+    }
+
+    /**
+     * Returns connection health: 'live' | 'lag' | 'offline'.
+     * Uses time since last fresh buffer — gaps grow when the link is congested.
+     */
+    function getBelaConnState() {
+        if(typeof Bela === 'undefined') return 'offline';
+        if(!belaSocketOpen()) return 'offline';
+        if(lastBelaRxMs === 0) return 'offline';
+        const staleMs = Date.now() - lastBelaRxMs;
+        if(staleMs >= BELA_OFFLINE_TIMEOUT_MS) return 'offline';
+        if(staleMs >= BELA_LAG_THRESHOLD_MS) return 'lag';
+        return 'live';
+    }
+
+    /** Returns true while Bela is still sending data (live or lagging). */
+    function isBelaConnected() {
+        return getBelaConnState() !== 'offline';
+    }
+
     function updateBadge() {
         const badge = document.getElementById('conn-badge');
         if(!badge) return;
-        const live = typeof Bela !== 'undefined' && Bela.data.buffers[0] !== null;
-        badge.textContent = live ? 'LIVE' : 'OFFLINE';
-        badge.className   = 'badge' + (live ? ' live' : '');
+        const state = getBelaConnState();
+        if(state === 'live') {
+            badge.textContent = 'LIVE';
+            badge.className   = 'badge live';
+        } else if(state === 'lag') {
+            badge.textContent = 'LAG';
+            badge.className   = 'badge lag';
+        } else {
+            badge.textContent = 'OFFLINE';
+            badge.className   = 'badge';
+        }
     }
 
     // -----------------------------------------------------------------------
@@ -1497,6 +1590,12 @@ body > main{
         if(typeof Bela === 'undefined') { updateBadge(); return; }
 
         const b = Bela.data.buffers;
+        updateBelaRxWatchdog(b);
+
+        if(!isBelaConnected()) {
+            updateBadge();
+            return;
+        }
 
         // Receive data from Bela
         if(b[0]) {
