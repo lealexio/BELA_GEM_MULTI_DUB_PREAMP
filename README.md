@@ -350,21 +350,167 @@ WARNING Canal 0 clipping
 
 ---
 
-## Roadmap
+## WiFi Setup
 
-- [x] Phase 1  — MUX scan via `HardwareManager` (real-time ADC scan)
-- [x] Phase 2  — Input gain + 3-band EQ via `ChannelStrip`
-- [x] Phase 3  — Per-channel noise gate (`NoiseGate`)
-- [x] Phase 4  — MCP23017 switch reading via I2C (`AuxiliaryTask`)
-- [x] Phase 5  — Click-free 4-band kill switches (`KillSwitch`, parallel crossover)
-- [x] Phase 6  — FX Send / Return with gated return (`MasterFx`)
-- [x] Phase 7  — Multi-MUX, multi-channel, centralised config
-- [x] Phase 8  — Dub Siren (LFO oscillator + pitch drop + gate envelope)
-- [x] Phase 9  — 4-band parametric EQ (`ParametricEq`, sweepable frequency)
-- [x] Phase 10 — LPF and HPF filters with resonance (`FilterSection`)
-- [x] Phase 11 — Per-band gain trim (`BandTrim`, ±6 dB, 4 bands)
-- [x] Phase 12 — Master gain + graphic EQ 12 bands (`GraphicEq`)
-- [x] Phase 13 — AUX 3 + AUX 4 channel strips
-- [x] Phase 14 — VU meter band-split outputs (OUT6–OUT9)
-- [x] Phase 15 — EQ gain smoothing (click-free pot sweeping, `kEqGainSmoothMs`)
-- [x] Phase 16 — Power curve for centred pots (`kCenteredPotExponent`)
+> Full reference: [Bela Gem — Connecting to WiFi](https://learn.bela.io/using-bela/bela-techniques/connecting-to-wifi/)
+
+### 0. Update Bela first (mandatory)
+
+**Before plugging in a WiFi dongle**, update the Bela system image via the IDE (`http://bela.local`). Without the latest image, the WiFi dongle drivers may not be present in the kernel and the device will simply not appear.
+
+```
+http://bela.local  →  Settings  →  Check for updates
+```
+
+Reboot after the update, then plug in the USB WiFi dongle.
+
+---
+
+### 1. Verify the dongle is detected
+
+```bash
+ssh root@bela.local
+iwctl device list
+# should show: wlan0  (or similar)
+```
+
+If no `wlan0` appears, the dongle is incompatible or the image was not updated.
+
+---
+
+### 2. Connect to an existing WiFi network
+
+```bash
+# Scan for networks
+iwctl station wlan0 scan
+iwctl station wlan0 get-networks
+
+# Connect (replace values)
+iwctl --passphrase "YourPassword" station wlan0 connect "YourNetworkName"
+
+# Verify connection
+iwctl station wlan0 show
+ip a show dev wlan0          # should show an inet IP address
+ping 8.8.8.8                 # internet reachability check
+```
+
+Credentials are automatically saved to `/var/lib/iwd/` and will reconnect on next boot.
+
+---
+
+### 3. WiFi fallback hotspot (auto AP if no network found)
+
+This setup tries to join the known network on boot. If no connection is established within ~28 seconds, the board automatically creates a WiFi access point.
+
+#### Step 1 — Enable iwd network configuration
+
+Edit `/etc/iwd/main.conf` and ensure the following line is present and uncommented:
+
+```ini
+[General]
+EnableNetworkConfiguration=true
+```
+
+```bash
+nano /etc/iwd/main.conf
+systemctl restart iwd
+```
+
+#### Step 2 — Create the hotspot profile
+
+```bash
+mkdir -p /var/lib/iwd/ap/
+nano /var/lib/iwd/ap/bela-hotspot.ap
+```
+
+File content:
+
+```ini
+[Security]
+Passphrase=BelaGemPreamp
+
+[IPv4]
+Address=192.168.101.1
+Gateway=192.168.101.1
+Netmask=255.255.255.0
+```
+
+#### Step 3 — Create the fallback script
+
+```bash
+nano /usr/local/bin/wifi-fallback.sh
+chmod +x /usr/local/bin/wifi-fallback.sh
+```
+
+Script content:
+
+```bash
+#!/bin/bash
+# Wait for iwd to stabilize and attempt auto-connect
+sleep 8
+
+MAX_WAIT=20
+ELAPSED=0
+
+while [ $ELAPSED -lt $MAX_WAIT ]; do
+    IP=$(ip -4 addr show wlan0 2>/dev/null | grep 'inet ' | awk '{print $2}')
+    if [ -n "$IP" ]; then
+        echo "wifi-fallback: connected with IP $IP"
+        exit 0
+    fi
+    sleep 1
+    ELAPSED=$((ELAPSED + 1))
+done
+
+# No connection — switch to AP mode
+echo "wifi-fallback: no connection after ${MAX_WAIT}s, starting hotspot"
+/usr/bin/iwctl device wlan0 set-property Mode ap
+sleep 1
+/usr/bin/iwctl ap wlan0 start-profile bela-hotspot
+```
+
+#### Step 4 — Create the systemd service
+
+```bash
+nano /etc/systemd/system/wifi-fallback.service
+```
+
+File content:
+
+```ini
+[Unit]
+Description=WiFi fallback to hotspot if no network available
+After=iwd.service
+Requires=iwd.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/wifi-fallback.sh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+```
+
+#### Step 5 — Enable and test
+
+```bash
+systemctl daemon-reload
+systemctl enable wifi-fallback.service
+systemctl start wifi-fallback.service
+journalctl -u wifi-fallback.service -f
+reboot
+```
+
+After reboot:
+- **Known network available** → board connects normally, accessible at its DHCP IP.
+- **Network unavailable** → board creates the `bela-hotspot` access point after ~28 s.  
+  Connect with password `Modelisme1999!` and open the IDE at `http://192.168.101.1`.
+
+#### Revert to station mode manually
+
+```bash
+iwctl ap wlan0 stop
+iwctl device wlan0 set-property Mode station
+iwctl station wlan0 connect "YourNetworkName"
+```
