@@ -18,7 +18,7 @@
 
   "routing": {
     "out": {
-      "master":  [0, 1],
+      "master":  [1],
       "fx1Send": 2,
       "fx2Send": 3,
       "vuSub":   9,
@@ -27,12 +27,12 @@
       "vuTop":   6
     },
     "in": {
-      "fx1Return": 4,
-      "fx2Return": 5,
+      "fx1Return": 6,
+      "fx2Return": 7,
       "aux1":      0,
       "aux2":      1,
-      "aux3":      2,
-      "aux4":      3
+      "aux3":      3,
+      "aux4":      5
     }
   },
 

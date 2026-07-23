@@ -207,6 +207,11 @@ constexpr float kGEqUpdateEpsilonDb = 0.05f;
 // Dub Siren (DubSiren)
 // ---------------------------------------------------------------------------
 
+/// Crossfade duration when switching siren presets (ms).
+/// Both oscillators run simultaneously; the old one fades out while the new
+/// one fades in over this window — eliminates the abrupt timbre/pitch jump.
+constexpr float kSirenPresetCrossfadeMs = 200.f;
+
 /// Time for the siren gate amplitude to ramp from 0 to 1 (trigger pressed).
 /// Hysteresis band applied to the siren preset selector.
 /// A preset change is only accepted when the pot has moved this far past the

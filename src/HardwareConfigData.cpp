@@ -33,13 +33,13 @@ uint8_t     kMcpAddress = 0x20;
 // Audio routing
 // ---------------------------------------------------------------------------
 
-int MASTER_OUTS[kMasterOutsMax] = {0, 1};
+int MASTER_OUTS[kMasterOutsMax] = {1};
 int MASTER_OUTS_COUNT           = 2;
 
 int FX1_SEND_OUT  = 2;
-int FX1_RETURN_IN = 4;
+int FX1_RETURN_IN = 6;
 int FX2_SEND_OUT  = 3;
-int FX2_RETURN_IN = 5;
+int FX2_RETURN_IN = 7;
 
 int VU_SUB_OUT  = 9;
 int VU_KICK_OUT = 8;
@@ -48,8 +48,8 @@ int VU_TOP_OUT  = 6;
 
 ChannelConfig AUX1_CONFIG = { {0, -1} };
 ChannelConfig AUX2_CONFIG = { {1, -1} };
-ChannelConfig AUX3_CONFIG = { {2, -1} };
-ChannelConfig AUX4_CONFIG = { {3, -1} };
+ChannelConfig AUX3_CONFIG = { {3, -1} };
+ChannelConfig AUX4_CONFIG = { {5, -1} };
 
 // ---------------------------------------------------------------------------
 // Switch mapping

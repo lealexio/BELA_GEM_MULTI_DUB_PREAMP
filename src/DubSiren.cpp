@@ -131,6 +131,7 @@ void DubSiren::setup(float sampleRate) {
     sampleRate_    = sampleRate;
     attackCoeff_   = 1.f - expf(-1.f / (kSirenGateAttackMs  * 0.001f * sampleRate));
     releaseCoeff_  = 1.f - expf(-1.f / (kSirenGateReleaseMs * 0.001f * sampleRate));
+    crossfadeStep_ = 1.f / (kSirenPresetCrossfadeMs * 0.001f * sampleRate);
     presetIdx_     = -1; // force first-run load
 }
 
@@ -153,10 +154,17 @@ void DubSiren::setControls(float typePot, float modPot, float gainPot,
     }
 
     if(newIdx != presetIdx_) {
-        // Reset phases on preset change to avoid a click from a stale phase
-        oscPhase_  = 0.f;
-        lfoPhase_  = 0.f;
-        presetIdx_ = newIdx;
+        if(presetIdx_ >= 0) {
+            // Snapshot current oscillator state so it can keep running during crossfade
+            prevPresetIdx_      = presetIdx_;
+            prevOscPhase_       = oscPhase_;
+            prevLfoPhase_       = lfoPhase_;
+            prevPitchDropSemi_  = pitchDropSemi_;
+            prevDropDecayCoeff_ = dropDecayCoeff_;
+            crossfade_          = 0.f;  // restart crossfade from old preset
+        }
+        // New preset starts from continuous phase (no hard reset → no click)
+        presetIdx_      = newIdx;
         dropDecayCoeff_ = (kPresets[newIdx].dropDecaySec > 0.f)
             ? expf(-1.f / (kPresets[newIdx].dropDecaySec * sampleRate_))
             : 0.f;
@@ -172,38 +180,58 @@ void DubSiren::setControls(float typePot, float modPot, float gainPot,
 float DubSiren::process() {
     const SirenPreset& p = kPresets[presetIdx_ >= 0 ? presetIdx_ : 0];
 
-    // Gate rising edge: retrigger pitch drop
+    // Gate rising edge: retrigger pitch drop on new preset
     bool risingEdge = gate_ && !prevGate_;
     if(risingEdge)
         pitchDropSemi_ = p.dropSemitones;
     prevGate_ = gate_;
 
-    // LFO
-    float lfoRate = p.lfoRateMin + mod_ * (p.lfoRateMax - p.lfoRateMin);
-    float lfoVal  = lfoSample(p.lfoShape, lfoPhase_);
+    // --- New preset oscillator ---
+    float lfoRate   = p.lfoRateMin + mod_ * (p.lfoRateMax - p.lfoRateMin);
+    float lfoVal    = lfoSample(p.lfoShape, lfoPhase_);
     lfoPhase_ += lfoRate / sampleRate_;
     if(lfoPhase_ >= 1.f) lfoPhase_ -= 1.f;
 
-    // Pitch (semitone offset from LFO + drop envelope)
     float depthSemi = p.lfoDepthMinSemi + mod_ * (p.lfoDepthMaxSemi - p.lfoDepthMinSemi);
     float pitchSemi = lfoVal * depthSemi + pitchDropSemi_;
-
-    // Oscillator
-    float freq = p.baseFreq * powf(2.f, pitchSemi / 12.f);
-    float osc  = oscSample(p.oscWave, oscPhase_);
+    float freq      = p.baseFreq * powf(2.f, pitchSemi / 12.f);
+    float osc       = oscSample(p.oscWave, oscPhase_);
     oscPhase_ += freq / sampleRate_;
     if(oscPhase_ >= 1.f) oscPhase_ -= 1.f;
-
-    // Pitch drop decay
     pitchDropSemi_ *= dropDecayCoeff_;
 
-    // Gate smoothing (one-pole IIR)
+    float signal;
+    if(crossfade_ < 1.f) {
+        // --- Previous preset oscillator (fading out) ---
+        const SirenPreset& prev  = kPresets[prevPresetIdx_];
+        float prevLfoRate  = prev.lfoRateMin + mod_ * (prev.lfoRateMax - prev.lfoRateMin);
+        float prevLfoVal   = lfoSample(prev.lfoShape, prevLfoPhase_);
+        prevLfoPhase_ += prevLfoRate / sampleRate_;
+        if(prevLfoPhase_ >= 1.f) prevLfoPhase_ -= 1.f;
+
+        float prevDepth    = prev.lfoDepthMinSemi + mod_ * (prev.lfoDepthMaxSemi - prev.lfoDepthMinSemi);
+        float prevPitch    = prevLfoVal * prevDepth + prevPitchDropSemi_;
+        float prevFreq     = prev.baseFreq * powf(2.f, prevPitch / 12.f);
+        float prevOsc      = oscSample(prev.oscWave, prevOscPhase_);
+        prevOscPhase_ += prevFreq / sampleRate_;
+        if(prevOscPhase_ >= 1.f) prevOscPhase_ -= 1.f;
+        prevPitchDropSemi_ *= prevDropDecayCoeff_;
+
+        // Linear crossfade: old fades out, new fades in
+        signal     = prevOsc * (1.f - crossfade_) + osc * crossfade_;
+        crossfade_ += crossfadeStep_;
+        if(crossfade_ > 1.f) crossfade_ = 1.f;
+    } else {
+        signal = osc;
+    }
+
+    // Gate smoothing (one-pole IIR) — applied to the final mixed signal
     float target = gate_ ? 1.f : 0.f;
     float coeff  = gate_ ? attackCoeff_ : releaseCoeff_;
     gateSmooth_ += coeff * (target - gateSmooth_);
+    signal *= gateSmooth_;
 
-    float signal = osc * gateSmooth_;
-    lastFxOut_   = signal * fxSend_  * kSirenGainScale;
-    lastFxOut2_  = signal * fxSend2_ * kSirenGainScale;
+    lastFxOut_  = signal * fxSend_  * kSirenGainScale;
+    lastFxOut2_ = signal * fxSend2_ * kSirenGainScale;
     return signal * gain_ * kSirenGainScale;
 }

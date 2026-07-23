@@ -65,10 +65,23 @@ public:
 private:
     float sampleRate_     = 44100.f;
 
+    // --- Active oscillator state ---
     float oscPhase_       = 0.f;  // oscillator phase [0, 1)
     float lfoPhase_       = 0.f;  // LFO phase [0, 1)
     float pitchDropSemi_  = 0.f;  // decaying pitch offset in semitones
     float dropDecayCoeff_ = 0.f;  // per-sample exponential decay for pitch drop
+
+    // --- Previous oscillator state (kept alive during crossfade) ---
+    int   prevPresetIdx_      = -1;
+    float prevOscPhase_       = 0.f;
+    float prevLfoPhase_       = 0.f;
+    float prevPitchDropSemi_  = 0.f;
+    float prevDropDecayCoeff_ = 0.f;
+
+    // --- Crossfade ramp: 0.0 = fully old preset, 1.0 = fully new preset ---
+    float crossfade_     = 1.f;   // starts at 1 (no crossfade active)
+    float crossfadeStep_ = 0.f;   // per-sample linear increment
+
     float gateSmooth_     = 0.f;  // smoothed gate amplitude [0, 1]
     float attackCoeff_    = 0.f;
     float releaseCoeff_   = 0.f;
