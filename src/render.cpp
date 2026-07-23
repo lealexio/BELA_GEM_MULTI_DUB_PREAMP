@@ -70,6 +70,13 @@ static std::vector<float> gSwitchMappingBuf;  // [9×3] switch mapping for GUI
 static std::vector<float> gConfigMetaBuf;     // [kGuiConfigMetaSize] mux/routing/ignoredPots
 static std::vector<float> gMuxRawBuf;         // [kGuiMuxRawBufSize] raw pot values per MUX channel
 
+// Codec gain state — written by the gui_control callback (seasocks thread),
+// broadcast to every connected GUI client via buffer 8 at ~20 fps.
+// Layout: [0..3] = ADC input ch0-3 (dB), [4] = HP Out 1 (dB).
+// Initialised to 0 dB (unity); resets to this default on every Bela restart.
+static float              gCodecGains[5]    = {0.f, 0.f, 0.f, 0.f, 0.f};
+static std::vector<float> gCodecGainsBuf;   // [5]
+
 // Per-block peak accumulators — one entry per tracked audio channel.
 // Index map: 0-3 = in0-in3 | 4-5 = fxRet1-2 | 6 = master out
 //            7-8 = fxSend1-2 | 9-12 = vuSub/Kick/Mid/Top
@@ -385,6 +392,7 @@ bool setup(BelaContext* context, void* userData) {
     gSirenBuf.assign(3, 0.f);
     gAudioLevelsBuf.assign(13, 0.f);
     gMuxRawBuf.assign(kGuiMuxRawBufSize, 0.f);
+    gCodecGainsBuf.assign(5, 0.f);
 
     // Fill static mapping buffers from the (possibly JSON-overridden) globals.
     gPotMappingBuf.resize(kAllNamedPotsCount * 4);
@@ -425,10 +433,11 @@ bool setup(BelaContext* context, void* userData) {
             float gain = (float)root[L"hp1Gain"]->AsNumber();
             gain = std::max(-63.0f, std::min(0.0f, gain));
             Bela_setHpLevel(1, gain);
+            gCodecGains[4] = gain;
             rt_printf("[GUI] MASTER → %.1f dB\n", gain);
         }
 
-        // ADC input PGA gain — codec supports [-12, 59.5] dB.
+        // ADC input PGA gain — codec supports [-12, 10] dB.
         if (root.find(L"inputGain") != root.end() &&
             root[L"inputGain"]->IsNumber() &&
             root.find(L"channel") != root.end() &&
@@ -439,6 +448,7 @@ bool setup(BelaContext* context, void* userData) {
             gain = std::max(-12.0f, std::min(10.0f, gain));
             if (ch >= 0 && ch <= 9) {
                 Bela_setAudioInputGain(ch, gain);
+                if (ch < 4) gCodecGains[ch] = gain;
                 rt_printf("[GUI] Input ch %d → %.1f dB\n", ch, gain);
             }
         }
@@ -743,6 +753,11 @@ void render(BelaContext* context, void* userData) {
             for(int p = 0; p < kPotsPerMux; ++p)
                 gMuxRawBuf[m * kPotsPerMux + p] = gHardwareManager.getPotValue(m, p);
         gGui.sendBuffer(7, gMuxRawBuf);
+
+        // Buffer 8: codec gain state — synchronises all connected GUI clients.
+        // Layout: [0..3] input ch0-3 (dB), [4] HP Out 1 (dB).
+        for(int i = 0; i < 5; ++i) gCodecGainsBuf[i] = gCodecGains[i];
+        gGui.sendBuffer(8, gCodecGainsBuf);
 
         // Buffers 4+5+6: mapping + config metadata — resend periodically for (re)connects.
         if(++gGuiStaticSendCount >= kGuiStaticBufSendDivisor) {

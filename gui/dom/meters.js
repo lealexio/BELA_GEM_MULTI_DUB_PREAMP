@@ -74,7 +74,10 @@ function _sendGain(payload, desc, statusEl) {
 
 /**
  * Builds one gain-picker row: label [−] value [+].
- * Calls onSend(newVal, statusEl) whenever the value changes.
+ * Calls onSend(newVal, statusEl) whenever the user clicks a button.
+ * @returns {{ el: Element, setValue: (n: number) => void }}
+ *   `setValue` updates the picker silently (no Bela.control send) — used for
+ *   sync from buffer 8 so other clients stay in phase.
  */
 function _buildPickerRow(label, initVal, min, max, step, onSend, statusEl) {
     const row    = el('div',    {className: 'codec-gain-row'});
@@ -104,6 +107,14 @@ function _buildPickerRow(label, initVal, min, max, step, onSend, statusEl) {
         onSend(current, statusEl);
     }
 
+    /** Silently update display to match a value received from the C++ state. */
+    function setValue(v) {
+        const clamped = Math.round(Math.max(min, Math.min(max, v)));
+        if (clamped === current) return;
+        current = clamped;
+        refresh();
+    }
+
     btnDec.addEventListener('click', () => tryChange(-step));
     btnInc.addEventListener('click', () => tryChange(+step));
 
@@ -114,13 +125,20 @@ function _buildPickerRow(label, initVal, min, max, step, onSend, statusEl) {
     row.appendChild(picker);
 
     refresh();
-    return row;
+    return { el: row, setValue };
 }
+
+// Picker handles for external sync via syncCodecGains().
+// inputPickers[0..3] → ADC channels, hpPicker → HP Out 1.
+const _inputPickers = [];
+let   _hpPicker     = null;
 
 /**
  * Builds the unified Codec Gains card.
  * Sections: ADC input PGA (AUX1–4) and HP output (MASTER OUT 1).
  * Uses Bela.control WebSocket — no project restart required.
+ * Must be called once; stores picker handles in _inputPickers / _hpPicker
+ * so syncCodecGains() can update them from buffer 8.
  */
 function buildCodecGainCard() {
     const card = el('div', {className: 'card'});
@@ -140,8 +158,9 @@ function buildCodecGainCard() {
     inSection.textContent = 'ADC Input PGA (-12–10 dB)';
     card.appendChild(inSection);
 
+    _inputPickers.length = 0;
     INPUT_CHANNELS.forEach(({ch, label}) => {
-        card.appendChild(_buildPickerRow(
+        const picker = _buildPickerRow(
             label,
             _codecGains.input[ch],
             INPUT_GAIN_MIN, INPUT_GAIN_MAX, INPUT_GAIN_STEP,
@@ -154,7 +173,9 @@ function buildCodecGainCard() {
                 );
             },
             statusEl
-        ));
+        );
+        _inputPickers[ch] = picker;
+        card.appendChild(picker.el);
     });
 
     // --- Output section ---
@@ -162,7 +183,7 @@ function buildCodecGainCard() {
     outSection.textContent = 'HP Output (-63–0 dB)';
     card.appendChild(outSection);
 
-    card.appendChild(_buildPickerRow(
+    _hpPicker = _buildPickerRow(
         'MASTER (OUT 1)',
         _codecGains.hp,
         HP_GAIN_MIN, HP_GAIN_MAX, HP_GAIN_STEP,
@@ -171,7 +192,8 @@ function buildCodecGainCard() {
             _sendGain({ event: 'custom', hp1Gain: val }, `MASTER (OUT 1) → ${val} dB`, st);
         },
         statusEl
-    ));
+    );
+    card.appendChild(_hpPicker.el);
 
     card.appendChild(statusEl);
 
@@ -185,6 +207,19 @@ function buildCodecGainCard() {
     }, 1000);
 
     return card;
+}
+
+/**
+ * Synchronises picker displays from buffer 8 broadcast by render.cpp (~20 fps).
+ * Layout: buf[0..3] = input ch0-3 (dB), buf[4] = HP Out 1 (dB).
+ * Called from main.js draw loop — does NOT trigger Bela.control.send().
+ * @param {Float32Array} buf
+ */
+export function syncCodecGains(buf) {
+    for (let ch = 0; ch < 4; ch++) {
+        if (_inputPickers[ch]) _inputPickers[ch].setValue(buf[ch]);
+    }
+    if (_hpPicker) _hpPicker.setValue(buf[4]);
 }
 
 export function createVuMeter(canvas, config) {

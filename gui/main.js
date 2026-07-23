@@ -7,7 +7,7 @@ import { injectCSS } from './css.js';
 import { buildUI } from './dom/shell.js';
 import { layoutTopChrome, hideP5Dom } from './dom/utils.js';
 import { updateSiren, updateSwitches, updateConsole } from './dom/live.js';
-import { startMeterAnim } from './dom/meters.js';
+import { startMeterAnim, syncCodecGains } from './dom/meters.js';
 import { updateMasterEq, resizeMasterEqCanvas } from './dom/masterEq.js';
 import { tryBuildMappingTable, updateDetectMode } from './dom/mapping.js';
 import {
@@ -94,6 +94,9 @@ export default function sketch(p) {
         }
         if(b[6] && !ctx.configMeta)
             ctx.configMeta = Float32Array.from(b[6]);
+
+        // Buffer 8: codec gain state — sync all connected clients (no send back to Bela).
+        if(b[8]) syncCodecGains(b[8]);
 
         if(ctx.consoleReady) updateConsole();
         updateSiren();

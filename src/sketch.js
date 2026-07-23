@@ -1685,6 +1685,12 @@ font-size:11px;color:#999;margin-top:10px;line-height:1.4;
       refresh();
       onSend(current, statusEl);
     }
+    function setValue(v) {
+      const clamped = Math.round(Math.max(min, Math.min(max, v)));
+      if (clamped === current) return;
+      current = clamped;
+      refresh();
+    }
     btnDec.addEventListener("click", () => tryChange(-step));
     btnInc.addEventListener("click", () => tryChange(+step));
     picker.appendChild(btnDec);
@@ -1693,8 +1699,10 @@ font-size:11px;color:#999;margin-top:10px;line-height:1.4;
     row.appendChild(lbl);
     row.appendChild(picker);
     refresh();
-    return row;
+    return { el: row, setValue };
   }
+  var _inputPickers = [];
+  var _hpPicker = null;
   function buildCodecGainCard() {
     const card = el("div", { className: "card" });
     card.appendChild(cardTitle("Codec Gains \u2014 real-time"));
@@ -1706,8 +1714,9 @@ font-size:11px;color:#999;margin-top:10px;line-height:1.4;
     const inSection = el("div", { className: "codec-gain-section" });
     inSection.textContent = "ADC Input PGA (-12\u201310 dB)";
     card.appendChild(inSection);
+    _inputPickers.length = 0;
     INPUT_CHANNELS.forEach(({ ch, label }) => {
-      card.appendChild(_buildPickerRow(
+      const picker = _buildPickerRow(
         label,
         _codecGains.input[ch],
         INPUT_GAIN_MIN,
@@ -1722,12 +1731,14 @@ font-size:11px;color:#999;margin-top:10px;line-height:1.4;
           );
         },
         statusEl
-      ));
+      );
+      _inputPickers[ch] = picker;
+      card.appendChild(picker.el);
     });
     const outSection = el("div", { className: "codec-gain-section" });
     outSection.textContent = "HP Output (-63\u20130 dB)";
     card.appendChild(outSection);
-    card.appendChild(_buildPickerRow(
+    _hpPicker = _buildPickerRow(
       "MASTER (OUT 1)",
       _codecGains.hp,
       HP_GAIN_MIN,
@@ -1738,7 +1749,8 @@ font-size:11px;color:#999;margin-top:10px;line-height:1.4;
         _sendGain({ event: "custom", hp1Gain: val }, `MASTER (OUT 1) \u2192 ${val} dB`, st);
       },
       statusEl
-    ));
+    );
+    card.appendChild(_hpPicker.el);
     card.appendChild(statusEl);
     const _poll = setInterval(() => {
       if (_belaControlReady()) {
@@ -1748,6 +1760,12 @@ font-size:11px;color:#999;margin-top:10px;line-height:1.4;
       }
     }, 1e3);
     return card;
+  }
+  function syncCodecGains(buf) {
+    for (let ch = 0; ch < 4; ch++) {
+      if (_inputPickers[ch]) _inputPickers[ch].setValue(buf[ch]);
+    }
+    if (_hpPicker) _hpPicker.setValue(buf[4]);
   }
   function createVuMeter(canvas, config) {
     const max = config.max || 100;
@@ -2576,6 +2594,7 @@ font-size:11px;color:#999;margin-top:10px;line-height:1.4;
       }
       if (b[6] && !ctx.configMeta)
         ctx.configMeta = Float32Array.from(b[6]);
+      if (b[8]) syncCodecGains(b[8]);
       if (ctx.consoleReady) updateConsole();
       updateSiren();
       updateSwitches();
