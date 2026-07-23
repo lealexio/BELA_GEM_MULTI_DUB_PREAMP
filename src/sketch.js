@@ -14,7 +14,6 @@
  *   [6] Float32[N]       — config metadata (mux, routing, ignoredPots)
  *   [7] Float32[64]      — raw MUX grid [mux×16+pot], normalised 0–1 (unmapped discovery)
  *   [8] Float32[20]      — codec gains: [0..9]=ADC input by physical ch, [10..19]=HP out by physical ch
- *   [9] Float32[1]       — CPU temperature °C (sysfs thermal_zone0, ~2 s poll)
  */
 
 var __belaPreampSketch = (() => {
@@ -395,8 +394,12 @@ background:#1a1a2e;color:#fff;
 padding:8px 18px;display:flex;align-items:center;gap:10px;
 width:100%;
 }
-#gui-header h1{font-size:16px;font-weight:700;letter-spacing:.05em}
 #gui-header .spacer{flex:1}
+#gui-bela-logo{
+height:28px;width:auto;
+mix-blend-mode:screen;
+opacity:.92;
+}
 #gui-logo{
 height:42px;width:auto;
 mix-blend-mode:screen; /* blacks become transparent on the dark header */
@@ -2692,7 +2695,20 @@ font-size:11px;color:#999;margin-top:10px;line-height:1.4;
     const root = el("div", { id: "bela-gui" });
     const topChrome = el("div", { id: "top-chrome" });
     const hdr = el("div", { id: "gui-header" });
-    hdr.innerHTML = '<h1>Bela Preamp</h1><span class="badge" id="conn-badge">OFFLINE</span><span class="badge temp unknown" id="temp-badge" title="CPU temperature">--\xB0C</span><span class="spacer"></span>';
+    const belaLogo = el("img", { id: "gui-bela-logo", alt: "Bela" });
+    belaLogo.src = projectFileUrl("BELA.png");
+    hdr.appendChild(belaLogo);
+    const connBadge = el("span", { className: "badge", id: "conn-badge" });
+    connBadge.textContent = "OFFLINE";
+    hdr.appendChild(connBadge);
+    const tempBadge = el("span", {
+      className: "badge temp unknown",
+      id: "temp-badge",
+      title: "CPU temperature"
+    });
+    tempBadge.textContent = "--\xB0C";
+    hdr.appendChild(tempBadge);
+    hdr.appendChild(el("span", { className: "spacer" }));
     const logo = el("img", { id: "gui-logo", alt: "Fulla Vibes" });
     logo.src = projectFileUrl("LOGO.png");
     hdr.appendChild(logo);

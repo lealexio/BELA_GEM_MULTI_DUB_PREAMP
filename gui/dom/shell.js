@@ -14,11 +14,20 @@ export function buildUI() {
     const topChrome = el('div', {id:'top-chrome'});
 
     const hdr = el('div', {id:'gui-header'});
-    hdr.innerHTML =
-        '<h1>Bela Preamp</h1>' +
-        '<span class="badge" id="conn-badge">OFFLINE</span>' +
-        '<span class="badge temp unknown" id="temp-badge" title="CPU temperature">--°C</span>' +
-        '<span class="spacer"></span>';
+    const belaLogo = el('img', { id: 'gui-bela-logo', alt: 'Bela' });
+    belaLogo.src = projectFileUrl('BELA.png');
+    hdr.appendChild(belaLogo);
+    const connBadge = el('span', { className: 'badge', id: 'conn-badge' });
+    connBadge.textContent = 'OFFLINE';
+    hdr.appendChild(connBadge);
+    const tempBadge = el('span', {
+        className: 'badge temp unknown',
+        id: 'temp-badge',
+        title: 'CPU temperature'
+    });
+    tempBadge.textContent = '--°C';
+    hdr.appendChild(tempBadge);
+    hdr.appendChild(el('span', { className: 'spacer' }));
     const logo = el('img', { id: 'gui-logo', alt: 'Fulla Vibes' });
     logo.src = projectFileUrl('LOGO.png');
     hdr.appendChild(logo);

@@ -39,8 +39,12 @@ background:#1a1a2e;color:#fff;
 padding:8px 18px;display:flex;align-items:center;gap:10px;
 width:100%;
 }
-#gui-header h1{font-size:16px;font-weight:700;letter-spacing:.05em}
 #gui-header .spacer{flex:1}
+#gui-bela-logo{
+height:28px;width:auto;
+mix-blend-mode:screen;
+opacity:.92;
+}
 #gui-logo{
 height:42px;width:auto;
 mix-blend-mode:screen; /* blacks become transparent on the dark header */
