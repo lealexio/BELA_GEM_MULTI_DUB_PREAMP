@@ -72,10 +72,11 @@ static std::vector<float> gMuxRawBuf;         // [kGuiMuxRawBufSize] raw pot val
 
 // Codec gain state — written by the gui_control callback (seasocks thread),
 // broadcast to every connected GUI client via buffer 8 at ~20 fps.
-// Layout: [0..3] = ADC input ch0-3 (dB), [4] = HP Out 1 (dB).
+// Layout: [0..9] = ADC input gain by physical channel (dB),
+//         [10..19] = HP output gain by physical channel (dB).
 // Initialised to 0 dB (unity); resets to this default on every Bela restart.
-static float              gCodecGains[5]    = {0.f, 0.f, 0.f, 0.f, 0.f};
-static std::vector<float> gCodecGainsBuf;   // [5]
+static float              gCodecGains[20]   = {};
+static std::vector<float> gCodecGainsBuf;   // [20]
 
 // Per-block peak accumulators — one entry per tracked audio channel.
 // Index map: 0-3 = in0-in3 | 4-5 = fxRet1-2 | 6 = master out
@@ -392,7 +393,7 @@ bool setup(BelaContext* context, void* userData) {
     gSirenBuf.assign(3, 0.f);
     gAudioLevelsBuf.assign(13, 0.f);
     gMuxRawBuf.assign(kGuiMuxRawBufSize, 0.f);
-    gCodecGainsBuf.assign(5, 0.f);
+    gCodecGainsBuf.assign(20, 0.f);
 
     // Fill static mapping buffers from the (possibly JSON-overridden) globals.
     gPotMappingBuf.resize(kAllNamedPotsCount * 4);
@@ -418,23 +419,27 @@ bool setup(BelaContext* context, void* userData) {
     // Runs on the seasocks thread (non-RT) — safe to call Bela_set*() codec APIs.
     //
     // Supported messages (all require { event: 'custom' }):
-    //   { hp1Gain: N }           — headphone output 1 level, range [-63, 0] dB
-    //   { inputGain: N, channel: C } — ADC PGA gain for channel C, range [0, 59] dB
+    //   { hpGain: N, channel: C }    — HP output level for physical ch C, range [-63, 0] dB
+    //   { inputGain: N, channel: C } — ADC PGA gain for physical ch C, range [-12, 10] dB
     gGui.setControlDataCallback([](JSONObject& root, void*) -> bool {
         if (root.find(L"event") == root.end() ||
             !root[L"event"]->IsString() ||
             root[L"event"]->AsString() != L"custom")
             return true;
 
-        // Headphone output gain
-        if (root.find(L"hp1Gain") != root.end() &&
-            root[L"hp1Gain"]->IsNumber())
+        // Headphone output gain — any physical output channel.
+        if (root.find(L"hpGain") != root.end() &&
+            root[L"hpGain"]->IsNumber() &&
+            root.find(L"channel") != root.end() &&
+            root[L"channel"]->IsNumber())
         {
-            float gain = (float)root[L"hp1Gain"]->AsNumber();
-            gain = std::max(-63.0f, std::min(0.0f, gain));
-            Bela_setHpLevel(1, gain);
-            gCodecGains[4] = gain;
-            rt_printf("[GUI] MASTER → %.1f dB\n", gain);
+            int   ch   = (int)root[L"channel"]->AsNumber();
+            float gain = std::max(-63.0f, std::min(0.0f, (float)root[L"hpGain"]->AsNumber()));
+            if (ch >= 0 && ch <= 9) {
+                Bela_setHpLevel(ch, gain);
+                gCodecGains[10 + ch] = gain;
+                rt_printf("[GUI] HP Out ch %d → %.1f dB\n", ch, gain);
+            }
         }
 
         // ADC input PGA gain — codec supports [-12, 10] dB.
@@ -444,11 +449,10 @@ bool setup(BelaContext* context, void* userData) {
             root[L"channel"]->IsNumber())
         {
             int   ch   = (int)root[L"channel"]->AsNumber();
-            float gain = (float)root[L"inputGain"]->AsNumber();
-            gain = std::max(-12.0f, std::min(10.0f, gain));
+            float gain = std::max(-12.0f, std::min(10.0f, (float)root[L"inputGain"]->AsNumber()));
             if (ch >= 0 && ch <= 9) {
                 Bela_setAudioInputGain(ch, gain);
-                if (ch < 4) gCodecGains[ch] = gain;
+                gCodecGains[ch] = gain;   // indexed by physical ADC channel
                 rt_printf("[GUI] Input ch %d → %.1f dB\n", ch, gain);
             }
         }
@@ -755,8 +759,8 @@ void render(BelaContext* context, void* userData) {
         gGui.sendBuffer(7, gMuxRawBuf);
 
         // Buffer 8: codec gain state — synchronises all connected GUI clients.
-        // Layout: [0..3] input ch0-3 (dB), [4] HP Out 1 (dB).
-        for(int i = 0; i < 5; ++i) gCodecGainsBuf[i] = gCodecGains[i];
+        // Layout: [0..9] ADC input gain by physical ch, [10..19] HP output gain by physical ch.
+        for(int i = 0; i < 20; ++i) gCodecGainsBuf[i] = gCodecGains[i];
         gGui.sendBuffer(8, gCodecGainsBuf);
 
         // Buffers 4+5+6: mapping + config metadata — resend periodically for (re)connects.

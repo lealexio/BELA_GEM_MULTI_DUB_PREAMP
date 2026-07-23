@@ -7,7 +7,7 @@ import { injectCSS } from './css.js';
 import { buildUI } from './dom/shell.js';
 import { layoutTopChrome, hideP5Dom } from './dom/utils.js';
 import { updateSiren, updateSwitches, updateConsole } from './dom/live.js';
-import { startMeterAnim, syncCodecGains } from './dom/meters.js';
+import { startMeterAnim, syncCodecGains, applyRoutingConfig } from './dom/meters.js';
 import { updateMasterEq, resizeMasterEqCanvas } from './dom/masterEq.js';
 import { tryBuildMappingTable, updateDetectMode } from './dom/mapping.js';
 import {
@@ -92,8 +92,12 @@ export default function sketch(p) {
             ctx.switchMapping = Float32Array.from(b[5]);
             tryBuildMappingTable();
         }
-        if(b[6] && !ctx.configMeta)
+        if(b[6] && !ctx.configMeta) {
             ctx.configMeta = Float32Array.from(b[6]);
+            // Apply dynamic routing from config.json: update VU meter labels
+            // and rebuild codec gain pickers with correct physical ADC channels.
+            applyRoutingConfig(ctx.configMeta);
+        }
 
         // Buffer 8: codec gain state — sync all connected clients (no send back to Bela).
         if(b[8]) syncCodecGains(b[8]);

@@ -163,3 +163,83 @@ export const VU_MAX              = 100;
 export const VU_CANVAS_W         = 300;
 export const VU_CANVAS_H         = 44;
 export const MAX_CONSOLE         = 10;
+
+/**
+ * Maps routing key names (from config.json) to their fixed index in gAudioPeaks (C++).
+ * This table is the JS source of truth — must stay in sync with the index layout in render.cpp.
+ */
+export const ROUTING_KEY_TO_BUFFER3 = {
+    aux1:      0,
+    aux2:      1,
+    aux3:      2,
+    aux4:      3,
+    fx1Return: 4,
+    fx2Return: 5,
+    master:    6,
+    fx1Send:   7,
+    fx2Send:   8,
+    vuSub:     9,
+    vuKick:    10,
+    vuMid:     11,
+    vuTop:     12,
+};
+
+/**
+ * Builds the full dynamic routing descriptor from a ROUTING_CONFIG object
+ * (auto-generated from src/config.json by build-gui.mjs).
+ *
+ * Channel numbers come directly from the routing values (e.g. routing.in.aux1 = 0),
+ * so no configMeta / buffer 6 is needed at runtime.
+ *
+ * @param {object} routing - ROUTING_CONFIG.in / ROUTING_CONFIG.out structure
+ * @returns {{
+ *   levelGroups:    Array<{label:string, indices:number[]}>,
+ *   levelLabels:    Object<number, string>,
+ *   inputChannels:  Array<{key:string, ch:number, label:string, buf3:number}>,
+ *   outputChannels: Array<{key:string, ch:number, label:string, buf3:number}>,
+ * }}
+ */
+export function buildFullRouting(routing) {
+    const toLabel    = key => key.toUpperCase();
+    const toPhysical = val => Array.isArray(val) ? val[0] : val;
+
+    const inEntries  = Object.entries(routing.in  || {});
+    const outEntries = Object.entries(routing.out || {});
+
+    const levelGroups = [
+        {
+            label:   'INPUTS',
+            indices: inEntries
+                .map(([k]) => ROUTING_KEY_TO_BUFFER3[k])
+                .filter(i => i !== undefined),
+        },
+        {
+            label:   'OUTPUTS',
+            indices: outEntries
+                .map(([k]) => ROUTING_KEY_TO_BUFFER3[k])
+                .filter(i => i !== undefined),
+        },
+    ];
+
+    const levelLabels = {};
+    [...inEntries, ...outEntries].forEach(([key]) => {
+        const idx = ROUTING_KEY_TO_BUFFER3[key];
+        if (idx !== undefined) levelLabels[idx] = toLabel(key);
+    });
+
+    const inputChannels = inEntries.map(([key, val]) => ({
+        key,
+        ch:    toPhysical(val),
+        label: toLabel(key),
+        buf3:  ROUTING_KEY_TO_BUFFER3[key],
+    }));
+
+    const outputChannels = outEntries.map(([key, val]) => ({
+        key,
+        ch:    toPhysical(val),
+        label: toLabel(key),
+        buf3:  ROUTING_KEY_TO_BUFFER3[key],
+    }));
+
+    return { levelGroups, levelLabels, inputChannels, outputChannels };
+}

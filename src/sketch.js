@@ -13,6 +13,7 @@
  *   [5] Float32[9×3]     — switch mapping [pin,portB,rev]×9
  *   [6] Float32[N]       — config metadata (mux, routing, ignoredPots)
  *   [7] Float32[64]      — raw MUX grid [mux×16+pot], normalised 0–1 (unmapped discovery)
+ *   [8] Float32[20]      — codec gains: [0..9]=ADC input by physical ch, [10..19]=HP out by physical ch
  */
 
 var __belaPreampSketch = (() => {
@@ -135,25 +136,6 @@ var __belaPreampSketch = (() => {
     { label: "FX send filter", type: "fx", indices: [4, 5, 6, 7] },
     { label: "Siren", type: "siren", indices: [8] }
   ];
-  var LEVEL_LABELS = [
-    "IN 1",
-    "IN 2",
-    "IN 3",
-    "IN 4",
-    "FX Ret 1",
-    "FX Ret 2",
-    "Master",
-    "FX Snd 1",
-    "FX Snd 2",
-    "VU SUB",
-    "VU KICK",
-    "VU MID",
-    "VU TOP"
-  ];
-  var LEVEL_GROUPS = [
-    { label: "INPUTS", indices: [0, 1, 2, 3, 4, 5] },
-    { label: "OUTPUTS", indices: [6, 7, 8, 9, 10, 11, 12] }
-  ];
   var I2C_BUS = "/dev/i2c-1";
   var CONFIG_META = {
     ACTIVE_MUX: 0,
@@ -256,6 +238,55 @@ var __belaPreampSketch = (() => {
   var VU_CANVAS_W = 300;
   var VU_CANVAS_H = 44;
   var MAX_CONSOLE = 10;
+  var ROUTING_KEY_TO_BUFFER3 = {
+    aux1: 0,
+    aux2: 1,
+    aux3: 2,
+    aux4: 3,
+    fx1Return: 4,
+    fx2Return: 5,
+    master: 6,
+    fx1Send: 7,
+    fx2Send: 8,
+    vuSub: 9,
+    vuKick: 10,
+    vuMid: 11,
+    vuTop: 12
+  };
+  function buildFullRouting(routing) {
+    const toLabel = (key) => key.toUpperCase();
+    const toPhysical = (val) => Array.isArray(val) ? val[0] : val;
+    const inEntries = Object.entries(routing.in || {});
+    const outEntries = Object.entries(routing.out || {});
+    const levelGroups = [
+      {
+        label: "INPUTS",
+        indices: inEntries.map(([k]) => ROUTING_KEY_TO_BUFFER3[k]).filter((i) => i !== void 0)
+      },
+      {
+        label: "OUTPUTS",
+        indices: outEntries.map(([k]) => ROUTING_KEY_TO_BUFFER3[k]).filter((i) => i !== void 0)
+      }
+    ];
+    const levelLabels = {};
+    [...inEntries, ...outEntries].forEach(([key]) => {
+      const idx = ROUTING_KEY_TO_BUFFER3[key];
+      if (idx !== void 0) levelLabels[idx] = toLabel(key);
+    });
+    const inputChannels = inEntries.map(([key, val]) => ({
+      key,
+      ch: toPhysical(val),
+      label: toLabel(key),
+      buf3: ROUTING_KEY_TO_BUFFER3[key]
+    }));
+    const outputChannels = outEntries.map(([key, val]) => ({
+      key,
+      ch: toPhysical(val),
+      label: toLabel(key),
+      buf3: ROUTING_KEY_TO_BUFFER3[key]
+    }));
+    return { levelGroups, levelLabels, inputChannels, outputChannels };
+  }
 
   // gui/state.js
   function createState() {
@@ -1631,18 +1662,34 @@ font-size:11px;color:#999;margin-top:10px;line-height:1.4;
     }
   }
 
+  // gui/routing-config.js
+  var ROUTING_CONFIG = {
+    "out": {
+      "master": [
+        1
+      ],
+      "fx1Send": 2,
+      "fx2Send": 3,
+      "vuSub": 9,
+      "vuKick": 8,
+      "vuMid": 7,
+      "vuTop": 6
+    },
+    "in": {
+      "fx1Return": 6,
+      "fx2Return": 7,
+      "aux1": 0,
+      "aux2": 1,
+      "aux3": 3,
+      "aux4": 5
+    }
+  };
+
   // gui/dom/meters.js
   var _codecGains = {
-    hp: 0,
-    input: [0, 0, 0, 0]
-    // AUX1 (ch0), AUX2 (ch1), AUX3 (ch2), AUX4 (ch3)
+    inputs: new Array(10).fill(0),
+    outputs: new Array(10).fill(0)
   };
-  var INPUT_CHANNELS = [
-    { ch: 0, label: "AUX1 (IN0)" },
-    { ch: 1, label: "AUX2 (IN1)" },
-    { ch: 2, label: "AUX3 (IN2)" },
-    { ch: 3, label: "AUX4 (IN3)" }
-  ];
   var INPUT_GAIN_MIN = -12;
   var INPUT_GAIN_MAX = 10;
   var INPUT_GAIN_STEP = 1;
@@ -1691,20 +1738,23 @@ font-size:11px;color:#999;margin-top:10px;line-height:1.4;
       current = clamped;
       refresh();
     }
+    function setLabel(text) {
+      lbl.textContent = text;
+    }
     btnDec.addEventListener("click", () => tryChange(-step));
     btnInc.addEventListener("click", () => tryChange(+step));
     picker.appendChild(btnDec);
     picker.appendChild(valEl);
     picker.appendChild(btnInc);
-    row.appendChild(lbl);
     row.appendChild(picker);
+    row.appendChild(lbl);
     refresh();
-    return { el: row, setValue };
+    return { el: row, setValue, setLabel };
   }
-  var _inputPickers = [];
-  var _hpPicker = null;
-  function buildCodecGainCard() {
-    const card = el("div", { className: "card" });
+  var _inputPickers = new Array(10).fill(null);
+  var _outputPickers = new Array(10).fill(null);
+  function buildCodecGainCard(inputChannels, outputChannels) {
+    const card = el("div", { id: "codec-gains-card", className: "card" });
     card.appendChild(cardTitle("Codec Gains \u2014 real-time"));
     const notice = el("p", { className: "codec-gain-notice" });
     notice.textContent = "Changes are applied immediately via Bela.control. Values are volatile \u2014 they reset on project restart.";
@@ -1714,16 +1764,16 @@ font-size:11px;color:#999;margin-top:10px;line-height:1.4;
     const inSection = el("div", { className: "codec-gain-section" });
     inSection.textContent = "ADC Input PGA (-12\u201310 dB)";
     card.appendChild(inSection);
-    _inputPickers.length = 0;
-    INPUT_CHANNELS.forEach(({ ch, label }) => {
+    inputChannels.forEach(({ ch, label }) => {
+      _inputPickers[ch] = null;
       const picker = _buildPickerRow(
         label,
-        _codecGains.input[ch],
+        _codecGains.inputs[ch],
         INPUT_GAIN_MIN,
         INPUT_GAIN_MAX,
         INPUT_GAIN_STEP,
         (val, st) => {
-          _codecGains.input[ch] = val;
+          _codecGains.inputs[ch] = val;
           _sendGain(
             { event: "custom", inputGain: val, channel: ch },
             `${label} \u2192 ${val} dB`,
@@ -1738,19 +1788,27 @@ font-size:11px;color:#999;margin-top:10px;line-height:1.4;
     const outSection = el("div", { className: "codec-gain-section" });
     outSection.textContent = "HP Output (-63\u20130 dB)";
     card.appendChild(outSection);
-    _hpPicker = _buildPickerRow(
-      "MASTER (OUT 1)",
-      _codecGains.hp,
-      HP_GAIN_MIN,
-      HP_GAIN_MAX,
-      HP_GAIN_STEP,
-      (val, st) => {
-        _codecGains.hp = val;
-        _sendGain({ event: "custom", hp1Gain: val }, `MASTER (OUT 1) \u2192 ${val} dB`, st);
-      },
-      statusEl
-    );
-    card.appendChild(_hpPicker.el);
+    outputChannels.forEach(({ ch, label }) => {
+      _outputPickers[ch] = null;
+      const picker = _buildPickerRow(
+        label,
+        _codecGains.outputs[ch],
+        HP_GAIN_MIN,
+        HP_GAIN_MAX,
+        HP_GAIN_STEP,
+        (val, st) => {
+          _codecGains.outputs[ch] = val;
+          _sendGain(
+            { event: "custom", hpGain: val, channel: ch },
+            `${label} \u2192 ${val} dB`,
+            st
+          );
+        },
+        statusEl
+      );
+      _outputPickers[ch] = picker;
+      card.appendChild(picker.el);
+    });
     card.appendChild(statusEl);
     const _poll = setInterval(() => {
       if (_belaControlReady()) {
@@ -1762,10 +1820,10 @@ font-size:11px;color:#999;margin-top:10px;line-height:1.4;
     return card;
   }
   function syncCodecGains(buf) {
-    for (let ch = 0; ch < 4; ch++) {
+    for (let ch = 0; ch < 10; ch++) {
       if (_inputPickers[ch]) _inputPickers[ch].setValue(buf[ch]);
+      if (_outputPickers[ch]) _outputPickers[ch].setValue(buf[10 + ch]);
     }
-    if (_hpPicker) _hpPicker.setValue(buf[4]);
   }
   function createVuMeter(canvas, config) {
     const max = config.max || 100;
@@ -1899,7 +1957,9 @@ font-size:11px;color:#999;margin-top:10px;line-height:1.4;
     const pane = el("div", { id: "pane-meters", className: "tab-pane" });
     const wrap = el("div", { id: "meters-wrap" });
     const columns = el("div", { className: "meters-columns" });
-    LEVEL_GROUPS.forEach((group) => {
+    const { levelGroups, levelLabels, inputChannels, outputChannels } = buildFullRouting(ROUTING_CONFIG);
+    getContext().meterLabelEls = [];
+    levelGroups.forEach((group) => {
       const card = el("div", { className: "card meters-card" });
       card.appendChild(cardTitle(group.label));
       const row = el("div", { className: "meter-group" });
@@ -1907,7 +1967,8 @@ font-size:11px;color:#999;margin-top:10px;line-height:1.4;
         const ch = el("div", { className: "meter-ch" });
         const mid = el("div", { className: "meter-id" });
         const lbl = el("div", { className: "meter-lbl" });
-        lbl.textContent = LEVEL_LABELS[idx];
+        lbl.textContent = levelLabels[idx] || String(idx);
+        getContext().meterLabelEls[idx] = lbl;
         const dbv = el("div", { className: "meter-db", id: "md-" + idx });
         dbv.textContent = "-\u221E";
         getContext().meterDbs[idx] = dbv;
@@ -1947,8 +2008,10 @@ font-size:11px;color:#999;margin-top:10px;line-height:1.4;
     });
     wrap.appendChild(columns);
     pane.appendChild(wrap);
-    pane.appendChild(buildCodecGainCard());
+    pane.appendChild(buildCodecGainCard(inputChannels, outputChannels));
     return pane;
+  }
+  function applyRoutingConfig(_configMeta) {
   }
   function levelToBarPct(raw) {
     const dB = raw > 32e-6 ? 20 * Math.log10(raw) : -90;
@@ -2592,8 +2655,10 @@ font-size:11px;color:#999;margin-top:10px;line-height:1.4;
         ctx.switchMapping = Float32Array.from(b[5]);
         tryBuildMappingTable();
       }
-      if (b[6] && !ctx.configMeta)
+      if (b[6] && !ctx.configMeta) {
         ctx.configMeta = Float32Array.from(b[6]);
+        applyRoutingConfig(ctx.configMeta);
+      }
       if (b[8]) syncCodecGains(b[8]);
       if (ctx.consoleReady) updateConsole();
       updateSiren();

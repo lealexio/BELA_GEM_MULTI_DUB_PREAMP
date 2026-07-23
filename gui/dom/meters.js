@@ -1,12 +1,13 @@
 /** Canvas VU meters tab + real-time codec gain control. */
 import { getContext } from '../context.js';
 import {
-    LEVEL_GROUPS, LEVEL_LABELS,
     VU_BOX_COUNT, VU_BOX_COUNT_RED, VU_BOX_COUNT_YELLOW,
     VU_BOX_GAP_FRACTION, VU_MAX, VU_CANVAS_W, VU_CANVAS_H,
     METER_ATTACK, METER_RELEASE, PEAK_HOLD_MS, PEAK_DECAY,
-    CLIP_THRESHOLD, CLIP_HOLD_MS
+    CLIP_THRESHOLD, CLIP_HOLD_MS,
+    buildFullRouting,
 } from '../config.js';
+import { ROUTING_CONFIG } from '../routing-config.js';
 import { el, cardTitle } from './utils.js';
 
 // ---------------------------------------------------------------------------
@@ -19,23 +20,19 @@ import { el, cardTitle } from './utils.js';
 //                   Bela_setHpLevel / Bela_setAudioInputGain  (written immediately)
 //
 // Supported payloads:
-//   { event:'custom', hp1Gain: N }               — MASTER (OUT 1), [-63, 0] dB
-//   { event:'custom', inputGain: N, channel: C } — ADC PGA, [-12, 10] dB
+//   { event:'custom', hpGain: N, channel: C }    — HP out ch C, [-63, 0] dB
+//   { event:'custom', inputGain: N, channel: C } — ADC PGA ch C, [-12, 10] dB
 // ---------------------------------------------------------------------------
 
-/** Codec gain state — all defaults at 0 dB (unity). */
+/**
+ * Codec gain state — indexed by physical channel, all defaults 0 dB.
+ * inputs[ch] = ADC PGA gain for physical ADC channel ch.
+ * outputs[ch] = HP output gain for physical output channel ch.
+ */
 const _codecGains = {
-    hp:    0,
-    input: [0, 0, 0, 0],  // AUX1 (ch0), AUX2 (ch1), AUX3 (ch2), AUX4 (ch3)
+    inputs:  new Array(10).fill(0),
+    outputs: new Array(10).fill(0),
 };
-
-/** Input channel descriptors — must match HardwareConfig.h audio inputs. */
-const INPUT_CHANNELS = [
-    { ch: 0, label: 'AUX1 (IN0)' },
-    { ch: 1, label: 'AUX2 (IN1)' },
-    { ch: 2, label: 'AUX3 (IN2)' },
-    { ch: 3, label: 'AUX4 (IN3)' },
-];
 
 const INPUT_GAIN_MIN  = -12;
 const INPUT_GAIN_MAX  = 10;
@@ -62,7 +59,7 @@ function _belaControlReady() {
 function _sendGain(payload, desc, statusEl) {
     if (!_belaControlReady()) {
         statusEl.textContent =
-            'Bela.control not connected — make sure the project is running';
+            'Bela not connected — make sure the project is running';
         statusEl.className = 'codec-gain-status err';
         return;
     }
@@ -115,33 +112,41 @@ function _buildPickerRow(label, initVal, min, max, step, onSend, statusEl) {
         refresh();
     }
 
+    /** Update the row label text (called when routing config is applied). */
+    function setLabel(text) { lbl.textContent = text; }
+
     btnDec.addEventListener('click', () => tryChange(-step));
     btnInc.addEventListener('click', () => tryChange(+step));
 
     picker.appendChild(btnDec);
     picker.appendChild(valEl);
     picker.appendChild(btnInc);
-    row.appendChild(lbl);
     row.appendChild(picker);
+    row.appendChild(lbl);
 
     refresh();
-    return { el: row, setValue };
+    return { el: row, setValue, setLabel };
 }
 
-// Picker handles for external sync via syncCodecGains().
-// inputPickers[0..3] → ADC channels, hpPicker → HP Out 1.
-const _inputPickers = [];
-let   _hpPicker     = null;
+// Picker handles for external sync via syncCodecGains() — indexed by physical channel.
+// _inputPickers[ch]  = ADC input picker for physical ADC channel ch.
+// _outputPickers[ch] = HP output picker for physical output channel ch.
+const _inputPickers  = new Array(10).fill(null);
+const _outputPickers = new Array(10).fill(null);
 
 /**
- * Builds the unified Codec Gains card.
- * Sections: ADC input PGA (AUX1–4) and HP output (MASTER OUT 1).
+ * Builds the unified Codec Gains card from dynamic routing.
+ * Section "ADC Input PGA" is generated from inputChannels (routing.in).
+ * Section "HP Output"     is generated from outputChannels (routing.out).
  * Uses Bela.control WebSocket — no project restart required.
- * Must be called once; stores picker handles in _inputPickers / _hpPicker
- * so syncCodecGains() can update them from buffer 8.
+ * Stores picker handles in _inputPickers / _outputPickers so syncCodecGains()
+ * can update them from buffer 8 without triggering Bela.control sends.
+ *
+ * @param {Array<{ch:number, label:string}>}  inputChannels
+ * @param {Array<{ch:number, label:string}>}  outputChannels
  */
-function buildCodecGainCard() {
-    const card = el('div', {className: 'card'});
+function buildCodecGainCard(inputChannels, outputChannels) {
+    const card = el('div', {id: 'codec-gains-card', className: 'card'});
     card.appendChild(cardTitle('Codec Gains — real-time'));
 
     const notice = el('p', {className: 'codec-gain-notice'});
@@ -153,24 +158,21 @@ function buildCodecGainCard() {
     const statusEl = el('div', {className: 'codec-gain-status'});
     statusEl.textContent = 'Waiting for Bela.control connection…';
 
-    // --- Input section ---
+    // --- ADC input section ---
     const inSection = el('div', {className: 'codec-gain-section'});
     inSection.textContent = 'ADC Input PGA (-12–10 dB)';
     card.appendChild(inSection);
 
-    _inputPickers.length = 0;
-    INPUT_CHANNELS.forEach(({ch, label}) => {
+    inputChannels.forEach(({ch, label}) => {
+        _inputPickers[ch] = null;
         const picker = _buildPickerRow(
             label,
-            _codecGains.input[ch],
+            _codecGains.inputs[ch],
             INPUT_GAIN_MIN, INPUT_GAIN_MAX, INPUT_GAIN_STEP,
             (val, st) => {
-                _codecGains.input[ch] = val;
-                _sendGain(
-                    { event: 'custom', inputGain: val, channel: ch },
-                    `${label} → ${val} dB`,
-                    st
-                );
+                _codecGains.inputs[ch] = val;
+                _sendGain({ event: 'custom', inputGain: val, channel: ch },
+                    `${label} → ${val} dB`, st);
             },
             statusEl
         );
@@ -178,29 +180,34 @@ function buildCodecGainCard() {
         card.appendChild(picker.el);
     });
 
-    // --- Output section ---
+    // --- HP output section ---
     const outSection = el('div', {className: 'codec-gain-section'});
     outSection.textContent = 'HP Output (-63–0 dB)';
     card.appendChild(outSection);
 
-    _hpPicker = _buildPickerRow(
-        'MASTER (OUT 1)',
-        _codecGains.hp,
-        HP_GAIN_MIN, HP_GAIN_MAX, HP_GAIN_STEP,
-        (val, st) => {
-            _codecGains.hp = val;
-            _sendGain({ event: 'custom', hp1Gain: val }, `MASTER (OUT 1) → ${val} dB`, st);
-        },
-        statusEl
-    );
-    card.appendChild(_hpPicker.el);
+    outputChannels.forEach(({ch, label}) => {
+        _outputPickers[ch] = null;
+        const picker = _buildPickerRow(
+            label,
+            _codecGains.outputs[ch],
+            HP_GAIN_MIN, HP_GAIN_MAX, HP_GAIN_STEP,
+            (val, st) => {
+                _codecGains.outputs[ch] = val;
+                _sendGain({ event: 'custom', hpGain: val, channel: ch },
+                    `${label} → ${val} dB`, st);
+            },
+            statusEl
+        );
+        _outputPickers[ch] = picker;
+        card.appendChild(picker.el);
+    });
 
     card.appendChild(statusEl);
 
     // Poll until Bela.control is ready
     const _poll = setInterval(() => {
         if (_belaControlReady()) {
-            statusEl.textContent = 'Bela.control connected — ready';
+            statusEl.textContent = 'Bela connected';
             statusEl.className   = 'codec-gain-status ok';
             clearInterval(_poll);
         }
@@ -211,15 +218,16 @@ function buildCodecGainCard() {
 
 /**
  * Synchronises picker displays from buffer 8 broadcast by render.cpp (~20 fps).
- * Layout: buf[0..3] = input ch0-3 (dB), buf[4] = HP Out 1 (dB).
+ * Layout: buf[0..9] = ADC input gain by physical ch (dB),
+ *         buf[10..19] = HP output gain by physical ch (dB).
  * Called from main.js draw loop — does NOT trigger Bela.control.send().
  * @param {Float32Array} buf
  */
 export function syncCodecGains(buf) {
-    for (let ch = 0; ch < 4; ch++) {
-        if (_inputPickers[ch]) _inputPickers[ch].setValue(buf[ch]);
+    for (let ch = 0; ch < 10; ch++) {
+        if (_inputPickers[ch])  _inputPickers[ch].setValue(buf[ch]);
+        if (_outputPickers[ch]) _outputPickers[ch].setValue(buf[10 + ch]);
     }
-    if (_hpPicker) _hpPicker.setValue(buf[4]);
 }
 
 export function createVuMeter(canvas, config) {
@@ -383,21 +391,29 @@ export function createVuMeter(canvas, config) {
 }
 
 export function buildMetersPane() {
-    const pane = el('div', {id:'pane-meters', className:'tab-pane'});
-    const wrap = el('div', {id:'meters-wrap'});
+    const pane    = el('div', {id:'pane-meters', className:'tab-pane'});
+    const wrap    = el('div', {id:'meters-wrap'});
     const columns = el('div', {className:'meters-columns'});
 
-    LEVEL_GROUPS.forEach(group => {
+    // Build routing descriptor from the bundled config.json at load time —
+    // labels and channel numbers are correct from the first render.
+    const { levelGroups, levelLabels, inputChannels, outputChannels } =
+        buildFullRouting(ROUTING_CONFIG);
+
+    getContext().meterLabelEls = [];
+
+    levelGroups.forEach(group => {
         const card = el('div', {className:'card meters-card'});
         card.appendChild(cardTitle(group.label));
         const row = el('div', {className:'meter-group'});
 
         group.indices.forEach(idx => {
-            const ch = el('div', {className:'meter-ch'});
+            const ch  = el('div', {className:'meter-ch'});
             const mid = el('div', {className:'meter-id'});
 
             const lbl = el('div', {className:'meter-lbl'});
-            lbl.textContent = LEVEL_LABELS[idx];
+            lbl.textContent = levelLabels[idx] || String(idx);
+            getContext().meterLabelEls[idx] = lbl;
 
             const dbv = el('div', {className:'meter-db', id:'md-'+idx});
             dbv.textContent = '-\u221e';
@@ -429,7 +445,9 @@ export function buildMetersPane() {
                 role: 'img',
                 'aria-label': 'Clip indicator off'
             });
-            clipLed.innerHTML = '<span class="meter-clip-led__bezel"></span><span class="meter-clip-led__core"></span>';
+            clipLed.innerHTML =
+                '<span class="meter-clip-led__bezel"></span>' +
+                '<span class="meter-clip-led__core"></span>';
             getContext().meterClipLeds[idx] = clipLed;
 
             mwrap.appendChild(cnv);
@@ -447,8 +465,19 @@ export function buildMetersPane() {
 
     wrap.appendChild(columns);
     pane.appendChild(wrap);
-    pane.appendChild(buildCodecGainCard());
+    pane.appendChild(buildCodecGainCard(inputChannels, outputChannels));
     return pane;
+}
+
+/**
+ * Called from main.js when buffer 6 (configMeta) first arrives.
+ * Routing is now built at load time from ROUTING_CONFIG (bundled from config.json),
+ * so no label or picker updates are needed here. Kept for API compatibility.
+ * @param {Float32Array} _configMeta
+ */
+export function applyRoutingConfig(_configMeta) {
+    // No-op: meters pane and codec pickers are built from ROUTING_CONFIG in
+    // buildMetersPane(), which runs before any buffer arrives.
 }
 
 /** Converts a linear peak level to a 0–100 % bar height (-60 dBFS floor). */
