@@ -148,6 +148,10 @@ extern PotRef MASTER_GAIN;
 extern PotRef SIREN_TYPE;
 extern PotRef SIREN_MOD;
 
+// FX return input gain (0 = mute, 1 = unity)
+extern PotRef FX1_RETURN_GAIN;
+extern PotRef FX2_RETURN_GAIN;
+
 // --- MUX 3 — siren + channel gain/send ---
 extern PotRef SIREN_GAIN;
 extern PotRef SIREN_FX_SEND;

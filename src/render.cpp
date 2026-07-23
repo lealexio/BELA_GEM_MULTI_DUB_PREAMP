@@ -545,6 +545,10 @@ void render(BelaContext* context, void* userData) {
         gHardwareManager.getSwitchState(SIREN_TRIGGER)
     );
 
+    // --- FX return input gains (0 = mute, 1 = unity) ---
+    const float fx1ReturnGain = gHardwareManager.getPotValue(FX1_RETURN_GAIN);
+    const float fx2ReturnGain = gHardwareManager.getPotValue(FX2_RETURN_GAIN);
+
     // --- Sample loop ---
     bool clipCh0 = false;
     bool clipCh1 = false;
@@ -588,9 +592,9 @@ void render(BelaContext* context, void* userData) {
         else
             fxSend2 = gFx2MidHpf.process(fxSend2);                       // > 250 Hz (MID+TOP)
 
-        // FX returns: noise-gated to suppress idle hum from the effect unit
-        float fxReturn  = gMasterFx.processFxReturn (audioRead(context, n, FX1_RETURN_IN));
-        float fxReturn2 = gMasterFx.processFxReturn2(audioRead(context, n, FX2_RETURN_IN));
+        // FX returns: gain-trimmed (MUX0 CH00/CH15) then noise-gated to suppress idle hum
+        float fxReturn  = gMasterFx.processFxReturn (audioRead(context, n, FX1_RETURN_IN) * fx1ReturnGain);
+        float fxReturn2 = gMasterFx.processFxReturn2(audioRead(context, n, FX2_RETURN_IN) * fx2ReturnGain);
 
         // Master bus mix — routing controlled by kFxReturnPostMaster (SoftwareConfig.h).
         // POST (true) : FX returns bypass all master DSP; only masterGain applies.

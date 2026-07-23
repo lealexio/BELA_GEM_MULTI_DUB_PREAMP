@@ -72,9 +72,14 @@ SwitchRef SIREN_TRIGGER = {0, false, true};
 // ---------------------------------------------------------------------------
 
 // MUX 0
-PotRef MASTER_GAIN  = {0,  1, true,  "MASTER_GAIN"};
-PotRef SIREN_TYPE   = {0, 10, true,  "SIREN_TYPE"};
-PotRef SIREN_MOD    = {0,  9, true,  "SIREN_MOD"};
+PotRef MASTER_GAIN     = {0,  1, true, "MASTER_GAIN"};
+PotRef SIREN_TYPE      = {0, 10, true, "SIREN_TYPE"};
+PotRef SIREN_MOD       = {0,  9, true, "SIREN_MOD"};
+
+// FX return input gains — reversed: pot at max physical position = unity gain (1.0),
+// pot at min physical position = mute (0.0). Useful to silence a noisy external effect.
+PotRef FX1_RETURN_GAIN = {0,  0, true, "FX1_RETURN_GAIN"};
+PotRef FX2_RETURN_GAIN = {0, 15, true, "FX2_RETURN_GAIN"};
 
 // MUX 3 — siren + channel gain/send
 PotRef SIREN_GAIN     = {3,  0, true,  "SIREN_GAIN"};
@@ -177,8 +182,10 @@ PotRef kAllNamedPots[kAllNamedPotsMax] = {
     // Graphic EQ — 12 bands
     GEQ_40HZ, GEQ_60HZ, GEQ_80HZ, GEQ_100HZ, GEQ_125HZ, GEQ_250HZ,
     GEQ_500HZ, GEQ_1KHZ, GEQ_2KHZ, GEQ_4KHZ, GEQ_8KHZ, GEQ_16KHZ,
+    // FX return input gains
+    FX1_RETURN_GAIN, FX2_RETURN_GAIN,
 };
-int kAllNamedPotsCount = 58;
+int kAllNamedPotsCount = 60;
 
 // ---------------------------------------------------------------------------
 // Debug logging exclusion list

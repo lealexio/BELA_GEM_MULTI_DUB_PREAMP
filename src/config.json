@@ -37,6 +37,9 @@
   },
 
   "pots": [
+    { "name": "FX1_RETURN_GAIN",    "mux": 0, "pot":  0, "reversed": true,  "centered": false },
+    { "name": "FX2_RETURN_GAIN",    "mux": 0, "pot": 15, "reversed": true,  "centered": false },
+
     { "name": "MASTER_GAIN",        "mux": 0, "pot":  1, "reversed": true,  "centered": false },
 
     { "name": "SIREN_TYPE",         "mux": 0, "pot": 10, "reversed": true,  "centered": false },
