@@ -17,6 +17,7 @@ export function buildUI() {
     hdr.innerHTML =
         '<h1>Bela Preamp</h1>' +
         '<span class="badge" id="conn-badge">OFFLINE</span>' +
+        '<span class="badge temp unknown" id="temp-badge" title="CPU temperature">--°C</span>' +
         '<span class="spacer"></span>';
     const logo = el('img', { id: 'gui-logo', alt: 'Fulla Vibes' });
     logo.src = projectFileUrl('LOGO.png');

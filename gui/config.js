@@ -17,6 +17,10 @@ export const BELA_OFFLINE_TIMEOUT_MS = 1000;
 /** Nominal GUI tick ~50 ms @ 20 fps; gap above this → badge LAG (orange). */
 export const BELA_LAG_THRESHOLD_MS = 180;
 
+/** CPU temp badge colour thresholds (°C) — display only. */
+export const CPU_TEMP_WARM_C = 65;
+export const CPU_TEMP_HOT_C  = 75;
+
 export const SIREN_PRESETS = ['Wail', 'Whoop', 'Police', 'Scanner', 'Riotgun', 'Laser'];
 
 /** Pot names in kAllNamedPots order (60 entries). */

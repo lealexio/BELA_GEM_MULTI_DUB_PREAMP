@@ -11,7 +11,7 @@ import { startMeterAnim, syncCodecGains, applyRoutingConfig } from './dom/meters
 import { updateMasterEq, resizeMasterEqCanvas } from './dom/masterEq.js';
 import { tryBuildMappingTable, updateDetectMode, fillRoutingFromConfigMeta } from './dom/mapping.js';
 import {
-    updateBelaRxWatchdog, isBelaConnected, updateBadge
+    updateBelaRxWatchdog, isBelaConnected, updateBadge, updateTempBadge
 } from './bela/connection.js';
 
 export default function sketch(p) {
@@ -51,13 +51,18 @@ export default function sketch(p) {
 
     p.draw = function() {
         const ctx = getContext();
-        if(typeof Bela === 'undefined') { updateBadge(); return; }
+        if(typeof Bela === 'undefined') {
+            updateBadge();
+            updateTempBadge(undefined);
+            return;
+        }
 
         const b = Bela.data.buffers;
         updateBelaRxWatchdog(b);
 
         if(!isBelaConnected()) {
             updateBadge();
+            updateTempBadge(undefined);
             return;
         }
 
@@ -102,6 +107,10 @@ export default function sketch(p) {
 
         // Buffer 8: codec gain state — sync all connected clients (no send back to Bela).
         if(b[8]) syncCodecGains(b[8]);
+
+        // Buffer 9: CPU temperature °C (polled ~2 s on Bela AuxTask).
+        if(b[9] && b[9].length) updateTempBadge(b[9][0]);
+        else updateTempBadge(undefined);
 
         if(ctx.consoleReady) updateConsole();
         updateSiren();

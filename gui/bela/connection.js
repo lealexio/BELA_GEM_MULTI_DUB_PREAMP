@@ -1,6 +1,9 @@
 /** Bela WebSocket connection health and header badge. */
 import { getContext } from '../context.js';
-import { BELA_OFFLINE_TIMEOUT_MS, BELA_LAG_THRESHOLD_MS } from '../config.js';
+import {
+    BELA_OFFLINE_TIMEOUT_MS, BELA_LAG_THRESHOLD_MS,
+    CPU_TEMP_WARM_C, CPU_TEMP_HOT_C
+} from '../config.js';
 
 export function belaSocketOpen() {
     if(typeof Bela === 'undefined') return false;
@@ -66,4 +69,23 @@ export function updateBadge() {
         badge.textContent = 'OFFLINE';
         badge.className   = 'badge';
     }
+}
+
+/**
+ * Updates the CPU temperature bubble from GUI buffer 9 (°C).
+ * @param {number|undefined} tempC - Celsius, or negative / NaN if unavailable
+ */
+export function updateTempBadge(tempC) {
+    const badge = document.getElementById('temp-badge');
+    if(!badge) return;
+    if(typeof tempC !== 'number' || !isFinite(tempC) || tempC < 0) {
+        badge.textContent = '--°C';
+        badge.className   = 'badge temp unknown';
+        return;
+    }
+    badge.textContent = `${Math.round(tempC)}°C`;
+    let cls = 'badge temp';
+    if(tempC >= CPU_TEMP_HOT_C)       cls += ' hot';
+    else if(tempC >= CPU_TEMP_WARM_C) cls += ' warm';
+    badge.className = cls;
 }

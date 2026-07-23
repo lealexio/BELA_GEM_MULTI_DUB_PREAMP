@@ -27,6 +27,7 @@ const banner = `/* AUTO-GENERATED — edit gui/, run: npm run build:gui */
  *   [6] Float32[N]       — config metadata (mux, routing, ignoredPots)
  *   [7] Float32[64]      — raw MUX grid [mux×16+pot], normalised 0–1 (unmapped discovery)
  *   [8] Float32[20]      — codec gains: [0..9]=ADC input by physical ch, [10..19]=HP out by physical ch
+ *   [9] Float32[1]       — CPU temperature °C (sysfs thermal_zone0, ~2 s poll)
  */
 `;
 

@@ -52,6 +52,13 @@ padding:2px 8px;border-radius:10px;letter-spacing:.06em;
 }
 .badge.live{background:#27ae60}
 .badge.lag{background:#e67e22}
+.badge.temp{
+background:#3498db;font-variant-numeric:tabular-nums;
+letter-spacing:.02em;min-width:3.6em;text-align:center;
+}
+.badge.temp.warm{background:#e67e22}
+.badge.temp.hot{background:#e74c3c}
+.badge.temp.unknown{background:#555}
 
 /* --- Tab bar --- */
 #tab-bar{

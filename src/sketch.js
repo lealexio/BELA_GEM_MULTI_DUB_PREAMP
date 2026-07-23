@@ -14,6 +14,7 @@
  *   [6] Float32[N]       — config metadata (mux, routing, ignoredPots)
  *   [7] Float32[64]      — raw MUX grid [mux×16+pot], normalised 0–1 (unmapped discovery)
  *   [8] Float32[20]      — codec gains: [0..9]=ADC input by physical ch, [10..19]=HP out by physical ch
+ *   [9] Float32[1]       — CPU temperature °C (sysfs thermal_zone0, ~2 s poll)
  */
 
 var __belaPreampSketch = (() => {
@@ -49,6 +50,8 @@ var __belaPreampSketch = (() => {
   var CONSOLE_POT_MIN_DELTA_NORMAL = 0.02;
   var BELA_OFFLINE_TIMEOUT_MS = 1e3;
   var BELA_LAG_THRESHOLD_MS = 180;
+  var CPU_TEMP_WARM_C = 65;
+  var CPU_TEMP_HOT_C = 75;
   var SIREN_PRESETS = ["Wail", "Whoop", "Police", "Scanner", "Riotgun", "Laser"];
   var POT_NAMES = [
     // AUX1 — idx 0-5
@@ -405,6 +408,13 @@ padding:2px 8px;border-radius:10px;letter-spacing:.06em;
 }
 .badge.live{background:#27ae60}
 .badge.lag{background:#e67e22}
+.badge.temp{
+background:#3498db;font-variant-numeric:tabular-nums;
+letter-spacing:.02em;min-width:3.6em;text-align:center;
+}
+.badge.temp.warm{background:#e67e22}
+.badge.temp.hot{background:#e74c3c}
+.badge.temp.unknown{background:#555}
 
 /* --- Tab bar --- */
 #tab-bar{
@@ -2682,7 +2692,7 @@ font-size:11px;color:#999;margin-top:10px;line-height:1.4;
     const root = el("div", { id: "bela-gui" });
     const topChrome = el("div", { id: "top-chrome" });
     const hdr = el("div", { id: "gui-header" });
-    hdr.innerHTML = '<h1>Bela Preamp</h1><span class="badge" id="conn-badge">OFFLINE</span><span class="spacer"></span>';
+    hdr.innerHTML = '<h1>Bela Preamp</h1><span class="badge" id="conn-badge">OFFLINE</span><span class="badge temp unknown" id="temp-badge" title="CPU temperature">--\xB0C</span><span class="spacer"></span>';
     const logo = el("img", { id: "gui-logo", alt: "Fulla Vibes" });
     logo.src = projectFileUrl("LOGO.png");
     hdr.appendChild(logo);
@@ -2784,6 +2794,20 @@ font-size:11px;color:#999;margin-top:10px;line-height:1.4;
       badge.className = "badge";
     }
   }
+  function updateTempBadge(tempC) {
+    const badge = document.getElementById("temp-badge");
+    if (!badge) return;
+    if (typeof tempC !== "number" || !isFinite(tempC) || tempC < 0) {
+      badge.textContent = "--\xB0C";
+      badge.className = "badge temp unknown";
+      return;
+    }
+    badge.textContent = `${Math.round(tempC)}\xB0C`;
+    let cls = "badge temp";
+    if (tempC >= CPU_TEMP_HOT_C) cls += " hot";
+    else if (tempC >= CPU_TEMP_WARM_C) cls += " warm";
+    badge.className = cls;
+  }
 
   // gui/main.js
   function sketch(p) {
@@ -2821,12 +2845,14 @@ font-size:11px;color:#999;margin-top:10px;line-height:1.4;
       const ctx = getContext();
       if (typeof Bela === "undefined") {
         updateBadge();
+        updateTempBadge(void 0);
         return;
       }
       const b = Bela.data.buffers;
       updateBelaRxWatchdog(b);
       if (!isBelaConnected()) {
         updateBadge();
+        updateTempBadge(void 0);
         return;
       }
       if (b[0]) {
@@ -2866,6 +2892,8 @@ font-size:11px;color:#999;margin-top:10px;line-height:1.4;
         fillRoutingFromConfigMeta();
       }
       if (b[8]) syncCodecGains(b[8]);
+      if (b[9] && b[9].length) updateTempBadge(b[9][0]);
+      else updateTempBadge(void 0);
       if (ctx.consoleReady) updateConsole();
       updateSiren();
       updateSwitches();

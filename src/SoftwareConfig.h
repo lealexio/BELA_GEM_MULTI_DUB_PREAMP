@@ -298,3 +298,11 @@ constexpr int kGuiConfigMetaSize         = kGuiConfigMetaHeaderFloats + 32; // 1
 
 /// Raw MUX grid for GUI buffer 7: kNumMux × kPotsPerMux (must match HardwareConfig.h).
 constexpr int kGuiMuxRawBufSize = 64;
+
+/// CPU die temperature poll interval for the non-RT AuxTask (sysfs read).
+/// Keep slow — file I/O must never run in render().
+constexpr int kCpuTempPollUs = 2000000; // 2 s
+
+/// Sysfs path for the first thermal zone (millidegrees C). Matches
+/// `cat /sys/class/thermal/thermal_zone*/temp` first glob hit on Bela.
+constexpr const char* kCpuTempSysfsPath = "/sys/class/thermal/thermal_zone0/temp";

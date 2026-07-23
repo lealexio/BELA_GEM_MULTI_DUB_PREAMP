@@ -32,6 +32,7 @@ ChannelStrip    gChannelStrip4;  // IN3 → master (AUX4)
 MasterFx        gMasterFx;
 DubSiren        gDubSiren;
 AuxiliaryTask   gI2cTask;
+AuxiliaryTask   gCpuTempTask;
 
 // FX send 1 band filters (PA5 = MIDS, PA6 = TOPS)
 BiquadFilter    gFxHpf4k;    // TOPS mode : HPF at kFxMidHighFreq
@@ -77,6 +78,11 @@ static std::vector<float> gMuxRawBuf;         // [kGuiMuxRawBufSize] raw pot val
 // Initialised to 0 dB (unity); resets to this default on every Bela restart.
 static float              gCodecGains[20]   = {};
 static std::vector<float> gCodecGainsBuf;   // [20]
+
+// CPU temperature (°C) — written by the non-RT AuxTask, read in render for GUI.
+// Negative means "not yet read / unavailable".
+static volatile float     gCpuTempC      = -1.f;
+static std::vector<float> gCpuTempBuf;   // [1] buffer 9
 
 // Per-block peak accumulators — one entry per tracked audio channel.
 // Index map: 0-3 = in0-in3 | 4-5 = fxRet1-2 | 6 = master out
@@ -143,6 +149,23 @@ void readI2cTask(void*) {
     while(!Bela_stopRequested()) {
         gHardwareManager.readMcp23017();
         usleep(5000);
+    }
+}
+
+/**
+ * Reads SoC die temperature from sysfs (millidegrees → °C).
+ * Non-RT only — blocking file I/O must never run in render().
+ */
+void readCpuTempTask(void*) {
+    while(!Bela_stopRequested()) {
+        FILE* f = fopen(kCpuTempSysfsPath, "r");
+        if(f) {
+            int milli = 0;
+            if(fscanf(f, "%d", &milli) == 1)
+                gCpuTempC = milli / 1000.f;
+            fclose(f);
+        }
+        usleep(kCpuTempPollUs);
     }
 }
 
@@ -386,6 +409,10 @@ bool setup(BelaContext* context, void* userData) {
     gI2cTask = Bela_createAuxiliaryTask(readI2cTask, 50, "i2c-reader", nullptr);
     Bela_scheduleAuxiliaryTask(gI2cTask);
 
+    // Low-priority sysfs poll — must stay far below audio / I2C priorities.
+    gCpuTempTask = Bela_createAuxiliaryTask(readCpuTempTask, 1, "cpu-temp", nullptr);
+    Bela_scheduleAuxiliaryTask(gCpuTempTask);
+
     // ---- GUI setup --------------------------------------------------------
     // Allocate live send buffers (never resized after this point).
     gPotValuesBuf.assign(kAllNamedPotsCount, 0.f);
@@ -394,6 +421,7 @@ bool setup(BelaContext* context, void* userData) {
     gAudioLevelsBuf.assign(13, 0.f);
     gMuxRawBuf.assign(kGuiMuxRawBufSize, 0.f);
     gCodecGainsBuf.assign(20, 0.f);
+    gCpuTempBuf.assign(1, -1.f);
 
     // Fill static mapping buffers from the (possibly JSON-overridden) globals.
     gPotMappingBuf.resize(kAllNamedPotsCount * 4);
@@ -762,6 +790,10 @@ void render(BelaContext* context, void* userData) {
         // Layout: [0..9] ADC input gain by physical ch, [10..19] HP output gain by physical ch.
         for(int i = 0; i < 20; ++i) gCodecGainsBuf[i] = gCodecGains[i];
         gGui.sendBuffer(8, gCodecGainsBuf);
+
+        // Buffer 9: CPU temperature °C (updated ~every 2 s by AuxTask; one float).
+        gCpuTempBuf[0] = gCpuTempC;
+        gGui.sendBuffer(9, gCpuTempBuf);
 
         // Buffers 4+5+6: mapping + config metadata — resend periodically for (re)connects.
         if(++gGuiStaticSendCount >= kGuiStaticBufSendDivisor) {
