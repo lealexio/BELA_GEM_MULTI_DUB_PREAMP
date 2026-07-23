@@ -5,11 +5,11 @@
  * Runs at http://bela.local/gui/  (Bela GUI library, p5.js instance mode).
  *
  * Buffer index convention (Bela → JS, via gGui.sendBuffer):
- *   [0] Float32[58]      — pot values, kAllNamedPots order
+ *   [0] Float32[60]      — pot values, kAllNamedPots order
  *   [1] Float32[9]       — switch states (0/1)
  *   [2] Float32[3]       — siren: [presetIdx, gate, mod]
  *   [3] Float32[13]      — audio peak levels
- *   [4] Float32[58×4]    — pot mapping [mux,pot,rev,cen]×58
+ *   [4] Float32[60×4]    — pot mapping [mux,pot,rev,cen]×60
  *   [5] Float32[9×3]     — switch mapping [pin,portB,rev]×9
  *   [6] Float32[N]       — config metadata (mux, routing, ignoredPots)
  *   [7] Float32[64]      — raw MUX grid [mux×16+pot], normalised 0–1 (unmapped discovery)
@@ -118,7 +118,10 @@ var __belaPreampSketch = (() => {
     "GEQ_2KHZ",
     "GEQ_4KHZ",
     "GEQ_8KHZ",
-    "GEQ_16KHZ"
+    "GEQ_16KHZ",
+    // FX return gains — idx 58-59
+    "FX1_RETURN_GAIN",
+    "FX2_RETURN_GAIN"
   ];
   var SWITCH_NAMES = [
     "KILL_SUB",
@@ -291,7 +294,7 @@ var __belaPreampSketch = (() => {
   // gui/state.js
   function createState() {
     return {
-      potValues: new Float32Array(58),
+      potValues: new Float32Array(60),
       switchStates: new Float32Array(9),
       sirenState: new Float32Array(3),
       audioLevels: new Float32Array(13),
@@ -309,8 +312,8 @@ var __belaPreampSketch = (() => {
       meterDbs: [],
       meterClipLeds: [],
       recentChanges: [],
-      prevPotValues: new Float32Array(58).fill(-1),
-      prevPotValuesNormal: new Float32Array(58).fill(-1),
+      prevPotValues: new Float32Array(60).fill(-1),
+      prevPotValuesNormal: new Float32Array(60).fill(-1),
       prevSwitchStates: new Float32Array(9).fill(-1),
       prevMuxRawValues: null,
       prevMuxRawValuesNormal: null,
@@ -318,6 +321,7 @@ var __belaPreampSketch = (() => {
       consoleFilterMode: "normal",
       currentTab: 0,
       mappingBuilt: false,
+      routingFilledFromMeta: false,
       detectMode: null,
       masterEqCanvas: null,
       masterEqCtx: null,
@@ -719,6 +723,29 @@ font-size:12px;padding:2px 0;
 }
 .btn-detect-row.detect-active:hover{background:#fdecea}
 #pane-mapping{max-width:100%}
+.routing-hint{
+font-size:11px;color:#666;margin:-4px 0 10px;
+}
+.routing-grid{
+display:grid;
+grid-template-columns:1fr 1fr;
+gap:16px;
+margin-bottom:8px;
+}
+@media (max-width:720px){
+.routing-grid{grid-template-columns:1fr}
+}
+.msec-subtitle{
+font-size:11px;font-weight:700;text-transform:uppercase;
+letter-spacing:.06em;color:#666;margin:0 0 6px;
+}
+.routing-table col.col-name{width:62%}
+.routing-table col.col-num{width:38%}
+.routing-table input[type=text]{
+width:100%;min-width:0;max-width:100%;
+padding:3px 4px;border:1px solid #ddd;
+border-radius:4px;font-size:12px;font-family:inherit;
+}
 .mtable-wrap{
 width:100%;max-width:100%;
 margin-bottom:4px;
@@ -911,7 +938,49 @@ font-size:11px;color:#999;margin-top:10px;line-height:1.4;
     document.querySelectorAll("body > main").forEach((el2) => el2.remove());
   }
 
+  // gui/routing-config.js
+  var ROUTING_CONFIG = {
+    "out": {
+      "master": [
+        1
+      ],
+      "fx1Send": 2,
+      "fx2Send": 3,
+      "vuSub": 9,
+      "vuKick": 8,
+      "vuMid": 7,
+      "vuTop": 6
+    },
+    "in": {
+      "fx1Return": 6,
+      "fx2Return": 7,
+      "aux1": 0,
+      "aux2": 1,
+      "aux3": 3,
+      "aux4": 5
+    }
+  };
+
   // gui/dom/mapping.js
+  var ROUTING_CH_MIN = 0;
+  var ROUTING_CH_MAX = 9;
+  var ROUTING_IN_KEYS = [
+    "fx1Return",
+    "fx2Return",
+    "aux1",
+    "aux2",
+    "aux3",
+    "aux4"
+  ];
+  var ROUTING_OUT_KEYS = [
+    "master",
+    "fx1Send",
+    "fx2Send",
+    "vuSub",
+    "vuKick",
+    "vuMid",
+    "vuTop"
+  ];
   function buildMappingPane() {
     const pane = el("div", { id: "pane-mapping", className: "tab-pane" });
     const note = el("div", { id: "mapping-note" });
@@ -931,6 +1000,7 @@ font-size:11px;color:#999;margin-top:10px;line-height:1.4;
     toolbar.appendChild(getContext().downloadStatusEl);
     getContext().detectStatusEl = detectBanner;
     pane.appendChild(toolbar);
+    pane.appendChild(buildRoutingSection());
     const potTitle = el("div", { className: "msec-title" });
     potTitle.textContent = "Potentiometers";
     pane.appendChild(potTitle);
@@ -977,6 +1047,146 @@ font-size:11px;color:#999;margin-top:10px;line-height:1.4;
     pane.appendChild(swWrap);
     return pane;
   }
+  function buildRoutingSection() {
+    const section = el("div", { id: "routing-section" });
+    const title = el("div", { className: "msec-title" });
+    title.textContent = "Audio I/O Routing";
+    section.appendChild(title);
+    const hint = el("div", { className: "routing-hint" });
+    hint.textContent = "Physical Bela channel numbers (0\u20139). Master may list one or two outputs, e.g. 0 or 0,1.";
+    section.appendChild(hint);
+    const grid = el("div", { className: "routing-grid" });
+    grid.appendChild(buildRoutingTable(
+      "Inputs (routing.in)",
+      "in",
+      ROUTING_IN_KEYS,
+      ROUTING_CONFIG.in || {}
+    ));
+    grid.appendChild(buildRoutingTable(
+      "Outputs (routing.out)",
+      "out",
+      ROUTING_OUT_KEYS,
+      ROUTING_CONFIG.out || {}
+    ));
+    section.appendChild(grid);
+    section.querySelectorAll(".ri").forEach((inp) => {
+      inp.addEventListener("input", updateMappingConflicts);
+      inp.addEventListener("change", updateMappingConflicts);
+    });
+    updateMappingConflicts();
+    return section;
+  }
+  function buildRoutingTable(heading, dir, keys, values) {
+    const wrap = el("div", { className: "mtable-wrap routing-table-wrap" });
+    const sub = el("div", { className: "msec-subtitle" });
+    sub.textContent = heading;
+    wrap.appendChild(sub);
+    const tbl = el("table", { className: "mtable routing-table", id: `routing-${dir}-table` });
+    tbl.innerHTML = `
+        <colgroup>
+            <col class="col-name">
+            <col class="col-num">
+        </colgroup>
+        <thead><tr>
+            <th>Signal</th><th>Channel</th>
+        </tr></thead>
+        <tbody id="routing-${dir}-tbody"></tbody>`;
+    wrap.appendChild(tbl);
+    const tbody = tbl.querySelector("tbody");
+    keys.forEach((key) => {
+      const raw = values[key];
+      const isMaster = key === "master";
+      const display = formatRoutingValue(raw, isMaster);
+      const tr = document.createElement("tr");
+      tr.dataset.routingDir = dir;
+      tr.dataset.routingKey = key;
+      const inputType = isMaster ? "text" : "number";
+      const extraAttrs = isMaster ? 'placeholder="0 or 0,1" spellcheck="false"' : `min="${ROUTING_CH_MIN}" max="${ROUTING_CH_MAX}" step="1"`;
+      tr.innerHTML = `<td class="pname" title="${key}">${key}</td><td><input type="${inputType}" value="${display}" data-dir="${dir}" data-key="${key}" class="ri" ${extraAttrs}></td>`;
+      tbody.appendChild(tr);
+    });
+    return wrap;
+  }
+  function formatRoutingValue(raw, asArray) {
+    if (asArray) {
+      const arr = Array.isArray(raw) ? raw : raw != null ? [raw] : [];
+      return arr.join(",");
+    }
+    if (Array.isArray(raw)) return String(raw[0] != null ? raw[0] : 0);
+    return String(raw != null ? raw : 0);
+  }
+  function parseRoutingInput(inp) {
+    if (!inp) return null;
+    const key = inp.dataset.key;
+    const text = String(inp.value).trim();
+    if (key === "master") {
+      if (!text) return [];
+      const parts = text.split(/[,\s]+/).filter(Boolean);
+      const nums = parts.map((p) => parseInt(p, 10));
+      if (nums.some((n2) => isNaN(n2))) return null;
+      return nums;
+    }
+    const n = parseInt(text, 10);
+    return isNaN(n) ? null : n;
+  }
+  function fillRoutingFromConfigMeta() {
+    if (getContext().routingFilledFromMeta || !getContext().configMeta) return;
+    getContext().routingFilledFromMeta = true;
+    const M = CONFIG_META;
+    const meta = getContext().configMeta;
+    const masterCount = Math.round(meta[M.MASTER_COUNT]);
+    const masterOuts = [];
+    if (masterCount > 0) masterOuts.push(Math.round(meta[M.MASTER_0]));
+    if (masterCount > 1) masterOuts.push(Math.round(meta[M.MASTER_1]));
+    const values = {
+      in: {
+        fx1Return: Math.round(meta[M.FX1_RET]),
+        fx2Return: Math.round(meta[M.FX2_RET]),
+        aux1: Math.round(meta[M.AUX1]),
+        aux2: Math.round(meta[M.AUX2]),
+        aux3: Math.round(meta[M.AUX3]),
+        aux4: Math.round(meta[M.AUX4])
+      },
+      out: {
+        master: masterOuts,
+        fx1Send: Math.round(meta[M.FX1_SEND]),
+        fx2Send: Math.round(meta[M.FX2_SEND]),
+        vuSub: Math.round(meta[M.VU_SUB]),
+        vuKick: Math.round(meta[M.VU_KICK]),
+        vuMid: Math.round(meta[M.VU_MID]),
+        vuTop: Math.round(meta[M.VU_TOP])
+      }
+    };
+    document.querySelectorAll(".ri").forEach((inp) => {
+      const dir = inp.dataset.dir;
+      const key = inp.dataset.key;
+      const raw = values[dir] && values[dir][key];
+      if (raw === void 0) return;
+      inp.value = formatRoutingValue(raw, key === "master");
+    });
+    updateMappingConflicts();
+  }
+  function collectRoutingFromForm() {
+    const readKey = (dir, key) => {
+      const inp = document.querySelector(`.ri[data-dir="${dir}"][data-key="${key}"]`);
+      const parsed = parseRoutingInput(inp);
+      if (parsed === null) return void 0;
+      if (key === "master")
+        return Array.isArray(parsed) ? parsed : [parsed];
+      return parsed;
+    };
+    const out = {};
+    ROUTING_OUT_KEYS.forEach((key) => {
+      const val = readKey("out", key);
+      if (val !== void 0) out[key] = val;
+    });
+    const inn = {};
+    ROUTING_IN_KEYS.forEach((key) => {
+      const val = readKey("in", key);
+      if (val !== void 0) inn[key] = val;
+    });
+    return { out, in: inn };
+  }
   function tryBuildMappingTable() {
     if (getContext().mappingBuilt || !getContext().potMapping || !getContext().switchMapping) return;
     getContext().mappingBuilt = true;
@@ -1018,54 +1228,85 @@ font-size:11px;color:#999;margin-top:10px;line-height:1.4;
     updateMappingConflicts();
   }
   function updateMappingConflicts() {
-    if (!getContext().mappingBuilt) return;
-    document.querySelectorAll("#pot-tbody tr, #sw-tbody tr").forEach((tr) => tr.classList.remove("dup-conflict"));
     const messages = [];
-    const potGroups = /* @__PURE__ */ new Map();
-    for (let i = 0; i < POT_NAMES.length; i++) {
-      const muxInp = document.querySelector(`.pi[data-i="${i}"][data-f="mux"]`);
-      const potInp = document.querySelector(`.pi[data-i="${i}"][data-f="pot"]`);
-      if (!muxInp || !potInp) continue;
-      const mux = parseInt(muxInp.value, 10);
-      const pot = parseInt(potInp.value, 10);
-      if (isNaN(mux) || isNaN(pot)) continue;
-      const key = mux + ":" + pot;
-      if (!potGroups.has(key)) potGroups.set(key, []);
-      potGroups.get(key).push(i);
-    }
-    potGroups.forEach((indices, key) => {
-      if (indices.length < 2) return;
-      const parts = key.split(":");
-      const names = indices.map((i) => POT_NAMES[i]).join(", ");
-      messages.push("Pot MUX " + parts[0] + " / channel " + parts[1] + " : " + names);
-      indices.forEach((i) => {
-        const inp = document.querySelector(`.pi[data-i="${i}"][data-f="mux"]`);
-        const tr = inp && inp.closest("tr");
-        if (tr) tr.classList.add("dup-conflict");
+    document.querySelectorAll("#pot-tbody tr, #sw-tbody tr, #routing-in-tbody tr, #routing-out-tbody tr").forEach((tr) => tr.classList.remove("dup-conflict"));
+    if (getContext().mappingBuilt) {
+      const potGroups = /* @__PURE__ */ new Map();
+      for (let i = 0; i < POT_NAMES.length; i++) {
+        const muxInp = document.querySelector(`.pi[data-i="${i}"][data-f="mux"]`);
+        const potInp = document.querySelector(`.pi[data-i="${i}"][data-f="pot"]`);
+        if (!muxInp || !potInp) continue;
+        const mux = parseInt(muxInp.value, 10);
+        const pot = parseInt(potInp.value, 10);
+        if (isNaN(mux) || isNaN(pot)) continue;
+        const key = mux + ":" + pot;
+        if (!potGroups.has(key)) potGroups.set(key, []);
+        potGroups.get(key).push(i);
+      }
+      potGroups.forEach((indices, key) => {
+        if (indices.length < 2) return;
+        const parts = key.split(":");
+        const names = indices.map((i) => POT_NAMES[i]).join(", ");
+        messages.push("Pot MUX " + parts[0] + " / channel " + parts[1] + " : " + names);
+        indices.forEach((i) => {
+          const inp = document.querySelector(`.pi[data-i="${i}"][data-f="mux"]`);
+          const tr = inp && inp.closest("tr");
+          if (tr) tr.classList.add("dup-conflict");
+        });
       });
-    });
-    const swGroups = /* @__PURE__ */ new Map();
-    for (let i = 0; i < SWITCH_NAMES.length; i++) {
-      const pinInp = document.querySelector(`.si[data-i="${i}"][data-f="pin"]`);
-      const portInp = document.querySelector(`.si[data-i="${i}"][data-f="port"]`);
-      if (!pinInp || !portInp) continue;
-      const pin = parseInt(pinInp.value, 10);
-      const port = parseInt(portInp.value, 10);
-      if (isNaN(pin) || isNaN(port)) continue;
-      const key = port + ":" + pin;
-      if (!swGroups.has(key)) swGroups.set(key, []);
-      swGroups.get(key).push(i);
+      const swGroups = /* @__PURE__ */ new Map();
+      for (let i = 0; i < SWITCH_NAMES.length; i++) {
+        const pinInp = document.querySelector(`.si[data-i="${i}"][data-f="pin"]`);
+        const portInp = document.querySelector(`.si[data-i="${i}"][data-f="port"]`);
+        if (!pinInp || !portInp) continue;
+        const pin = parseInt(pinInp.value, 10);
+        const port = parseInt(portInp.value, 10);
+        if (isNaN(pin) || isNaN(port)) continue;
+        const key = port + ":" + pin;
+        if (!swGroups.has(key)) swGroups.set(key, []);
+        swGroups.get(key).push(i);
+      }
+      swGroups.forEach((indices, key) => {
+        if (indices.length < 2) return;
+        const parts = key.split(":");
+        const portLabel = parts[0] === "1" ? "B" : "A";
+        const names = indices.map((i) => SWITCH_NAMES[i]).join(", ");
+        messages.push("Switch port " + portLabel + " / pin " + parts[1] + " : " + names);
+        indices.forEach((i) => {
+          const inp = document.querySelector(`.si[data-i="${i}"][data-f="pin"]`);
+          const tr = inp && inp.closest("tr");
+          if (tr) tr.classList.add("dup-conflict");
+        });
+      });
     }
-    swGroups.forEach((indices, key) => {
-      if (indices.length < 2) return;
-      const parts = key.split(":");
-      const portLabel = parts[0] === "1" ? "B" : "A";
-      const names = indices.map((i) => SWITCH_NAMES[i]).join(", ");
-      messages.push("Switch port " + portLabel + " / pin " + parts[1] + " : " + names);
-      indices.forEach((i) => {
-        const inp = document.querySelector(`.si[data-i="${i}"][data-f="pin"]`);
-        const tr = inp && inp.closest("tr");
-        if (tr) tr.classList.add("dup-conflict");
+    ["in", "out"].forEach((dir) => {
+      const groups = /* @__PURE__ */ new Map();
+      document.querySelectorAll(`.ri[data-dir="${dir}"]`).forEach((inp) => {
+        const parsed = parseRoutingInput(inp);
+        if (parsed === null) return;
+        const chans = Array.isArray(parsed) ? parsed : [parsed];
+        const seenInField = /* @__PURE__ */ new Set();
+        chans.forEach((ch) => {
+          if (typeof ch !== "number" || isNaN(ch)) return;
+          if (seenInField.has(ch)) {
+            messages.push("Routing " + dir + " channel " + ch + " : " + inp.dataset.key + " lists it more than once");
+            const tr = inp.closest("tr");
+            if (tr) tr.classList.add("dup-conflict");
+            return;
+          }
+          seenInField.add(ch);
+          if (!groups.has(ch)) groups.set(ch, []);
+          groups.get(ch).push({ key: inp.dataset.key, inp });
+        });
+      });
+      groups.forEach((entries, ch) => {
+        const keys = [...new Set(entries.map((e) => e.key))];
+        if (keys.length < 2) return;
+        messages.push("Routing " + dir + " channel " + ch + " : " + keys.join(", "));
+        entries.forEach((e) => {
+          const tr = e.inp.closest("tr");
+          if (tr) tr.classList.add("dup-conflict");
+        });
       });
     });
     const banner = document.getElementById("mapping-conflicts");
@@ -1349,10 +1590,6 @@ font-size:11px;color:#999;margin-top:10px;line-height:1.4;
   function buildConfigJsonText(pm, sm) {
     if (!getContext().configMeta) return null;
     const M = CONFIG_META;
-    const masterCount = Math.round(getContext().configMeta[M.MASTER_COUNT]);
-    const masterOuts = [];
-    if (masterCount > 0) masterOuts.push(Math.round(getContext().configMeta[M.MASTER_0]));
-    if (masterCount > 1) masterOuts.push(Math.round(getContext().configMeta[M.MASTER_1]));
     const ignoredCount = Math.round(getContext().configMeta[M.IGNORED_COUNT]);
     const ignoredPots = [];
     for (let i = 0; i < ignoredCount; i++) {
@@ -1374,6 +1611,7 @@ font-size:11px;color:#999;margin-top:10px;line-height:1.4;
       reversed: sm[i * 3 + 2] > 0.5,
       port: sm[i * 3 + 1] > 0.5 ? "B" : "A"
     }));
+    const routing = collectRoutingFromForm();
     const config = {
       _comment: "Dub Preamp BELA GEM MULTI -- hardware mapping config. Edit this file to remap pots/switches without recompiling. Restart the Bela project to apply changes.",
       mux: { activeMux: Math.round(getContext().configMeta[M.ACTIVE_MUX]) },
@@ -1386,25 +1624,7 @@ font-size:11px;color:#999;margin-top:10px;line-height:1.4;
         bus: I2C_BUS,
         mcpAddress: Math.round(getContext().configMeta[M.MCP_ADDR])
       },
-      routing: {
-        out: {
-          master: masterOuts,
-          fx1Send: Math.round(getContext().configMeta[M.FX1_SEND]),
-          fx2Send: Math.round(getContext().configMeta[M.FX2_SEND]),
-          vuSub: Math.round(getContext().configMeta[M.VU_SUB]),
-          vuKick: Math.round(getContext().configMeta[M.VU_KICK]),
-          vuMid: Math.round(getContext().configMeta[M.VU_MID]),
-          vuTop: Math.round(getContext().configMeta[M.VU_TOP])
-        },
-        in: {
-          fx1Return: Math.round(getContext().configMeta[M.FX1_RET]),
-          fx2Return: Math.round(getContext().configMeta[M.FX2_RET]),
-          aux1: Math.round(getContext().configMeta[M.AUX1]),
-          aux2: Math.round(getContext().configMeta[M.AUX2]),
-          aux3: Math.round(getContext().configMeta[M.AUX3]),
-          aux4: Math.round(getContext().configMeta[M.AUX4])
-        }
-      },
+      routing,
       pots,
       switches,
       ignoredPots
@@ -1418,6 +1638,17 @@ font-size:11px;color:#999;margin-top:10px;line-height:1.4;
     }
     if (!getContext().configMeta) {
       showDownloadStatus("Config metadata not received", true);
+      return;
+    }
+    const routing = collectRoutingFromForm();
+    const expectedIn = ROUTING_IN_KEYS.length;
+    const expectedOut = ROUTING_OUT_KEYS.length;
+    if (Object.keys(routing.in).length !== expectedIn || Object.keys(routing.out).length !== expectedOut) {
+      showDownloadStatus("Invalid routing channels \u2014 check the form", true);
+      return;
+    }
+    if (!Array.isArray(routing.out.master) || routing.out.master.length < 1) {
+      showDownloadStatus("Master needs at least one output channel", true);
       return;
     }
     const { pm, sm } = collectMappingFromForm();
@@ -1658,29 +1889,6 @@ font-size:11px;color:#999;margin-top:10px;line-height:1.4;
       if (tile) tile.classList.toggle("on", getContext().switchStates[i] > 0.5);
     }
   }
-
-  // gui/routing-config.js
-  var ROUTING_CONFIG = {
-    "out": {
-      "master": [
-        1
-      ],
-      "fx1Send": 2,
-      "fx2Send": 3,
-      "vuSub": 9,
-      "vuKick": 8,
-      "vuMid": 7,
-      "vuTop": 6
-    },
-    "in": {
-      "fx1Return": 6,
-      "fx2Return": 7,
-      "aux1": 0,
-      "aux2": 1,
-      "aux3": 3,
-      "aux4": 5
-    }
-  };
 
   // gui/dom/meters.js
   var _codecGains = {
@@ -2655,6 +2863,7 @@ font-size:11px;color:#999;margin-top:10px;line-height:1.4;
       if (b[6] && !ctx.configMeta) {
         ctx.configMeta = Float32Array.from(b[6]);
         applyRoutingConfig(ctx.configMeta);
+        fillRoutingFromConfigMeta();
       }
       if (b[8]) syncCodecGains(b[8]);
       if (ctx.consoleReady) updateConsole();

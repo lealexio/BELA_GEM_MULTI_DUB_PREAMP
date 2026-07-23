@@ -370,6 +370,29 @@ font-size:12px;padding:2px 0;
 }
 .btn-detect-row.detect-active:hover{background:#fdecea}
 #pane-mapping{max-width:100%}
+.routing-hint{
+font-size:11px;color:#666;margin:-4px 0 10px;
+}
+.routing-grid{
+display:grid;
+grid-template-columns:1fr 1fr;
+gap:16px;
+margin-bottom:8px;
+}
+@media (max-width:720px){
+.routing-grid{grid-template-columns:1fr}
+}
+.msec-subtitle{
+font-size:11px;font-weight:700;text-transform:uppercase;
+letter-spacing:.06em;color:#666;margin:0 0 6px;
+}
+.routing-table col.col-name{width:62%}
+.routing-table col.col-num{width:38%}
+.routing-table input[type=text]{
+width:100%;min-width:0;max-width:100%;
+padding:3px 4px;border:1px solid #ddd;
+border-radius:4px;font-size:12px;font-family:inherit;
+}
 .mtable-wrap{
 width:100%;max-width:100%;
 margin-bottom:4px;

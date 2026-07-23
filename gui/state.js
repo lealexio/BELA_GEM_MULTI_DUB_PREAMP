@@ -4,7 +4,7 @@ import { MASTER_EQ_CONFIG } from './config.js';
 /** Creates the initial mutable GUI state object. */
 export function createState() {
     return {
-        potValues: new Float32Array(58),
+        potValues: new Float32Array(60),
         switchStates: new Float32Array(9),
         sirenState: new Float32Array(3),
         audioLevels: new Float32Array(13),
@@ -22,8 +22,8 @@ export function createState() {
         meterDbs: [],
         meterClipLeds: [],
         recentChanges: [],
-        prevPotValues: new Float32Array(58).fill(-1),
-        prevPotValuesNormal: new Float32Array(58).fill(-1),
+        prevPotValues: new Float32Array(60).fill(-1),
+        prevPotValuesNormal: new Float32Array(60).fill(-1),
         prevSwitchStates: new Float32Array(9).fill(-1),
         prevMuxRawValues: null,
         prevMuxRawValuesNormal: null,
@@ -31,6 +31,7 @@ export function createState() {
         consoleFilterMode: 'normal',
         currentTab: 0,
         mappingBuilt: false,
+        routingFilledFromMeta: false,
         detectMode: null,
         masterEqCanvas: null,
         masterEqCtx: null,

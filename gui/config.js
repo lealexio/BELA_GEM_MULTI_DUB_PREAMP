@@ -19,7 +19,7 @@ export const BELA_LAG_THRESHOLD_MS = 180;
 
 export const SIREN_PRESETS = ['Wail', 'Whoop', 'Police', 'Scanner', 'Riotgun', 'Laser'];
 
-/** Pot names in kAllNamedPots order (58 entries). */
+/** Pot names in kAllNamedPots order (60 entries). */
 export const POT_NAMES = [
     // AUX1 — idx 0-5
     'AUX1_INPUT_GAIN','AUX1_EQ_MID','AUX1_EQ_LOW','AUX1_EQ_HIGH','AUX1_FX_SEND','AUX1_FX2_SEND',
@@ -44,8 +44,10 @@ export const POT_NAMES = [
     'SIREN_TYPE','SIREN_MOD','SIREN_GAIN','SIREN_FX_SEND','SIREN_FX2_SEND',
     // Graphic EQ 12 bands — idx 46-57
     'GEQ_40HZ','GEQ_60HZ','GEQ_80HZ','GEQ_100HZ','GEQ_125HZ','GEQ_250HZ',
-    'GEQ_500HZ','GEQ_1KHZ','GEQ_2KHZ','GEQ_4KHZ','GEQ_8KHZ','GEQ_16KHZ'
-]; // 58 entries
+    'GEQ_500HZ','GEQ_1KHZ','GEQ_2KHZ','GEQ_4KHZ','GEQ_8KHZ','GEQ_16KHZ',
+    // FX return gains — idx 58-59
+    'FX1_RETURN_GAIN','FX2_RETURN_GAIN'
+]; // 60 entries
 
 /** Switch names matching kGuiSwitchRefs[] order in render.cpp. */
 export const SWITCH_NAMES = [

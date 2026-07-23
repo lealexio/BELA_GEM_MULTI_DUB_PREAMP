@@ -4,7 +4,22 @@ import {
     POT_NAMES, SWITCH_NAMES, MUX_POTS_PER_MUX, MUX_RAW_SIZE,
     CONFIG_META, I2C_BUS, DETECT_POT_MIN_DELTA
 } from '../config.js';
+import { ROUTING_CONFIG } from '../routing-config.js';
 import { el } from './utils.js';
+
+/** Bela Gem Multi audio channel index range (0-based). */
+const ROUTING_CH_MIN = 0;
+const ROUTING_CH_MAX = 9;
+
+/** Ordered routing.in keys — matches config.json layout. */
+const ROUTING_IN_KEYS = [
+    'fx1Return', 'fx2Return', 'aux1', 'aux2', 'aux3', 'aux4'
+];
+
+/** Ordered routing.out keys — matches config.json layout. */
+const ROUTING_OUT_KEYS = [
+    'master', 'fx1Send', 'fx2Send', 'vuSub', 'vuKick', 'vuMid', 'vuTop'
+];
 
 export function buildMappingPane() {
     const pane = el('div', {id:'pane-mapping', className:'tab-pane'});
@@ -34,6 +49,9 @@ export function buildMappingPane() {
     toolbar.appendChild(getContext().downloadStatusEl);
     getContext().detectStatusEl = detectBanner;
     pane.appendChild(toolbar);
+
+    // Audio I/O routing (config.json → routing.in / routing.out)
+    pane.appendChild(buildRoutingSection());
 
     // Pots table
     const potTitle = el('div', {className:'msec-title'});
@@ -88,6 +106,186 @@ export function buildMappingPane() {
     return pane;
 }
 
+/**
+ * Builds the editable routing.in / routing.out section for config.json.
+ * Prefills from the bundled ROUTING_CONFIG; live Bela values overwrite once via fillRoutingFromConfigMeta().
+ */
+function buildRoutingSection() {
+    const section = el('div', {id: 'routing-section'});
+
+    const title = el('div', {className: 'msec-title'});
+    title.textContent = 'Audio I/O Routing';
+    section.appendChild(title);
+
+    const hint = el('div', {className: 'routing-hint'});
+    hint.textContent =
+        'Physical Bela channel numbers (0–9). Master may list one or two outputs, e.g. 0 or 0,1.';
+    section.appendChild(hint);
+
+    const grid = el('div', {className: 'routing-grid'});
+    grid.appendChild(buildRoutingTable(
+        'Inputs (routing.in)', 'in', ROUTING_IN_KEYS, ROUTING_CONFIG.in || {}
+    ));
+    grid.appendChild(buildRoutingTable(
+        'Outputs (routing.out)', 'out', ROUTING_OUT_KEYS, ROUTING_CONFIG.out || {}
+    ));
+    section.appendChild(grid);
+
+    section.querySelectorAll('.ri').forEach(inp => {
+        inp.addEventListener('input',  updateMappingConflicts);
+        inp.addEventListener('change', updateMappingConflicts);
+    });
+    updateMappingConflicts();
+
+    return section;
+}
+
+/**
+ * Builds one routing direction table (inputs or outputs).
+ * @param {string} heading
+ * @param {'in'|'out'} dir
+ * @param {string[]} keys
+ * @param {object} values
+ */
+function buildRoutingTable(heading, dir, keys, values) {
+    const wrap = el('div', {className: 'mtable-wrap routing-table-wrap'});
+    const sub = el('div', {className: 'msec-subtitle'});
+    sub.textContent = heading;
+    wrap.appendChild(sub);
+
+    const tbl = el('table', {className: 'mtable routing-table', id: `routing-${dir}-table`});
+    tbl.innerHTML = `
+        <colgroup>
+            <col class="col-name">
+            <col class="col-num">
+        </colgroup>
+        <thead><tr>
+            <th>Signal</th><th>Channel</th>
+        </tr></thead>
+        <tbody id="routing-${dir}-tbody"></tbody>`;
+    wrap.appendChild(tbl);
+
+    const tbody = tbl.querySelector('tbody');
+    keys.forEach(key => {
+        const raw = values[key];
+        const isMaster = key === 'master';
+        const display = formatRoutingValue(raw, isMaster);
+        const tr = document.createElement('tr');
+        tr.dataset.routingDir = dir;
+        tr.dataset.routingKey = key;
+        const inputType = isMaster ? 'text' : 'number';
+        const extraAttrs = isMaster
+            ? 'placeholder="0 or 0,1" spellcheck="false"'
+            : `min="${ROUTING_CH_MIN}" max="${ROUTING_CH_MAX}" step="1"`;
+        tr.innerHTML =
+            `<td class="pname" title="${key}">${key}</td>` +
+            `<td><input type="${inputType}" value="${display}" ` +
+            `data-dir="${dir}" data-key="${key}" class="ri" ${extraAttrs}></td>`;
+        tbody.appendChild(tr);
+    });
+
+    return wrap;
+}
+
+/** Formats a routing JSON value for the form input. */
+function formatRoutingValue(raw, asArray) {
+    if(asArray) {
+        const arr = Array.isArray(raw) ? raw : (raw != null ? [raw] : []);
+        return arr.join(',');
+    }
+    if(Array.isArray(raw)) return String(raw[0] != null ? raw[0] : 0);
+    return String(raw != null ? raw : 0);
+}
+
+/**
+ * Parses a channel field: scalar number, or comma-separated list for master.
+ * @returns {number|number[]|null}
+ */
+function parseRoutingInput(inp) {
+    if(!inp) return null;
+    const key = inp.dataset.key;
+    const text = String(inp.value).trim();
+    if(key === 'master') {
+        if(!text) return [];
+        const parts = text.split(/[,\s]+/).filter(Boolean);
+        const nums = parts.map(p => parseInt(p, 10));
+        if(nums.some(n => isNaN(n))) return null;
+        return nums;
+    }
+    const n = parseInt(text, 10);
+    return isNaN(n) ? null : n;
+}
+
+/**
+ * Overwrites routing form fields from live Bela configMeta (once).
+ * Called when buffer 6 arrives so the download matches the running project.
+ */
+export function fillRoutingFromConfigMeta() {
+    if(getContext().routingFilledFromMeta || !getContext().configMeta) return;
+    getContext().routingFilledFromMeta = true;
+
+    const M = CONFIG_META;
+    const meta = getContext().configMeta;
+    const masterCount = Math.round(meta[M.MASTER_COUNT]);
+    const masterOuts = [];
+    if(masterCount > 0) masterOuts.push(Math.round(meta[M.MASTER_0]));
+    if(masterCount > 1) masterOuts.push(Math.round(meta[M.MASTER_1]));
+
+    const values = {
+        in: {
+            fx1Return: Math.round(meta[M.FX1_RET]),
+            fx2Return: Math.round(meta[M.FX2_RET]),
+            aux1:      Math.round(meta[M.AUX1]),
+            aux2:      Math.round(meta[M.AUX2]),
+            aux3:      Math.round(meta[M.AUX3]),
+            aux4:      Math.round(meta[M.AUX4])
+        },
+        out: {
+            master:  masterOuts,
+            fx1Send: Math.round(meta[M.FX1_SEND]),
+            fx2Send: Math.round(meta[M.FX2_SEND]),
+            vuSub:   Math.round(meta[M.VU_SUB]),
+            vuKick:  Math.round(meta[M.VU_KICK]),
+            vuMid:   Math.round(meta[M.VU_MID]),
+            vuTop:   Math.round(meta[M.VU_TOP])
+        }
+    };
+
+    document.querySelectorAll('.ri').forEach(inp => {
+        const dir = inp.dataset.dir;
+        const key = inp.dataset.key;
+        const raw = values[dir] && values[dir][key];
+        if(raw === undefined) return;
+        inp.value = formatRoutingValue(raw, key === 'master');
+    });
+    updateMappingConflicts();
+}
+
+/** Reads routing.in / routing.out from the Mapping form (stable key order). */
+export function collectRoutingFromForm() {
+    const readKey = (dir, key) => {
+        const inp = document.querySelector(`.ri[data-dir="${dir}"][data-key="${key}"]`);
+        const parsed = parseRoutingInput(inp);
+        if(parsed === null) return undefined;
+        if(key === 'master')
+            return Array.isArray(parsed) ? parsed : [parsed];
+        return parsed;
+    };
+
+    const out = {};
+    ROUTING_OUT_KEYS.forEach(key => {
+        const val = readKey('out', key);
+        if(val !== undefined) out[key] = val;
+    });
+
+    const inn = {};
+    ROUTING_IN_KEYS.forEach(key => {
+        const val = readKey('in', key);
+        if(val !== undefined) inn[key] = val;
+    });
+
+    return { out, in: inn };
+}
 
 export function tryBuildMappingTable() {
     if(getContext().mappingBuilt || !getContext().potMapping || !getContext().switchMapping) return;
@@ -153,65 +351,99 @@ export function tryBuildMappingTable() {
 }
 
 /**
- * Highlights rows and lists groups that share the same MUX/channel (pots)
- * or port/pin (switches).
+ * Highlights rows and lists groups that share the same MUX/channel (pots),
+ * port/pin (switches), or physical audio channel (routing in/out).
  */
 export function updateMappingConflicts() {
-    if(!getContext().mappingBuilt) return;
-
-    document.querySelectorAll('#pot-tbody tr, #sw-tbody tr').forEach(tr =>
-        tr.classList.remove('dup-conflict'));
-
     const messages = [];
 
-    // Pots — duplicate MUX + channel
-    const potGroups = new Map();
-    for(let i = 0; i < POT_NAMES.length; i++) {
-        const muxInp = document.querySelector(`.pi[data-i="${i}"][data-f="mux"]`);
-        const potInp = document.querySelector(`.pi[data-i="${i}"][data-f="pot"]`);
-        if(!muxInp || !potInp) continue;
-        const mux = parseInt(muxInp.value, 10);
-        const pot = parseInt(potInp.value, 10);
-        if(isNaN(mux) || isNaN(pot)) continue;
-        const key = mux + ':' + pot;
-        if(!potGroups.has(key)) potGroups.set(key, []);
-        potGroups.get(key).push(i);
-    }
-    potGroups.forEach((indices, key) => {
-        if(indices.length < 2) return;
-        const parts = key.split(':');
-        const names = indices.map(i => POT_NAMES[i]).join(', ');
-        messages.push('Pot MUX ' + parts[0] + ' / channel ' + parts[1] + ' : ' + names);
-        indices.forEach(i => {
-            const inp = document.querySelector(`.pi[data-i="${i}"][data-f="mux"]`);
-            const tr  = inp && inp.closest('tr');
-            if(tr) tr.classList.add('dup-conflict');
-        });
-    });
+    document.querySelectorAll('#pot-tbody tr, #sw-tbody tr, #routing-in-tbody tr, #routing-out-tbody tr')
+        .forEach(tr => tr.classList.remove('dup-conflict'));
 
-    // Switches — duplicate port + pin
-    const swGroups = new Map();
-    for(let i = 0; i < SWITCH_NAMES.length; i++) {
-        const pinInp  = document.querySelector(`.si[data-i="${i}"][data-f="pin"]`);
-        const portInp = document.querySelector(`.si[data-i="${i}"][data-f="port"]`);
-        if(!pinInp || !portInp) continue;
-        const pin  = parseInt(pinInp.value, 10);
-        const port = parseInt(portInp.value, 10);
-        if(isNaN(pin) || isNaN(port)) continue;
-        const key = port + ':' + pin;
-        if(!swGroups.has(key)) swGroups.set(key, []);
-        swGroups.get(key).push(i);
+    if(getContext().mappingBuilt) {
+        // Pots — duplicate MUX + channel
+        const potGroups = new Map();
+        for(let i = 0; i < POT_NAMES.length; i++) {
+            const muxInp = document.querySelector(`.pi[data-i="${i}"][data-f="mux"]`);
+            const potInp = document.querySelector(`.pi[data-i="${i}"][data-f="pot"]`);
+            if(!muxInp || !potInp) continue;
+            const mux = parseInt(muxInp.value, 10);
+            const pot = parseInt(potInp.value, 10);
+            if(isNaN(mux) || isNaN(pot)) continue;
+            const key = mux + ':' + pot;
+            if(!potGroups.has(key)) potGroups.set(key, []);
+            potGroups.get(key).push(i);
+        }
+        potGroups.forEach((indices, key) => {
+            if(indices.length < 2) return;
+            const parts = key.split(':');
+            const names = indices.map(i => POT_NAMES[i]).join(', ');
+            messages.push('Pot MUX ' + parts[0] + ' / channel ' + parts[1] + ' : ' + names);
+            indices.forEach(i => {
+                const inp = document.querySelector(`.pi[data-i="${i}"][data-f="mux"]`);
+                const tr  = inp && inp.closest('tr');
+                if(tr) tr.classList.add('dup-conflict');
+            });
+        });
+
+        // Switches — duplicate port + pin
+        const swGroups = new Map();
+        for(let i = 0; i < SWITCH_NAMES.length; i++) {
+            const pinInp  = document.querySelector(`.si[data-i="${i}"][data-f="pin"]`);
+            const portInp = document.querySelector(`.si[data-i="${i}"][data-f="port"]`);
+            if(!pinInp || !portInp) continue;
+            const pin  = parseInt(pinInp.value, 10);
+            const port = parseInt(portInp.value, 10);
+            if(isNaN(pin) || isNaN(port)) continue;
+            const key = port + ':' + pin;
+            if(!swGroups.has(key)) swGroups.set(key, []);
+            swGroups.get(key).push(i);
+        }
+        swGroups.forEach((indices, key) => {
+            if(indices.length < 2) return;
+            const parts = key.split(':');
+            const portLabel = parts[0] === '1' ? 'B' : 'A';
+            const names = indices.map(i => SWITCH_NAMES[i]).join(', ');
+            messages.push('Switch port ' + portLabel + ' / pin ' + parts[1] + ' : ' + names);
+            indices.forEach(i => {
+                const inp = document.querySelector(`.si[data-i="${i}"][data-f="pin"]`);
+                const tr  = inp && inp.closest('tr');
+                if(tr) tr.classList.add('dup-conflict');
+            });
+        });
     }
-    swGroups.forEach((indices, key) => {
-        if(indices.length < 2) return;
-        const parts = key.split(':');
-        const portLabel = parts[0] === '1' ? 'B' : 'A';
-        const names = indices.map(i => SWITCH_NAMES[i]).join(', ');
-        messages.push('Switch port ' + portLabel + ' / pin ' + parts[1] + ' : ' + names);
-        indices.forEach(i => {
-            const inp = document.querySelector(`.si[data-i="${i}"][data-f="pin"]`);
-            const tr  = inp && inp.closest('tr');
-            if(tr) tr.classList.add('dup-conflict');
+
+    // Routing — duplicate physical channel within inputs or within outputs
+    ['in', 'out'].forEach(dir => {
+        const groups = new Map(); // ch → [{key, inp}]
+        document.querySelectorAll(`.ri[data-dir="${dir}"]`).forEach(inp => {
+            const parsed = parseRoutingInput(inp);
+            if(parsed === null) return;
+            const chans = Array.isArray(parsed) ? parsed : [parsed];
+            const seenInField = new Set();
+            chans.forEach(ch => {
+                if(typeof ch !== 'number' || isNaN(ch)) return;
+                if(seenInField.has(ch)) {
+                    // Duplicate inside master list (e.g. "1,1")
+                    messages.push('Routing ' + dir + ' channel ' + ch +
+                        ' : ' + inp.dataset.key + ' lists it more than once');
+                    const tr = inp.closest('tr');
+                    if(tr) tr.classList.add('dup-conflict');
+                    return;
+                }
+                seenInField.add(ch);
+                if(!groups.has(ch)) groups.set(ch, []);
+                groups.get(ch).push({key: inp.dataset.key, inp});
+            });
+        });
+        groups.forEach((entries, ch) => {
+            const keys = [...new Set(entries.map(e => e.key))];
+            if(keys.length < 2) return;
+            messages.push('Routing ' + dir + ' channel ' + ch + ' : ' + keys.join(', '));
+            entries.forEach(e => {
+                const tr = e.inp.closest('tr');
+                if(tr) tr.classList.add('dup-conflict');
+            });
         });
     });
 
@@ -564,10 +796,6 @@ export function buildConfigJsonText(pm, sm) {
     if(!getContext().configMeta) return null;
 
     const M = CONFIG_META;
-    const masterCount = Math.round(getContext().configMeta[M.MASTER_COUNT]);
-    const masterOuts  = [];
-    if(masterCount > 0) masterOuts.push(Math.round(getContext().configMeta[M.MASTER_0]));
-    if(masterCount > 1) masterOuts.push(Math.round(getContext().configMeta[M.MASTER_1]));
 
     const ignoredCount = Math.round(getContext().configMeta[M.IGNORED_COUNT]);
     const ignoredPots  = [];
@@ -593,6 +821,8 @@ export function buildConfigJsonText(pm, sm) {
         port:     sm[i*3+1] > 0.5 ? 'B' : 'A'
     }));
 
+    const routing = collectRoutingFromForm();
+
     const config = {
         _comment: 'Dub Preamp BELA GEM MULTI -- hardware mapping config. Edit this file to remap pots/switches without recompiling. Restart the Bela project to apply changes.',
         mux: { activeMux: Math.round(getContext().configMeta[M.ACTIVE_MUX]) },
@@ -605,25 +835,7 @@ export function buildConfigJsonText(pm, sm) {
             bus:        I2C_BUS,
             mcpAddress: Math.round(getContext().configMeta[M.MCP_ADDR])
         },
-        routing: {
-            out: {
-                master:  masterOuts,
-                fx1Send: Math.round(getContext().configMeta[M.FX1_SEND]),
-                fx2Send: Math.round(getContext().configMeta[M.FX2_SEND]),
-                vuSub:   Math.round(getContext().configMeta[M.VU_SUB]),
-                vuKick:  Math.round(getContext().configMeta[M.VU_KICK]),
-                vuMid:   Math.round(getContext().configMeta[M.VU_MID]),
-                vuTop:   Math.round(getContext().configMeta[M.VU_TOP])
-            },
-            in: {
-                fx1Return: Math.round(getContext().configMeta[M.FX1_RET]),
-                fx2Return: Math.round(getContext().configMeta[M.FX2_RET]),
-                aux1:      Math.round(getContext().configMeta[M.AUX1]),
-                aux2:      Math.round(getContext().configMeta[M.AUX2]),
-                aux3:      Math.round(getContext().configMeta[M.AUX3]),
-                aux4:      Math.round(getContext().configMeta[M.AUX4])
-            }
-        },
+        routing,
         pots,
         switches,
         ignoredPots
@@ -640,6 +852,19 @@ export function downloadConfigJson() {
     }
     if(!getContext().configMeta) {
         showDownloadStatus('Config metadata not received', true);
+        return;
+    }
+
+    const routing = collectRoutingFromForm();
+    const expectedIn  = ROUTING_IN_KEYS.length;
+    const expectedOut = ROUTING_OUT_KEYS.length;
+    if(Object.keys(routing.in).length !== expectedIn ||
+       Object.keys(routing.out).length !== expectedOut) {
+        showDownloadStatus('Invalid routing channels — check the form', true);
+        return;
+    }
+    if(!Array.isArray(routing.out.master) || routing.out.master.length < 1) {
+        showDownloadStatus('Master needs at least one output channel', true);
         return;
     }
 
