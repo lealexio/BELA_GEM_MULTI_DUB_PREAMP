@@ -252,10 +252,10 @@ letter-spacing:.04em;line-height:1.2;
 /* --- Meters (canvas VU, horizontal) --- */
 #meters-wrap{display:flex;flex-direction:column;gap:8px}
 .meters-columns{
-display:grid;grid-template-columns:1fr;
-gap:12px;align-items:start;
+display:flex;flex-wrap:wrap;
+gap:12px;align-items:flex-start;
 }
-.meters-card{min-width:0}
+.meters-card{min-width:0;flex:1 1 280px}
 .meter-group{
 display:flex;flex-direction:column;gap:12px;
 align-items:stretch;padding:12px 2px 8px;
@@ -268,7 +268,7 @@ padding-top:18px;
 .meter-id{
 display:flex;flex-direction:column;gap:2px;
 min-width:40px;flex-shrink:0;
-align-items:flex-end;text-align:right;
+align-items:flex-start;text-align:left;
 }
 .meter-wrap{
 position:relative;flex:1 1 0;min-width:0;
@@ -288,11 +288,11 @@ transition:left 60ms linear,opacity 120ms ease;
 }
 .meter-lbl{
 font-size:9px;font-weight:700;color:#555;
-text-align:right;letter-spacing:.03em;
+text-align:left;letter-spacing:.03em;
 }
 .meter-db{
 font-size:9px;color:#888;font-family:monospace;
-text-align:right;line-height:1.2;
+text-align:left;line-height:1.2;
 transition:color 120ms ease;
 }
 .meter-db.clip{color:#ff3b2a;font-weight:700}
@@ -457,9 +457,6 @@ white-space:nowrap;text-overflow:ellipsis;overflow:hidden;
 .mtable th,.mtable td{padding-left:4px;padding-right:4px}
 .mtable th{font-size:9px}
 .mtable input[type=number],.mtable select{font-size:11px}
-}
-@media(min-width:720px){
-.meters-columns{grid-template-columns:1fr 1fr}
 }
 @media(min-width:860px){
 .meter-wrap{max-width:320px;height:48px}

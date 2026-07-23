@@ -453,9 +453,9 @@ export function buildMetersPane() {
             mwrap.appendChild(cnv);
             mwrap.appendChild(peakDb);
 
-            ch.appendChild(mid);
             ch.appendChild(mwrap);
             ch.appendChild(clipLed);
+            ch.appendChild(mid);
             row.appendChild(ch);
         });
 
