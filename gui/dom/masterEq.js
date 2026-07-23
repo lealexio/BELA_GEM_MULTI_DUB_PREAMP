@@ -437,5 +437,6 @@ export function buildMasterEqPane() {
     pane.appendChild(card);
 
     computeMasterCurve(getContext().potValues, getContext().switchStates);
+
     return pane;
 }

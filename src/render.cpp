@@ -28,6 +28,7 @@ ChannelStrip    gChannelStrip;   // IN0 → master (CH1)
 ChannelStrip    gChannelStrip2;  // IN1 → master (CH2)
 ChannelStrip    gChannelStrip3;  // IN2 → master (AUX3)
 ChannelStrip    gChannelStrip4;  // IN3 → master (AUX4)
+
 MasterFx        gMasterFx;
 DubSiren        gDubSiren;
 AuxiliaryTask   gI2cTask;
@@ -403,6 +404,47 @@ bool setup(BelaContext* context, void* userData) {
     fillConfigMetaBuf();
 
     gGui.setup(context->projectName);
+
+    // Real-time codec gain control from the GUI.
+    // Receives JSON sent by Bela.control.send() on the gui_control WebSocket.
+    // Runs on the seasocks thread (non-RT) — safe to call Bela_set*() codec APIs.
+    //
+    // Supported messages (all require { event: 'custom' }):
+    //   { hp1Gain: N }           — headphone output 1 level, range [-63, 0] dB
+    //   { inputGain: N, channel: C } — ADC PGA gain for channel C, range [0, 59] dB
+    gGui.setControlDataCallback([](JSONObject& root, void*) -> bool {
+        if (root.find(L"event") == root.end() ||
+            !root[L"event"]->IsString() ||
+            root[L"event"]->AsString() != L"custom")
+            return true;
+
+        // Headphone output gain
+        if (root.find(L"hp1Gain") != root.end() &&
+            root[L"hp1Gain"]->IsNumber())
+        {
+            float gain = (float)root[L"hp1Gain"]->AsNumber();
+            gain = std::max(-63.0f, std::min(0.0f, gain));
+            Bela_setHpLevel(1, gain);
+            rt_printf("[GUI] MASTER → %.1f dB\n", gain);
+        }
+
+        // ADC input PGA gain — codec supports [-12, 59.5] dB.
+        if (root.find(L"inputGain") != root.end() &&
+            root[L"inputGain"]->IsNumber() &&
+            root.find(L"channel") != root.end() &&
+            root[L"channel"]->IsNumber())
+        {
+            int   ch   = (int)root[L"channel"]->AsNumber();
+            float gain = (float)root[L"inputGain"]->AsNumber();
+            gain = std::max(-12.0f, std::min(10.0f, gain));
+            if (ch >= 0 && ch <= 9) {
+                Bela_setAudioInputGain(ch, gain);
+                rt_printf("[GUI] Input ch %d → %.1f dB\n", ch, gain);
+            }
+        }
+
+        return true; // let the default handler process connection-reply etc.
+    }, nullptr);
     // -----------------------------------------------------------------------
 
     return true;

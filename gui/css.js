@@ -486,6 +486,45 @@ border-radius:6px;background:#fafafa;
 @media(min-width:720px){
 #master-eq-canvas{height:320px;min-height:320px}
 }
+
+/* --- Codec gain test card --- */
+.codec-gain-notice{
+font-size:11px;color:#888;margin-bottom:12px;line-height:1.45;
+}
+.codec-gain-row{
+display:flex;align-items:center;gap:14px;margin-bottom:10px;
+}
+.codec-gain-label{
+font-size:12px;font-weight:600;color:#3a3a44;white-space:nowrap;
+}
+.codec-gain-picker{
+display:flex;align-items:stretch;
+border:1px solid #ccc;border-radius:4px;overflow:hidden;
+}
+.codec-gain-btn{
+padding:6px 14px;background:#f0f0f2;border:none;
+font-size:18px;font-weight:700;color:#333;cursor:pointer;
+line-height:1;transition:background .1s;
+}
+.codec-gain-btn:hover{background:#e0e0e4}
+.codec-gain-btn:active{background:#d0d0d6}
+.codec-gain-btn:disabled{color:#bbb;cursor:default;background:#f8f8f8}
+.codec-gain-val{
+width:54px;text-align:center;
+font-family:monospace;font-size:15px;font-weight:700;
+border:none;
+border-left:1px solid #ccc;border-right:1px solid #ccc;
+padding:6px 4px;background:#fff;color:#1a1a2e;
+}
+.codec-gain-section{
+font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;
+color:#888;margin:10px 0 4px;padding-bottom:2px;border-bottom:1px solid #e8e8ec;
+}
+.codec-gain-status{
+font-size:11px;color:#999;margin-top:10px;line-height:1.4;
+}
+.codec-gain-status.ok{color:#27ae60;font-weight:600}
+.codec-gain-status.err{color:#e74c3c;font-weight:600}
     `;
     document.head.appendChild(s);
 }

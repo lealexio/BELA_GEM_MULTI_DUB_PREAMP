@@ -804,6 +804,45 @@ border-radius:6px;background:#fafafa;
 @media(min-width:720px){
 #master-eq-canvas{height:320px;min-height:320px}
 }
+
+/* --- Codec gain test card --- */
+.codec-gain-notice{
+font-size:11px;color:#888;margin-bottom:12px;line-height:1.45;
+}
+.codec-gain-row{
+display:flex;align-items:center;gap:14px;margin-bottom:10px;
+}
+.codec-gain-label{
+font-size:12px;font-weight:600;color:#3a3a44;white-space:nowrap;
+}
+.codec-gain-picker{
+display:flex;align-items:stretch;
+border:1px solid #ccc;border-radius:4px;overflow:hidden;
+}
+.codec-gain-btn{
+padding:6px 14px;background:#f0f0f2;border:none;
+font-size:18px;font-weight:700;color:#333;cursor:pointer;
+line-height:1;transition:background .1s;
+}
+.codec-gain-btn:hover{background:#e0e0e4}
+.codec-gain-btn:active{background:#d0d0d6}
+.codec-gain-btn:disabled{color:#bbb;cursor:default;background:#f8f8f8}
+.codec-gain-val{
+width:54px;text-align:center;
+font-family:monospace;font-size:15px;font-weight:700;
+border:none;
+border-left:1px solid #ccc;border-right:1px solid #ccc;
+padding:6px 4px;background:#fff;color:#1a1a2e;
+}
+.codec-gain-section{
+font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;
+color:#888;margin:10px 0 4px;padding-bottom:2px;border-bottom:1px solid #e8e8ec;
+}
+.codec-gain-status{
+font-size:11px;color:#999;margin-top:10px;line-height:1.4;
+}
+.codec-gain-status.ok{color:#27ae60;font-weight:600}
+.codec-gain-status.err{color:#e74c3c;font-weight:600}
     `;
     document.head.appendChild(s);
   }
@@ -1593,6 +1632,123 @@ border-radius:6px;background:#fafafa;
   }
 
   // gui/dom/meters.js
+  var _codecGains = {
+    hp: 0,
+    input: [0, 0, 0, 0]
+    // AUX1 (ch0), AUX2 (ch1), AUX3 (ch2), AUX4 (ch3)
+  };
+  var INPUT_CHANNELS = [
+    { ch: 0, label: "AUX1 (IN0)" },
+    { ch: 1, label: "AUX2 (IN1)" },
+    { ch: 2, label: "AUX3 (IN2)" },
+    { ch: 3, label: "AUX4 (IN3)" }
+  ];
+  var INPUT_GAIN_MIN = -12;
+  var INPUT_GAIN_MAX = 10;
+  var INPUT_GAIN_STEP = 1;
+  var HP_GAIN_MIN = -63;
+  var HP_GAIN_MAX = 0;
+  var HP_GAIN_STEP = 1;
+  function _belaControlReady() {
+    return typeof Bela !== "undefined" && Bela.control && Bela.control.ws && Bela.control.ws.readyState === 1;
+  }
+  function _sendGain(payload, desc, statusEl) {
+    if (!_belaControlReady()) {
+      statusEl.textContent = "Bela.control not connected \u2014 make sure the project is running";
+      statusEl.className = "codec-gain-status err";
+      return;
+    }
+    Bela.control.send(payload);
+    statusEl.textContent = `Real-time: ${desc} (applied immediately, no restart)`;
+    statusEl.className = "codec-gain-status ok";
+  }
+  function _buildPickerRow(label, initVal, min, max, step, onSend, statusEl) {
+    const row = el("div", { className: "codec-gain-row" });
+    const lbl = el("span", { className: "codec-gain-label" });
+    const picker = el("span", { className: "codec-gain-picker" });
+    const btnDec = el("button", { className: "codec-gain-btn", title: `-${step} dB` });
+    const valEl = el("input", { type: "text", className: "codec-gain-val", readOnly: true });
+    const btnInc = el("button", { className: "codec-gain-btn", title: `+${step} dB` });
+    lbl.textContent = label;
+    btnDec.textContent = "\u2212";
+    btnInc.textContent = "+";
+    let current = initVal;
+    function refresh() {
+      valEl.value = String(current);
+      btnDec.disabled = current <= min;
+      btnInc.disabled = current >= max;
+    }
+    function tryChange(delta) {
+      const next = current + delta;
+      if (next < min || next > max) return;
+      current = next;
+      refresh();
+      onSend(current, statusEl);
+    }
+    btnDec.addEventListener("click", () => tryChange(-step));
+    btnInc.addEventListener("click", () => tryChange(+step));
+    picker.appendChild(btnDec);
+    picker.appendChild(valEl);
+    picker.appendChild(btnInc);
+    row.appendChild(lbl);
+    row.appendChild(picker);
+    refresh();
+    return row;
+  }
+  function buildCodecGainCard() {
+    const card = el("div", { className: "card" });
+    card.appendChild(cardTitle("Codec Gains \u2014 real-time"));
+    const notice = el("p", { className: "codec-gain-notice" });
+    notice.textContent = "Changes are applied immediately via Bela.control. Values are volatile \u2014 they reset on project restart.";
+    card.appendChild(notice);
+    const statusEl = el("div", { className: "codec-gain-status" });
+    statusEl.textContent = "Waiting for Bela.control connection\u2026";
+    const inSection = el("div", { className: "codec-gain-section" });
+    inSection.textContent = "ADC Input PGA (-12\u201310 dB)";
+    card.appendChild(inSection);
+    INPUT_CHANNELS.forEach(({ ch, label }) => {
+      card.appendChild(_buildPickerRow(
+        label,
+        _codecGains.input[ch],
+        INPUT_GAIN_MIN,
+        INPUT_GAIN_MAX,
+        INPUT_GAIN_STEP,
+        (val, st) => {
+          _codecGains.input[ch] = val;
+          _sendGain(
+            { event: "custom", inputGain: val, channel: ch },
+            `${label} \u2192 ${val} dB`,
+            st
+          );
+        },
+        statusEl
+      ));
+    });
+    const outSection = el("div", { className: "codec-gain-section" });
+    outSection.textContent = "HP Output (-63\u20130 dB)";
+    card.appendChild(outSection);
+    card.appendChild(_buildPickerRow(
+      "MASTER (OUT 1)",
+      _codecGains.hp,
+      HP_GAIN_MIN,
+      HP_GAIN_MAX,
+      HP_GAIN_STEP,
+      (val, st) => {
+        _codecGains.hp = val;
+        _sendGain({ event: "custom", hp1Gain: val }, `MASTER (OUT 1) \u2192 ${val} dB`, st);
+      },
+      statusEl
+    ));
+    card.appendChild(statusEl);
+    const _poll = setInterval(() => {
+      if (_belaControlReady()) {
+        statusEl.textContent = "Bela.control connected \u2014 ready";
+        statusEl.className = "codec-gain-status ok";
+        clearInterval(_poll);
+      }
+    }, 1e3);
+    return card;
+  }
   function createVuMeter(canvas, config) {
     const max = config.max || 100;
     const boxCount = config.boxCount || 15;
@@ -1773,6 +1929,7 @@ border-radius:6px;background:#fafafa;
     });
     wrap.appendChild(columns);
     pane.appendChild(wrap);
+    pane.appendChild(buildCodecGainCard());
     return pane;
   }
   function levelToBarPct(raw) {

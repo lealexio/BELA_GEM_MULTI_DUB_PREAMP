@@ -1,4 +1,4 @@
-/** Canvas VU meters tab. */
+/** Canvas VU meters tab + real-time codec gain control. */
 import { getContext } from '../context.js';
 import {
     LEVEL_GROUPS, LEVEL_LABELS,
@@ -8,6 +8,184 @@ import {
     CLIP_THRESHOLD, CLIP_HOLD_MS
 } from '../config.js';
 import { el, cardTitle } from './utils.js';
+
+// ---------------------------------------------------------------------------
+// Real-time codec gain control via Bela.control WebSocket.
+//
+// Flow:  [Button] → Bela.control.send({ event:'custom', ...payload })
+//                       ↓  ws://bela:5555/gui_control
+//                   render.cpp : gGui.setControlDataCallback(...)
+//                       ↓  seasocks thread (non-RT, I2C-safe)
+//                   Bela_setHpLevel / Bela_setAudioInputGain  (written immediately)
+//
+// Supported payloads:
+//   { event:'custom', hp1Gain: N }               — MASTER (OUT 1), [-63, 0] dB
+//   { event:'custom', inputGain: N, channel: C } — ADC PGA, [-12, 10] dB
+// ---------------------------------------------------------------------------
+
+/** Codec gain state — all defaults at 0 dB (unity). */
+const _codecGains = {
+    hp:    0,
+    input: [0, 0, 0, 0],  // AUX1 (ch0), AUX2 (ch1), AUX3 (ch2), AUX4 (ch3)
+};
+
+/** Input channel descriptors — must match HardwareConfig.h audio inputs. */
+const INPUT_CHANNELS = [
+    { ch: 0, label: 'AUX1 (IN0)' },
+    { ch: 1, label: 'AUX2 (IN1)' },
+    { ch: 2, label: 'AUX3 (IN2)' },
+    { ch: 3, label: 'AUX4 (IN3)' },
+];
+
+const INPUT_GAIN_MIN  = -12;
+const INPUT_GAIN_MAX  = 10;
+const INPUT_GAIN_STEP = 1;
+const HP_GAIN_MIN     = -63;
+const HP_GAIN_MAX     = 0;
+const HP_GAIN_STEP    = 1;
+
+/** Returns true when Bela.control WebSocket is open and ready to send. */
+function _belaControlReady() {
+    /* global Bela */
+    return typeof Bela !== 'undefined' &&
+           Bela.control &&
+           Bela.control.ws &&
+           Bela.control.ws.readyState === 1; // WebSocket.OPEN
+}
+
+/**
+ * Sends a JSON payload to render.cpp via Bela.control.
+ * @param {object} payload
+ * @param {string} desc - human-readable description for status
+ * @param {Element} statusEl
+ */
+function _sendGain(payload, desc, statusEl) {
+    if (!_belaControlReady()) {
+        statusEl.textContent =
+            'Bela.control not connected — make sure the project is running';
+        statusEl.className = 'codec-gain-status err';
+        return;
+    }
+    /* global Bela */
+    Bela.control.send(payload);
+    statusEl.textContent = `Real-time: ${desc} (applied immediately, no restart)`;
+    statusEl.className   = 'codec-gain-status ok';
+}
+
+/**
+ * Builds one gain-picker row: label [−] value [+].
+ * Calls onSend(newVal, statusEl) whenever the value changes.
+ */
+function _buildPickerRow(label, initVal, min, max, step, onSend, statusEl) {
+    const row    = el('div',    {className: 'codec-gain-row'});
+    const lbl    = el('span',   {className: 'codec-gain-label'});
+    const picker = el('span',   {className: 'codec-gain-picker'});
+    const btnDec = el('button', {className: 'codec-gain-btn', title: `-${step} dB`});
+    const valEl  = el('input',  {type: 'text', className: 'codec-gain-val', readOnly: true});
+    const btnInc = el('button', {className: 'codec-gain-btn', title: `+${step} dB`});
+
+    lbl.textContent    = label;
+    btnDec.textContent = '−';
+    btnInc.textContent = '+';
+
+    let current = initVal;
+
+    function refresh() {
+        valEl.value     = String(current);
+        btnDec.disabled = (current <= min);
+        btnInc.disabled = (current >= max);
+    }
+
+    function tryChange(delta) {
+        const next = current + delta;
+        if (next < min || next > max) return;
+        current = next;
+        refresh();
+        onSend(current, statusEl);
+    }
+
+    btnDec.addEventListener('click', () => tryChange(-step));
+    btnInc.addEventListener('click', () => tryChange(+step));
+
+    picker.appendChild(btnDec);
+    picker.appendChild(valEl);
+    picker.appendChild(btnInc);
+    row.appendChild(lbl);
+    row.appendChild(picker);
+
+    refresh();
+    return row;
+}
+
+/**
+ * Builds the unified Codec Gains card.
+ * Sections: ADC input PGA (AUX1–4) and HP output (MASTER OUT 1).
+ * Uses Bela.control WebSocket — no project restart required.
+ */
+function buildCodecGainCard() {
+    const card = el('div', {className: 'card'});
+    card.appendChild(cardTitle('Codec Gains — real-time'));
+
+    const notice = el('p', {className: 'codec-gain-notice'});
+    notice.textContent =
+        'Changes are applied immediately via Bela.control. ' +
+        'Values are volatile — they reset on project restart.';
+    card.appendChild(notice);
+
+    const statusEl = el('div', {className: 'codec-gain-status'});
+    statusEl.textContent = 'Waiting for Bela.control connection…';
+
+    // --- Input section ---
+    const inSection = el('div', {className: 'codec-gain-section'});
+    inSection.textContent = 'ADC Input PGA (-12–10 dB)';
+    card.appendChild(inSection);
+
+    INPUT_CHANNELS.forEach(({ch, label}) => {
+        card.appendChild(_buildPickerRow(
+            label,
+            _codecGains.input[ch],
+            INPUT_GAIN_MIN, INPUT_GAIN_MAX, INPUT_GAIN_STEP,
+            (val, st) => {
+                _codecGains.input[ch] = val;
+                _sendGain(
+                    { event: 'custom', inputGain: val, channel: ch },
+                    `${label} → ${val} dB`,
+                    st
+                );
+            },
+            statusEl
+        ));
+    });
+
+    // --- Output section ---
+    const outSection = el('div', {className: 'codec-gain-section'});
+    outSection.textContent = 'HP Output (-63–0 dB)';
+    card.appendChild(outSection);
+
+    card.appendChild(_buildPickerRow(
+        'MASTER (OUT 1)',
+        _codecGains.hp,
+        HP_GAIN_MIN, HP_GAIN_MAX, HP_GAIN_STEP,
+        (val, st) => {
+            _codecGains.hp = val;
+            _sendGain({ event: 'custom', hp1Gain: val }, `MASTER (OUT 1) → ${val} dB`, st);
+        },
+        statusEl
+    ));
+
+    card.appendChild(statusEl);
+
+    // Poll until Bela.control is ready
+    const _poll = setInterval(() => {
+        if (_belaControlReady()) {
+            statusEl.textContent = 'Bela.control connected — ready';
+            statusEl.className   = 'codec-gain-status ok';
+            clearInterval(_poll);
+        }
+    }, 1000);
+
+    return card;
+}
 
 export function createVuMeter(canvas, config) {
     const max            = config.max || 100;
@@ -234,6 +412,7 @@ export function buildMetersPane() {
 
     wrap.appendChild(columns);
     pane.appendChild(wrap);
+    pane.appendChild(buildCodecGainCard());
     return pane;
 }
 
