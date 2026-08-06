@@ -180,7 +180,7 @@ export const VU_BOX_COUNT_YELLOW = 6;
 export const VU_BOX_GAP_FRACTION = 0.25;
 export const VU_MAX              = 100;
 export const VU_CANVAS_W         = 300;
-export const VU_CANVAS_H         = 28;
+export const VU_CANVAS_H         = 26;
 /** dB scale tick labels under each VU bar (-60 floor … 0). */
 export const VU_SCALE_TICKS      = [-60, -40, -20, -6, 0];
 export const MAX_CONSOLE         = 10;
