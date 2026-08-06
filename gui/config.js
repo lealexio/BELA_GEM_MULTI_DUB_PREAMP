@@ -1,6 +1,13 @@
 /**
  * GUI constants — must match render.cpp / HardwareConfig.h / SoftwareConfig.h.
  */
+
+/** Tab indices — must match shell.js tab bar order. */
+export const TAB_LIVE      = 0;
+export const TAB_CONSOLE   = 1;
+export const TAB_MASTER_EQ = 2;
+export const TAB_MAPPING   = 3;
+
 /** Minimum pot travel (0–1) required to accept a detect hit. */
 export const DETECT_POT_MIN_DELTA = 0.25;
 
@@ -173,7 +180,7 @@ export const VU_BOX_COUNT_YELLOW = 6;
 export const VU_BOX_GAP_FRACTION = 0.25;
 export const VU_MAX              = 100;
 export const VU_CANVAS_W         = 300;
-export const VU_CANVAS_H         = 50;
+export const VU_CANVAS_H         = 28;
 /** dB scale tick labels under each VU bar (-60 floor … 0). */
 export const VU_SCALE_TICKS      = [-60, -40, -20, -6, 0];
 export const MAX_CONSOLE         = 10;

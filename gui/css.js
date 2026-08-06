@@ -261,42 +261,45 @@ letter-spacing:.04em;line-height:1.2;
 }
 
 /* --- Meters (canvas VU, horizontal) --- */
-#meters-wrap{display:flex;flex-direction:column;gap:8px}
+#meters-wrap{display:flex;flex-direction:column;gap:8px;margin-top:8px}
 .meters-columns{
 display:grid;
-grid-template-columns:repeat(auto-fit,minmax(320px,1fr));
-gap:12px;align-items:flex-start;
+grid-template-columns:repeat(auto-fit,minmax(280px,1fr));
+gap:10px;align-items:stretch;
 }
-.meters-card{min-width:0}
+.meters-card{
+min-width:0;height:100%;margin-bottom:0;
+display:flex;flex-direction:column;box-sizing:border-box;
+}
 .meter-group{
-display:flex;flex-direction:column;gap:12px;
-align-items:stretch;padding:12px 2px 8px;
+display:flex;flex-direction:column;gap:6px;
+align-items:stretch;padding:6px 2px 4px;flex:1;
 }
 .meter-ch{
 display:flex;flex-direction:row;align-items:center;gap:6px;
 width:100%;min-width:0;
-padding-top:18px;
+padding-top:12px;
 }
 .meter-id{
 display:flex;flex-direction:column;gap:1px;
-min-width:56px;flex-shrink:0;
+min-width:52px;flex-shrink:0;
 align-items:flex-start;text-align:left;
 }
 .meter-strip{
 display:flex;flex-direction:row;align-items:stretch;
-flex:1 1 0;min-width:0;gap:0;
+flex:1 1 0;min-width:0;max-width:380px;gap:0;
 }
 .meter-body{
-display:flex;flex-direction:column;gap:2px;
+display:flex;flex-direction:column;gap:1px;
 flex:1 1 0;min-width:0;width:100%;
 }
 .meter-wrap{
 position:relative;flex:1 1 0;min-width:0;
-width:100%;height:50px;margin-bottom:0;
+width:100%;height:28px;margin-bottom:0;
 cursor:pointer;
 }
 .meter-canvas{
-display:block;width:100%;height:50px;
+display:block;width:100%;height:28px;
 border-radius:0;
 }
 .meter-scale{
@@ -306,7 +309,7 @@ font-size:7px;font-family:monospace;color:#999;
 line-height:1;user-select:none;pointer-events:none;
 }
 .meter-peak-db{
-position:absolute;top:-15px;left:0;
+position:absolute;top:-12px;left:0;
 font-size:8px;font-family:monospace;color:#555;
 transform:translateX(-50%);
 white-space:nowrap;pointer-events:none;
@@ -314,17 +317,17 @@ opacity:0;
 transition:left 60ms linear,opacity 120ms ease;
 }
 .meter-lbl{
-font-size:11px;font-weight:700;color:#555;
+font-size:10px;font-weight:700;color:#555;
 text-align:left;letter-spacing:.03em;
 }
 .meter-gain-val{
-font-size:13px;font-family:monospace;font-weight:700;
-color:#1a1a2e;line-height:1.25;
+font-size:12px;font-family:monospace;font-weight:700;
+color:#1a1a2e;line-height:1.2;
 }
 .meter-peak-db.clip{color:#ff3b2a;font-weight:700}
 .meter-clip-led{
 position:relative;flex:0 0 auto;
-width:12px;height:12px;
+width:10px;height:10px;
 align-self:center;
 }
 .meter-clip-led__bezel{
@@ -349,13 +352,13 @@ box-shadow:inset 0 1px 2px rgba(255,255,255,.18),0 0 6px rgba(255,59,42,.35);
 /* Gain ± flush with VU bar (same height as canvas row) */
 .meter-gain-btn{
 flex:0 0 auto;align-self:flex-start;
-width:28px;height:50px;padding:0;margin:0;
+width:22px;height:28px;padding:0;margin:0;
 border:none;background:#202020;color:#c8c8c8;
-font-size:16px;font-weight:700;line-height:1;cursor:pointer;
+font-size:14px;font-weight:700;line-height:1;cursor:pointer;
 transition:background .1s,color .1s;
 }
-.meter-gain-btn--dec{border-radius:4px 0 0 4px}
-.meter-gain-btn--inc{border-radius:0 4px 4px 0}
+.meter-gain-btn--dec{border-radius:3px 0 0 3px}
+.meter-gain-btn--inc{border-radius:0 3px 3px 0}
 .meter-gain-btn:hover{background:#2e2e2e;color:#fff}
 .meter-gain-btn:active{background:#3a3a3a}
 .meter-gain-btn:disabled{color:#555;cursor:default;background:#1a1a1a}
@@ -507,13 +510,25 @@ white-space:nowrap;text-overflow:ellipsis;overflow:hidden;
 /* --- Responsive --- */
 @media(min-width:580px){
 #tab-content{padding:18px}
-#live-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+#live-grid{
+display:grid;grid-template-columns:1fr 1fr;gap:12px;
+align-items:stretch;margin-bottom:12px;
+}
+#live-grid > .card{
+height:100%;margin-bottom:0;
+display:flex;flex-direction:column;box-sizing:border-box;
+}
+#live-grid #siren-body,
+#live-grid #mic-inputs-card .mic-live-list{
+flex:1;
+}
 }
 
 /* --- Live mic inputs --- */
 #mic-inputs-card{
 margin:0;
 max-width:100%;
+display:flex;flex-direction:column;
 }
 .mic-live-note{
 font-size:11px;color:#666;line-height:1.35;margin-bottom:6px;
@@ -579,11 +594,6 @@ font-size:12px;background:#fff;
 .mtable th,.mtable td{padding-left:4px;padding-right:4px}
 .mtable th{font-size:9px}
 .mtable input[type=number],.mtable select{font-size:11px}
-}
-@media(min-width:860px){
-.meter-wrap{height:52px}
-.meter-canvas{height:52px}
-.meter-gain-btn{height:52px}
 }
 
 /* --- Master EQ curve --- */

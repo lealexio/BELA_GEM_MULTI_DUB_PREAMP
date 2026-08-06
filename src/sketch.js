@@ -43,6 +43,9 @@ var __belaPreampSketch = (() => {
   });
 
   // gui/config.js
+  var TAB_LIVE = 0;
+  var TAB_MASTER_EQ = 2;
+  var TAB_MAPPING = 3;
   var DETECT_POT_MIN_DELTA = 0.25;
   var MUX_POTS_PER_MUX = 16;
   var MUX_RAW_SIZE = 64;
@@ -252,7 +255,7 @@ var __belaPreampSketch = (() => {
   var VU_BOX_GAP_FRACTION = 0.25;
   var VU_MAX = 100;
   var VU_CANVAS_W = 300;
-  var VU_CANVAS_H = 50;
+  var VU_CANVAS_H = 28;
   var VU_SCALE_TICKS = [-60, -40, -20, -6, 0];
   var MAX_CONSOLE = 10;
   var ROUTING_KEY_TO_BUFFER3 = {
@@ -632,42 +635,45 @@ letter-spacing:.04em;line-height:1.2;
 }
 
 /* --- Meters (canvas VU, horizontal) --- */
-#meters-wrap{display:flex;flex-direction:column;gap:8px}
+#meters-wrap{display:flex;flex-direction:column;gap:8px;margin-top:8px}
 .meters-columns{
 display:grid;
-grid-template-columns:repeat(auto-fit,minmax(320px,1fr));
-gap:12px;align-items:flex-start;
+grid-template-columns:repeat(auto-fit,minmax(280px,1fr));
+gap:10px;align-items:stretch;
 }
-.meters-card{min-width:0}
+.meters-card{
+min-width:0;height:100%;margin-bottom:0;
+display:flex;flex-direction:column;box-sizing:border-box;
+}
 .meter-group{
-display:flex;flex-direction:column;gap:12px;
-align-items:stretch;padding:12px 2px 8px;
+display:flex;flex-direction:column;gap:6px;
+align-items:stretch;padding:6px 2px 4px;flex:1;
 }
 .meter-ch{
 display:flex;flex-direction:row;align-items:center;gap:6px;
 width:100%;min-width:0;
-padding-top:18px;
+padding-top:12px;
 }
 .meter-id{
 display:flex;flex-direction:column;gap:1px;
-min-width:56px;flex-shrink:0;
+min-width:52px;flex-shrink:0;
 align-items:flex-start;text-align:left;
 }
 .meter-strip{
 display:flex;flex-direction:row;align-items:stretch;
-flex:1 1 0;min-width:0;gap:0;
+flex:1 1 0;min-width:0;max-width:380px;gap:0;
 }
 .meter-body{
-display:flex;flex-direction:column;gap:2px;
+display:flex;flex-direction:column;gap:1px;
 flex:1 1 0;min-width:0;width:100%;
 }
 .meter-wrap{
 position:relative;flex:1 1 0;min-width:0;
-width:100%;height:50px;margin-bottom:0;
+width:100%;height:28px;margin-bottom:0;
 cursor:pointer;
 }
 .meter-canvas{
-display:block;width:100%;height:50px;
+display:block;width:100%;height:28px;
 border-radius:0;
 }
 .meter-scale{
@@ -677,7 +683,7 @@ font-size:7px;font-family:monospace;color:#999;
 line-height:1;user-select:none;pointer-events:none;
 }
 .meter-peak-db{
-position:absolute;top:-15px;left:0;
+position:absolute;top:-12px;left:0;
 font-size:8px;font-family:monospace;color:#555;
 transform:translateX(-50%);
 white-space:nowrap;pointer-events:none;
@@ -685,17 +691,17 @@ opacity:0;
 transition:left 60ms linear,opacity 120ms ease;
 }
 .meter-lbl{
-font-size:11px;font-weight:700;color:#555;
+font-size:10px;font-weight:700;color:#555;
 text-align:left;letter-spacing:.03em;
 }
 .meter-gain-val{
-font-size:13px;font-family:monospace;font-weight:700;
-color:#1a1a2e;line-height:1.25;
+font-size:12px;font-family:monospace;font-weight:700;
+color:#1a1a2e;line-height:1.2;
 }
 .meter-peak-db.clip{color:#ff3b2a;font-weight:700}
 .meter-clip-led{
 position:relative;flex:0 0 auto;
-width:12px;height:12px;
+width:10px;height:10px;
 align-self:center;
 }
 .meter-clip-led__bezel{
@@ -720,13 +726,13 @@ box-shadow:inset 0 1px 2px rgba(255,255,255,.18),0 0 6px rgba(255,59,42,.35);
 /* Gain \xB1 flush with VU bar (same height as canvas row) */
 .meter-gain-btn{
 flex:0 0 auto;align-self:flex-start;
-width:28px;height:50px;padding:0;margin:0;
+width:22px;height:28px;padding:0;margin:0;
 border:none;background:#202020;color:#c8c8c8;
-font-size:16px;font-weight:700;line-height:1;cursor:pointer;
+font-size:14px;font-weight:700;line-height:1;cursor:pointer;
 transition:background .1s,color .1s;
 }
-.meter-gain-btn--dec{border-radius:4px 0 0 4px}
-.meter-gain-btn--inc{border-radius:0 4px 4px 0}
+.meter-gain-btn--dec{border-radius:3px 0 0 3px}
+.meter-gain-btn--inc{border-radius:0 3px 3px 0}
 .meter-gain-btn:hover{background:#2e2e2e;color:#fff}
 .meter-gain-btn:active{background:#3a3a3a}
 .meter-gain-btn:disabled{color:#555;cursor:default;background:#1a1a1a}
@@ -878,13 +884,25 @@ white-space:nowrap;text-overflow:ellipsis;overflow:hidden;
 /* --- Responsive --- */
 @media(min-width:580px){
 #tab-content{padding:18px}
-#live-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+#live-grid{
+display:grid;grid-template-columns:1fr 1fr;gap:12px;
+align-items:stretch;margin-bottom:12px;
+}
+#live-grid > .card{
+height:100%;margin-bottom:0;
+display:flex;flex-direction:column;box-sizing:border-box;
+}
+#live-grid #siren-body,
+#live-grid #mic-inputs-card .mic-live-list{
+flex:1;
+}
 }
 
 /* --- Live mic inputs --- */
 #mic-inputs-card{
 margin:0;
 max-width:100%;
+display:flex;flex-direction:column;
 }
 .mic-live-note{
 font-size:11px;color:#666;line-height:1.35;margin-bottom:6px;
@@ -950,11 +968,6 @@ font-size:12px;background:#fff;
 .mtable th,.mtable td{padding-left:4px;padding-right:4px}
 .mtable th{font-size:9px}
 .mtable input[type=number],.mtable select{font-size:11px}
-}
-@media(min-width:860px){
-.meter-wrap{height:52px}
-.meter-canvas{height:52px}
-.meter-gain-btn{height:52px}
 }
 
 /* --- Master EQ curve --- */
@@ -1063,6 +1076,595 @@ border-radius:6px;background:#fafafa;
       }
     }
   };
+
+  // gui/dom/meters.js
+  var INPUT_GAIN_MIN = -12;
+  var INPUT_GAIN_MAX = 10;
+  var INPUT_GAIN_STEP = 1;
+  var HP_GAIN_MIN = -63;
+  var HP_GAIN_MAX = 0;
+  var HP_GAIN_STEP = 1;
+  var METER_COUNT = 13;
+  var _inputPickers = new Array(10).fill(null);
+  var _outputPickers = new Array(10).fill(null);
+  function _belaControlReady() {
+    return typeof Bela !== "undefined" && Bela.control && Bela.control.ws && Bela.control.ws.readyState === 1;
+  }
+  function _sendGain(payload) {
+    if (!_belaControlReady()) return;
+    Bela.control.send(payload);
+  }
+  function _buildMeterGainControls(initVal, min, max, step, onSend) {
+    const btnDec = el("button", {
+      className: "meter-gain-btn meter-gain-btn--dec",
+      title: `-${step} dB`,
+      type: "button"
+    });
+    const btnInc = el("button", {
+      className: "meter-gain-btn meter-gain-btn--inc",
+      title: `+${step} dB`,
+      type: "button"
+    });
+    const valEl = el("div", { className: "meter-gain-val" });
+    btnDec.textContent = "\u2212";
+    btnInc.textContent = "+";
+    let current = initVal;
+    function refresh() {
+      valEl.textContent = String(current) + "\u202FdB";
+      btnDec.disabled = current <= min;
+      btnInc.disabled = current >= max;
+    }
+    function tryChange(delta) {
+      const next = current + delta;
+      if (next < min || next > max) return;
+      current = next;
+      refresh();
+      onSend(current);
+    }
+    function setValue(v) {
+      const clamped = Math.round(Math.max(min, Math.min(max, v)));
+      if (clamped === current) return;
+      current = clamped;
+      refresh();
+    }
+    btnDec.addEventListener("click", (e) => {
+      e.stopPropagation();
+      tryChange(-step);
+    });
+    btnInc.addEventListener("click", (e) => {
+      e.stopPropagation();
+      tryChange(+step);
+    });
+    refresh();
+    return { btnDec, btnInc, valEl, setValue };
+  }
+  function _buildGainByBuf3(inputChannels, outputChannels) {
+    const map = {};
+    inputChannels.forEach(({ ch, label, buf3 }) => {
+      if (buf3 !== void 0)
+        map[buf3] = { kind: "input", ch, label };
+    });
+    outputChannels.forEach(({ ch, label, buf3 }) => {
+      if (buf3 !== void 0)
+        map[buf3] = { kind: "output", ch, label };
+    });
+    return map;
+  }
+  function _createInlineGain(desc) {
+    const { kind, ch, label } = desc;
+    const isInput = kind === "input";
+    const min = isInput ? INPUT_GAIN_MIN : HP_GAIN_MIN;
+    const max = isInput ? INPUT_GAIN_MAX : HP_GAIN_MAX;
+    const step = isInput ? INPUT_GAIN_STEP : HP_GAIN_STEP;
+    const controls = _buildMeterGainControls(0, min, max, step, (val) => {
+      if (isInput) {
+        _sendGain({ event: "custom", inputGain: val, channel: ch });
+      } else {
+        _sendGain({ event: "custom", hpGain: val, channel: ch });
+      }
+    });
+    controls.btnDec.title = `${label}: -${step} dB`;
+    controls.btnInc.title = `${label}: +${step} dB`;
+    controls.valEl.title = isInput ? `${label} ADC gain (\u221212\u202610 dB)` : `${label} HP gain (\u221263\u20260 dB)`;
+    if (isInput)
+      _inputPickers[ch] = controls;
+    else
+      _outputPickers[ch] = controls;
+    return controls;
+  }
+  function syncCodecGains(buf) {
+    for (let ch = 0; ch < 10; ch++) {
+      if (_inputPickers[ch]) _inputPickers[ch].setValue(buf[ch]);
+      if (_outputPickers[ch]) _outputPickers[ch].setValue(buf[10 + ch]);
+    }
+  }
+  function createVuMeter(canvas, config) {
+    const max = config.max || 100;
+    const boxCount = config.boxCount || 15;
+    const boxCountRed = config.boxCountRed || 2;
+    const boxCountYellow = config.boxCountYellow || 3;
+    const boxGapFraction = config.boxGapFraction || 0.25;
+    const redStart = boxCount - boxCountRed + 1;
+    const yellowStart = boxCount - boxCountRed - boxCountYellow + 1;
+    const redOn = "rgba(255,47,30,0.9)";
+    const redOff = "rgba(64,12,8,0.9)";
+    const yellowOn = "rgba(255,215,5,0.9)";
+    const yellowOff = "rgba(64,53,0,0.9)";
+    const greenOn = "rgba(53,255,30,0.9)";
+    const greenOff = "rgba(13,64,8,0.9)";
+    const ctx2d = canvas.getContext("2d");
+    let width = 0;
+    let height = 0;
+    let boxHeight = 0;
+    let boxGapY = 0;
+    let boxWidth = 0;
+    let boxGapX = 0;
+    let curVal = 0;
+    let curPeakVal = 0;
+    let lastLitBoxes = -1;
+    let lastPeakPx = -1;
+    let needsRedraw = true;
+    function resize() {
+      const dpr = window.devicePixelRatio || 1;
+      const rect = canvas.getBoundingClientRect();
+      const style = window.getComputedStyle(canvas);
+      let cssW = rect.width;
+      let cssH = rect.height;
+      if (cssW < 2) cssW = parseFloat(style.width) || VU_CANVAS_W;
+      if (cssH < 2) cssH = parseFloat(style.height) || VU_CANVAS_H;
+      const newW = Math.max(1, Math.round(cssW));
+      const newH = Math.max(1, Math.round(cssH));
+      const pxW = Math.round(newW * dpr);
+      const pxH = Math.round(newH * dpr);
+      if (newW === width && newH === height && canvas.width === pxW && canvas.height === pxH)
+        return;
+      width = newW;
+      height = newH;
+      canvas.width = pxW;
+      canvas.height = pxH;
+      ctx2d.setTransform(dpr, 0, 0, dpr, 0, 0);
+      boxWidth = width / (boxCount + (boxCount + 1) * boxGapFraction);
+      boxGapX = boxWidth * boxGapFraction;
+      boxHeight = Math.max(8, height - boxGapX * 2);
+      boxGapY = boxGapX;
+      needsRedraw = true;
+    }
+    function litBoxCount(val) {
+      return Math.ceil(val / max * boxCount);
+    }
+    function boxColor(id, lit) {
+      const on = id <= lit;
+      if (id >= redStart) return on ? redOn : redOff;
+      if (id >= yellowStart) return on ? yellowOn : yellowOff;
+      return on ? greenOn : greenOff;
+    }
+    function drawBoxes(lit) {
+      ctx2d.save();
+      ctx2d.translate(boxGapX, boxGapY);
+      for (let i = 0; i < boxCount; i++) {
+        const id = i + 1;
+        ctx2d.fillStyle = boxColor(id, lit);
+        ctx2d.fillRect(0, 0, boxWidth, boxHeight);
+        ctx2d.translate(boxWidth + boxGapX, 0);
+      }
+      ctx2d.restore();
+    }
+    function drawPeakIndicator(peakVal) {
+      if (peakVal < 1.5) return;
+      const innerLeft = boxGapX;
+      const innerRight = width - boxGapX;
+      const x = innerLeft + peakVal / max * (innerRight - innerLeft);
+      ctx2d.strokeStyle = "#fff";
+      ctx2d.lineWidth = 2;
+      ctx2d.beginPath();
+      ctx2d.moveTo(x, boxGapY);
+      ctx2d.lineTo(x, height - boxGapY);
+      ctx2d.stroke();
+    }
+    if (typeof ResizeObserver !== "undefined") {
+      new ResizeObserver(() => {
+        resize();
+      }).observe(canvas);
+    }
+    resize();
+    return {
+      /** Sets current level and peak-hold percentages (0–max). */
+      setTargets(level, peak) {
+        curVal = Math.max(0, Math.min(max, level));
+        curPeakVal = Math.max(0, Math.min(max, peak));
+      },
+      /** Returns peak position as 0–100 (for peak label placement). */
+      getPeakPct() {
+        return curPeakVal;
+      },
+      /** Redraws only when lit boxes or peak pixel position changed. */
+      draw() {
+        const lit = litBoxCount(curVal);
+        const peakPx = curPeakVal < 1.5 ? -1 : Math.round(curPeakVal / max * width);
+        if (!needsRedraw && lit === lastLitBoxes && peakPx === lastPeakPx)
+          return;
+        lastLitBoxes = lit;
+        lastPeakPx = peakPx;
+        needsRedraw = false;
+        ctx2d.fillStyle = "rgb(32,32,32)";
+        ctx2d.fillRect(0, 0, width, height);
+        drawBoxes(lit);
+        drawPeakIndicator(curPeakVal);
+      },
+      resize
+    };
+  }
+  function levelToBarPct(raw) {
+    const dB = raw > 32e-6 ? 20 * Math.log10(raw) : -90;
+    return (Math.max(dB, -60) + 60) / 60 * 100;
+  }
+  function levelToDbLabel(raw) {
+    const dB = raw > 32e-6 ? 20 * Math.log10(raw) : -90;
+    return dB < -80 ? "-\u221E" : dB.toFixed(1) + "\u202FdB";
+  }
+  function buildMetersSection() {
+    const wrap = el("div", { id: "meters-wrap" });
+    const columns = el("div", { className: "meters-columns" });
+    const { levelGroups, levelLabels, inputChannels, outputChannels } = buildFullRouting(ROUTING_CONFIG);
+    const gainByBuf3 = _buildGainByBuf3(inputChannels, outputChannels);
+    for (let ch = 0; ch < 10; ch++) {
+      _inputPickers[ch] = null;
+      _outputPickers[ch] = null;
+    }
+    const ctx = getContext();
+    ctx.meterVu = [];
+    ctx.meterPeakDbs = [];
+    ctx.meterClipLeds = [];
+    levelGroups.forEach((group) => {
+      const card = el("div", { className: "card meters-card" });
+      card.appendChild(cardTitle(group.label));
+      const row = el("div", { className: "meter-group" });
+      group.indices.forEach((idx) => {
+        const chRow = el("div", { className: "meter-ch" });
+        const mid = el("div", { className: "meter-id" });
+        const lbl = el("div", { className: "meter-lbl" });
+        lbl.textContent = levelLabels[idx] || String(idx);
+        mid.appendChild(lbl);
+        const gainDesc = gainByBuf3[idx];
+        const gainCtrl = gainDesc ? _createInlineGain(gainDesc) : null;
+        if (gainCtrl)
+          mid.appendChild(gainCtrl.valEl);
+        const strip = el("div", { className: "meter-strip" });
+        const body = el("div", { className: "meter-body" });
+        const mwrap = el("div", { className: "meter-wrap" });
+        mwrap.title = "Click to reset peak hold";
+        const cnv = el("canvas", { className: "meter-canvas", id: "mc-" + idx });
+        ctx.meterVu[idx] = createVuMeter(cnv, {
+          boxCount: VU_BOX_COUNT,
+          boxCountRed: VU_BOX_COUNT_RED,
+          boxCountYellow: VU_BOX_COUNT_YELLOW,
+          boxGapFraction: VU_BOX_GAP_FRACTION,
+          max: VU_MAX
+        });
+        const peakDb = el("div", { className: "meter-peak-db", id: "mpd-" + idx });
+        peakDb.style.left = "0%";
+        peakDb.textContent = "-\u221E";
+        ctx.meterPeakDbs[idx] = peakDb;
+        const clipLed = el("div", {
+          className: "meter-clip-led",
+          id: "mclip-" + idx,
+          title: "Clip (\u2265 " + (CLIP_THRESHOLD * 100).toFixed(0) + "% full scale)",
+          role: "img",
+          "aria-label": "Clip indicator off"
+        });
+        clipLed.innerHTML = '<span class="meter-clip-led__bezel"></span><span class="meter-clip-led__core"></span>';
+        ctx.meterClipLeds[idx] = clipLed;
+        mwrap.addEventListener("click", () => {
+          ctx.peakHoldLevel[idx] = 0;
+          ctx.peakHoldExpire[idx] = 0;
+        });
+        const scale = el("div", { className: "meter-scale" });
+        for (let t = 0; t < VU_SCALE_TICKS.length; t++) {
+          const tick = el("span");
+          tick.textContent = String(VU_SCALE_TICKS[t]);
+          scale.appendChild(tick);
+        }
+        mwrap.appendChild(cnv);
+        mwrap.appendChild(peakDb);
+        body.appendChild(mwrap);
+        body.appendChild(scale);
+        if (gainCtrl) {
+          strip.appendChild(gainCtrl.btnDec);
+          strip.appendChild(body);
+          strip.appendChild(gainCtrl.btnInc);
+        } else {
+          strip.appendChild(body);
+        }
+        chRow.appendChild(strip);
+        chRow.appendChild(clipLed);
+        chRow.appendChild(mid);
+        row.appendChild(chRow);
+      });
+      card.appendChild(row);
+      columns.appendChild(card);
+    });
+    wrap.appendChild(columns);
+    return wrap;
+  }
+  function startMeterAnim() {
+    if (getContext().meterAnimId != null) return;
+    function tick() {
+      const ctx = getContext();
+      if (ctx.currentTab !== TAB_LIVE) {
+        ctx.meterAnimId = null;
+        return;
+      }
+      updateMetersFrame();
+      ctx.meterAnimId = requestAnimationFrame(tick);
+    }
+    getContext().meterAnimId = requestAnimationFrame(tick);
+  }
+  function stopMeterAnim() {
+    const ctx = getContext();
+    if (ctx.meterAnimId == null) return;
+    cancelAnimationFrame(ctx.meterAnimId);
+    ctx.meterAnimId = null;
+  }
+  function updateMetersFrame() {
+    const ctx = getContext();
+    const now = performance.now();
+    for (let i = 0; i < METER_COUNT; i++) {
+      const vu = ctx.meterVu[i];
+      if (!vu) continue;
+      const raw = ctx.audioLevels[i];
+      const smooth = ctx.meterSmooth[i];
+      const coeff = raw > smooth ? METER_ATTACK : METER_RELEASE;
+      ctx.meterSmooth[i] = smooth + (raw - smooth) * coeff;
+      if (raw > ctx.peakHoldLevel[i]) {
+        ctx.peakHoldLevel[i] = raw;
+        ctx.peakHoldExpire[i] = now + PEAK_HOLD_MS;
+      } else if (now >= ctx.peakHoldExpire[i]) {
+        ctx.peakHoldLevel[i] *= PEAK_DECAY;
+      }
+      if (raw >= CLIP_THRESHOLD || ctx.peakHoldLevel[i] >= CLIP_THRESHOLD)
+        ctx.clipHoldUntil[i] = now + CLIP_HOLD_MS;
+      const clipping = now < ctx.clipHoldUntil[i];
+      const clipLed = ctx.meterClipLeds[i];
+      if (clipLed) {
+        const on = clipping;
+        if (clipLed.classList.contains("on") !== on) {
+          clipLed.classList.toggle("on", on);
+          clipLed.setAttribute(
+            "aria-label",
+            on ? "Clip indicator on" : "Clip indicator off"
+          );
+        }
+      }
+      const peakDb = ctx.meterPeakDbs[i];
+      if (peakDb)
+        peakDb.classList.toggle("clip", clipping);
+      vu.setTargets(
+        levelToBarPct(ctx.meterSmooth[i]),
+        levelToBarPct(ctx.peakHoldLevel[i])
+      );
+      vu.draw();
+      if (peakDb) {
+        const pkPct = vu.getPeakPct();
+        const peakLbl = levelToDbLabel(ctx.peakHoldLevel[i]);
+        if (peakDb.textContent !== peakLbl)
+          peakDb.textContent = peakLbl;
+        const left = pkPct.toFixed(2) + "%";
+        if (peakDb.style.left !== left)
+          peakDb.style.left = left;
+        const op = pkPct > 1.5 ? "1" : "0";
+        if (peakDb.style.opacity !== op)
+          peakDb.style.opacity = op;
+      }
+    }
+  }
+
+  // gui/dom/live.js
+  var _micRows = [null, null, null, null];
+  var _hpfDebounceTimers = [null, null, null, null];
+  var _micSyncHoldUntil = [0, 0, 0, 0];
+  var _hpfSyncHoldUntil = [0, 0, 0, 0];
+  var HPF_DEBOUNCE_MS = 150;
+  var MIC_SYNC_HOLD_MS = 2500;
+  function _holdMicSync(idx, kind) {
+    const until = Date.now() + MIC_SYNC_HOLD_MS;
+    if (kind === "mic" || kind === "both") _micSyncHoldUntil[idx] = until;
+    if (kind === "hpf" || kind === "both") _hpfSyncHoldUntil[idx] = until;
+  }
+  function _belaControlReady2() {
+    return typeof Bela !== "undefined" && Bela.control && Bela.control.ws && Bela.control.ws.readyState === 1;
+  }
+  function _sendMicControl(payload, desc, statusEl) {
+    if (!_belaControlReady2()) {
+      if (statusEl) {
+        statusEl.textContent = "Bela not connected \u2014 project must be running";
+        statusEl.className = "mic-live-status err";
+      }
+      return;
+    }
+    Bela.control.send(payload);
+    if (statusEl) {
+      statusEl.textContent = `Live: ${desc} (lost on Bela restart)`;
+      statusEl.className = "mic-live-status ok";
+    }
+  }
+  function buildLivePane() {
+    const pane = el("div", { id: "pane-live", className: "tab-pane active" });
+    const grid = el("div", { id: "live-grid" });
+    const sirenCard = el("div", { className: "card" });
+    sirenCard.appendChild(cardTitle("Siren"));
+    const sirenBody = el("div", { id: "siren-body" });
+    const hero = el("div", { id: "siren-hero" });
+    hero.innerHTML = `
+        <div id="siren-hero-top">
+            <div id="siren-name">\u2014</div>
+            <div id="siren-gate">
+                <span id="siren-gate-dot"></span>
+                <span class="gate-lbl">Gate</span>
+            </div>
+        </div>
+        <div id="siren-mod-row">
+            <span class="siren-mod-label">Mod</span>
+            <div id="siren-mod-track"><div id="siren-mod-fill"></div></div>
+            <span id="siren-mod-lbl">0%</span>
+        </div>
+    `;
+    sirenBody.appendChild(hero);
+    const presetsDiv = el("div", { id: "siren-presets" });
+    getContext().sirenPresetPills = [];
+    SIREN_PRESETS.forEach((name) => {
+      const pill = el("div", { className: "spreset" });
+      pill.textContent = name;
+      pill.title = name;
+      presetsDiv.appendChild(pill);
+      getContext().sirenPresetPills.push(pill);
+    });
+    sirenBody.appendChild(presetsDiv);
+    sirenCard.appendChild(sirenBody);
+    getContext().sirenNameEl = hero.querySelector("#siren-name");
+    getContext().sirenGateEl = hero.querySelector("#siren-gate-dot");
+    getContext().sirenModFill = hero.querySelector("#siren-mod-fill");
+    getContext().sirenModLbl = hero.querySelector("#siren-mod-lbl");
+    grid.appendChild(sirenCard);
+    grid.appendChild(buildMicInputsCard());
+    pane.appendChild(grid);
+    pane.appendChild(buildMetersSection());
+    return pane;
+  }
+  function buildMicInputsCard() {
+    const card = el("div", { className: "card", id: "mic-inputs-card" });
+    card.appendChild(cardTitle("Mic inputs"));
+    const note = el("div", { className: "mic-live-note" });
+    note.textContent = "Mic bypasses ParamEQ / filters / kills. HPF Hz cuts subs (0 = off). Live \u2014 lost on restart.";
+    card.appendChild(note);
+    const statusEl = el("div", { className: "mic-live-status" });
+    statusEl.textContent = "Waiting for Bela.control\u2026";
+    card.appendChild(statusEl);
+    getContext().micLiveStatusEl = statusEl;
+    const list = el("div", { className: "mic-live-list" });
+    for (let i = 0; i < 4; ++i) {
+      const auxN = i + 1;
+      const row = el("div", { className: "mic-live-row" });
+      const label = el("span", { className: "mic-live-label" });
+      label.textContent = "AUX" + auxN;
+      const micWrap = el("label", { className: "mic-toggle" });
+      const micCb = el("input", { type: "checkbox", className: "mic-toggle-input" });
+      micCb.title = "Mic mode";
+      const track = el("span", { className: "mic-toggle-track", "aria-hidden": "true" });
+      track.appendChild(el("span", { className: "mic-toggle-thumb" }));
+      const micLbl = el("span", { className: "mic-toggle-text" });
+      micLbl.textContent = "Mic";
+      micWrap.appendChild(micCb);
+      micWrap.appendChild(track);
+      micWrap.appendChild(micLbl);
+      const hpfWrap = el("label", { className: "mic-live-hpf" });
+      const hpfLbl = el("span");
+      hpfLbl.textContent = "HPF";
+      const hpfInp = el("input", {
+        type: "number",
+        min: String(MIC_HPF_HZ_MIN),
+        max: String(MIC_HPF_HZ_MAX),
+        step: "1",
+        value: "0"
+      });
+      hpfInp.title = "Mic HPF Hz (0 = off)";
+      const hpfUnit = el("span", { className: "mic-live-hpf-unit" });
+      hpfUnit.textContent = "Hz";
+      hpfWrap.appendChild(hpfLbl);
+      hpfWrap.appendChild(hpfInp);
+      hpfWrap.appendChild(hpfUnit);
+      micCb.addEventListener("change", () => {
+        _holdMicSync(i, "mic");
+        _sendMicControl(
+          { event: "custom", auxMic: auxN, mic: !!micCb.checked },
+          `AUX${auxN} mic ${micCb.checked ? "on" : "off"}`,
+          statusEl
+        );
+      });
+      const sendHpf = () => {
+        let hz = parseFloat(hpfInp.value);
+        if (isNaN(hz) || hz < 0) hz = 0;
+        hz = Math.min(MIC_HPF_HZ_MAX, Math.max(MIC_HPF_HZ_MIN, Math.round(hz)));
+        hpfInp.value = String(hz);
+        _holdMicSync(i, "hpf");
+        _sendMicControl(
+          { event: "custom", auxHpf: auxN, hpf: hz },
+          `AUX${auxN} HPF ${hz} Hz`,
+          statusEl
+        );
+      };
+      hpfInp.addEventListener("change", sendHpf);
+      hpfInp.addEventListener("input", () => {
+        if (_hpfDebounceTimers[i]) clearTimeout(_hpfDebounceTimers[i]);
+        _hpfDebounceTimers[i] = setTimeout(sendHpf, HPF_DEBOUNCE_MS);
+      });
+      row.appendChild(label);
+      row.appendChild(micWrap);
+      row.appendChild(hpfWrap);
+      list.appendChild(row);
+      _micRows[i] = {
+        micCb,
+        hpfInp,
+        /** Silent UI update from Bela buffer 6 (no control send). */
+        setMic(on) {
+          if (micCb.checked === !!on) return;
+          micCb.checked = !!on;
+        },
+        setHpf(hz) {
+          const n = Math.round(hz);
+          if (String(hpfInp.value) === String(n)) return;
+          if (document.activeElement === hpfInp) return;
+          hpfInp.value = String(n);
+        }
+      };
+    }
+    card.appendChild(list);
+    const poll = setInterval(() => {
+      if (_belaControlReady2()) {
+        statusEl.textContent = "Live \u2014 lost on Bela restart";
+        statusEl.className = "mic-live-status ok";
+        clearInterval(poll);
+      }
+    }, 500);
+    return card;
+  }
+  function syncMicInputs(meta) {
+    if (!meta || meta.length <= CONFIG_META.HPF_AUX4) return;
+    const M = CONFIG_META;
+    const now = Date.now();
+    const micKeys = [M.MIC_AUX1, M.MIC_AUX2, M.MIC_AUX3, M.MIC_AUX4];
+    const hpfKeys = [M.HPF_AUX1, M.HPF_AUX2, M.HPF_AUX3, M.HPF_AUX4];
+    for (let i = 0; i < 4; ++i) {
+      const row = _micRows[i];
+      if (!row) continue;
+      const remoteMic = meta[micKeys[i]] > 0.5;
+      const remoteHpf = meta[hpfKeys[i]] != null ? meta[hpfKeys[i]] : 0;
+      if (now < _micSyncHoldUntil[i]) {
+        if (row.micCb.checked === remoteMic)
+          _micSyncHoldUntil[i] = 0;
+      } else {
+        row.setMic(remoteMic);
+      }
+      if (now < _hpfSyncHoldUntil[i]) {
+        if (Math.round(Number(row.hpfInp.value)) === Math.round(remoteHpf))
+          _hpfSyncHoldUntil[i] = 0;
+      } else {
+        row.setHpf(remoteHpf);
+      }
+    }
+  }
+  function updateSiren() {
+    const idx = Math.max(0, Math.min(Math.round(getContext().sirenState[0]), SIREN_PRESETS.length - 1));
+    const gate = getContext().sirenState[1] > 0.5;
+    const mod = getContext().sirenState[2];
+    getContext().sirenPresetPills.forEach((pill, i) => {
+      const isActive = i === idx;
+      pill.className = "spreset" + (isActive ? " active" : "") + (isActive && gate ? " gate" : "");
+    });
+    if (getContext().sirenNameEl) getContext().sirenNameEl.textContent = SIREN_PRESETS[idx];
+    if (getContext().sirenGateEl) getContext().sirenGateEl.className = gate ? "on" : "";
+    if (getContext().sirenModFill) getContext().sirenModFill.style.width = (mod * 100).toFixed(1) + "%";
+    if (getContext().sirenModLbl) getContext().sirenModLbl.textContent = Math.round(mod * 100) + "%";
+  }
 
   // gui/dom/mapping.js
   var ROUTING_CH_MIN = 0;
@@ -1843,72 +2445,9 @@ border-radius:6px;background:#fafafa;
     }, 4e3);
   }
 
-  // gui/dom/live.js
-  var _micRows = [null, null, null, null];
-  var _hpfDebounceTimers = [null, null, null, null];
-  var _micSyncHoldUntil = [0, 0, 0, 0];
-  var _hpfSyncHoldUntil = [0, 0, 0, 0];
-  var HPF_DEBOUNCE_MS = 150;
-  var MIC_SYNC_HOLD_MS = 2500;
-  function _holdMicSync(idx, kind) {
-    const until = Date.now() + MIC_SYNC_HOLD_MS;
-    if (kind === "mic" || kind === "both") _micSyncHoldUntil[idx] = until;
-    if (kind === "hpf" || kind === "both") _hpfSyncHoldUntil[idx] = until;
-  }
-  function _belaControlReady() {
-    return typeof Bela !== "undefined" && Bela.control && Bela.control.ws && Bela.control.ws.readyState === 1;
-  }
-  function _sendMicControl(payload, desc, statusEl) {
-    if (!_belaControlReady()) {
-      if (statusEl) {
-        statusEl.textContent = "Bela not connected \u2014 project must be running";
-        statusEl.className = "mic-live-status err";
-      }
-      return;
-    }
-    Bela.control.send(payload);
-    if (statusEl) {
-      statusEl.textContent = `Live: ${desc} (lost on Bela restart)`;
-      statusEl.className = "mic-live-status ok";
-    }
-  }
-  function buildLivePane() {
-    const pane = el("div", { id: "pane-live", className: "tab-pane active" });
-    const grid = el("div", { id: "live-grid" });
-    const sirenCard = el("div", { className: "card" });
-    sirenCard.appendChild(cardTitle("Siren"));
-    const sirenBody = el("div", { id: "siren-body" });
-    const hero = el("div", { id: "siren-hero" });
-    hero.innerHTML = `
-        <div id="siren-hero-top">
-            <div id="siren-name">\u2014</div>
-            <div id="siren-gate">
-                <span id="siren-gate-dot"></span>
-                <span class="gate-lbl">Gate</span>
-            </div>
-        </div>
-        <div id="siren-mod-row">
-            <span class="siren-mod-label">Mod</span>
-            <div id="siren-mod-track"><div id="siren-mod-fill"></div></div>
-            <span id="siren-mod-lbl">0%</span>
-        </div>
-    `;
-    sirenBody.appendChild(hero);
-    const presetsDiv = el("div", { id: "siren-presets" });
-    getContext().sirenPresetPills = [];
-    SIREN_PRESETS.forEach((name) => {
-      const pill = el("div", { className: "spreset" });
-      pill.textContent = name;
-      pill.title = name;
-      presetsDiv.appendChild(pill);
-      getContext().sirenPresetPills.push(pill);
-    });
-    sirenBody.appendChild(presetsDiv);
-    sirenCard.appendChild(sirenBody);
-    getContext().sirenNameEl = hero.querySelector("#siren-name");
-    getContext().sirenGateEl = hero.querySelector("#siren-gate-dot");
-    getContext().sirenModFill = hero.querySelector("#siren-mod-fill");
-    getContext().sirenModLbl = hero.querySelector("#siren-mod-lbl");
+  // gui/dom/console.js
+  function buildConsolePane() {
+    const pane = el("div", { id: "pane-console", className: "tab-pane" });
     const consoleCard = el("div", { className: "card" });
     const consoleHdr = el("div", { className: "console-header" });
     consoleHdr.appendChild(cardTitle("Console \u2014 last change"));
@@ -1933,10 +2472,7 @@ border-radius:6px;background:#fafafa;
     getContext().consoleList = el("ul", { id: "console-list" });
     consoleCard.appendChild(getContext().consoleList);
     renderConsole();
-    grid.appendChild(sirenCard);
-    grid.appendChild(consoleCard);
-    grid.appendChild(buildMicInputsCard());
-    pane.appendChild(grid);
+    pane.appendChild(consoleCard);
     const swCard = el("div", { className: "card" });
     swCard.appendChild(cardTitle("Switches"));
     const swGrid = el("div", { className: "sw-grid" });
@@ -1957,128 +2493,6 @@ border-radius:6px;background:#fafafa;
     pane.appendChild(swCard);
     return pane;
   }
-  function buildMicInputsCard() {
-    const card = el("div", { className: "card", id: "mic-inputs-card" });
-    card.appendChild(cardTitle("Mic inputs"));
-    const note = el("div", { className: "mic-live-note" });
-    note.textContent = "Mic bypasses ParamEQ / filters / kills. HPF Hz cuts subs (0 = off). Live \u2014 lost on restart.";
-    card.appendChild(note);
-    const statusEl = el("div", { className: "mic-live-status" });
-    statusEl.textContent = "Waiting for Bela.control\u2026";
-    card.appendChild(statusEl);
-    getContext().micLiveStatusEl = statusEl;
-    const list = el("div", { className: "mic-live-list" });
-    for (let i = 0; i < 4; ++i) {
-      const auxN = i + 1;
-      const row = el("div", { className: "mic-live-row" });
-      const label = el("span", { className: "mic-live-label" });
-      label.textContent = "AUX" + auxN;
-      const micWrap = el("label", { className: "mic-toggle" });
-      const micCb = el("input", { type: "checkbox", className: "mic-toggle-input" });
-      micCb.title = "Mic mode";
-      const track = el("span", { className: "mic-toggle-track", "aria-hidden": "true" });
-      track.appendChild(el("span", { className: "mic-toggle-thumb" }));
-      const micLbl = el("span", { className: "mic-toggle-text" });
-      micLbl.textContent = "Mic";
-      micWrap.appendChild(micCb);
-      micWrap.appendChild(track);
-      micWrap.appendChild(micLbl);
-      const hpfWrap = el("label", { className: "mic-live-hpf" });
-      const hpfLbl = el("span");
-      hpfLbl.textContent = "HPF";
-      const hpfInp = el("input", {
-        type: "number",
-        min: String(MIC_HPF_HZ_MIN),
-        max: String(MIC_HPF_HZ_MAX),
-        step: "1",
-        value: "0"
-      });
-      hpfInp.title = "Mic HPF Hz (0 = off)";
-      const hpfUnit = el("span", { className: "mic-live-hpf-unit" });
-      hpfUnit.textContent = "Hz";
-      hpfWrap.appendChild(hpfLbl);
-      hpfWrap.appendChild(hpfInp);
-      hpfWrap.appendChild(hpfUnit);
-      micCb.addEventListener("change", () => {
-        _holdMicSync(i, "mic");
-        _sendMicControl(
-          { event: "custom", auxMic: auxN, mic: !!micCb.checked },
-          `AUX${auxN} mic ${micCb.checked ? "on" : "off"}`,
-          statusEl
-        );
-      });
-      const sendHpf = () => {
-        let hz = parseFloat(hpfInp.value);
-        if (isNaN(hz) || hz < 0) hz = 0;
-        hz = Math.min(MIC_HPF_HZ_MAX, Math.max(MIC_HPF_HZ_MIN, Math.round(hz)));
-        hpfInp.value = String(hz);
-        _holdMicSync(i, "hpf");
-        _sendMicControl(
-          { event: "custom", auxHpf: auxN, hpf: hz },
-          `AUX${auxN} HPF ${hz} Hz`,
-          statusEl
-        );
-      };
-      hpfInp.addEventListener("change", sendHpf);
-      hpfInp.addEventListener("input", () => {
-        if (_hpfDebounceTimers[i]) clearTimeout(_hpfDebounceTimers[i]);
-        _hpfDebounceTimers[i] = setTimeout(sendHpf, HPF_DEBOUNCE_MS);
-      });
-      row.appendChild(label);
-      row.appendChild(micWrap);
-      row.appendChild(hpfWrap);
-      list.appendChild(row);
-      _micRows[i] = {
-        micCb,
-        hpfInp,
-        /** Silent UI update from Bela buffer 6 (no control send). */
-        setMic(on) {
-          if (micCb.checked === !!on) return;
-          micCb.checked = !!on;
-        },
-        setHpf(hz) {
-          const n = Math.round(hz);
-          if (String(hpfInp.value) === String(n)) return;
-          if (document.activeElement === hpfInp) return;
-          hpfInp.value = String(n);
-        }
-      };
-    }
-    card.appendChild(list);
-    const poll = setInterval(() => {
-      if (_belaControlReady()) {
-        statusEl.textContent = "Live \u2014 lost on Bela restart";
-        statusEl.className = "mic-live-status ok";
-        clearInterval(poll);
-      }
-    }, 500);
-    return card;
-  }
-  function syncMicInputs(meta) {
-    if (!meta || meta.length <= CONFIG_META.HPF_AUX4) return;
-    const M = CONFIG_META;
-    const now = Date.now();
-    const micKeys = [M.MIC_AUX1, M.MIC_AUX2, M.MIC_AUX3, M.MIC_AUX4];
-    const hpfKeys = [M.HPF_AUX1, M.HPF_AUX2, M.HPF_AUX3, M.HPF_AUX4];
-    for (let i = 0; i < 4; ++i) {
-      const row = _micRows[i];
-      if (!row) continue;
-      const remoteMic = meta[micKeys[i]] > 0.5;
-      const remoteHpf = meta[hpfKeys[i]] != null ? meta[hpfKeys[i]] : 0;
-      if (now < _micSyncHoldUntil[i]) {
-        if (row.micCb.checked === remoteMic)
-          _micSyncHoldUntil[i] = 0;
-      } else {
-        row.setMic(remoteMic);
-      }
-      if (now < _hpfSyncHoldUntil[i]) {
-        if (Math.round(Number(row.hpfInp.value)) === Math.round(remoteHpf))
-          _hpfSyncHoldUntil[i] = 0;
-      } else {
-        row.setHpf(remoteHpf);
-      }
-    }
-  }
   function switchDisplayName(name) {
     if (name.indexOf("KILL_") === 0) return name.slice(5);
     if (name === "FX_FILTER_MIDS") return "FX1 MIDS";
@@ -2097,19 +2511,6 @@ border-radius:6px;background:#fafafa;
     tile.appendChild(lbl);
     getContext().switchPills[index] = tile;
     return tile;
-  }
-  function updateSiren() {
-    const idx = Math.max(0, Math.min(Math.round(getContext().sirenState[0]), SIREN_PRESETS.length - 1));
-    const gate = getContext().sirenState[1] > 0.5;
-    const mod = getContext().sirenState[2];
-    getContext().sirenPresetPills.forEach((pill, i) => {
-      const isActive = i === idx;
-      pill.className = "spreset" + (isActive ? " active" : "") + (isActive && gate ? " gate" : "");
-    });
-    if (getContext().sirenNameEl) getContext().sirenNameEl.textContent = SIREN_PRESETS[idx];
-    if (getContext().sirenGateEl) getContext().sirenGateEl.className = gate ? "on" : "";
-    if (getContext().sirenModFill) getContext().sirenModFill.style.width = (mod * 100).toFixed(1) + "%";
-    if (getContext().sirenModLbl) getContext().sirenModLbl.textContent = Math.round(mod * 100) + "%";
   }
   function syncConsolePotBaselines() {
     getContext().prevPotValues.set(getContext().potValues);
@@ -2191,402 +2592,22 @@ border-radius:6px;background:#fafafa;
   function pushConsoleEntry(entry) {
     getContext().recentChanges = getContext().recentChanges.filter((e) => e.name !== entry.name);
     getContext().recentChanges.unshift(entry);
-    if (getContext().recentChanges.length > MAX_CONSOLE) getContext().recentChanges.length = MAX_CONSOLE;
+    if (getContext().recentChanges.length > MAX_CONSOLE)
+      getContext().recentChanges.length = MAX_CONSOLE;
   }
   function renderConsole() {
     if (!getContext().consoleList) return;
     getContext().consoleList.innerHTML = "";
     for (let i = 0; i < MAX_CONSOLE; i++) {
-      getContext().consoleList.appendChild(buildConsoleRow(getContext().recentChanges[i] || null, i));
+      getContext().consoleList.appendChild(
+        buildConsoleRow(getContext().recentChanges[i] || null, i)
+      );
     }
   }
   function updateSwitches() {
     for (let i = 0; i < SWITCH_NAMES.length; i++) {
       const tile = getContext().switchPills[i];
       if (tile) tile.classList.toggle("on", getContext().switchStates[i] > 0.5);
-    }
-  }
-
-  // gui/dom/meters.js
-  var INPUT_GAIN_MIN = -12;
-  var INPUT_GAIN_MAX = 10;
-  var INPUT_GAIN_STEP = 1;
-  var HP_GAIN_MIN = -63;
-  var HP_GAIN_MAX = 0;
-  var HP_GAIN_STEP = 1;
-  var METER_COUNT = 13;
-  var _inputPickers = new Array(10).fill(null);
-  var _outputPickers = new Array(10).fill(null);
-  function _belaControlReady2() {
-    return typeof Bela !== "undefined" && Bela.control && Bela.control.ws && Bela.control.ws.readyState === 1;
-  }
-  function _sendGain(payload) {
-    if (!_belaControlReady2()) return;
-    Bela.control.send(payload);
-  }
-  function _buildMeterGainControls(initVal, min, max, step, onSend) {
-    const btnDec = el("button", {
-      className: "meter-gain-btn meter-gain-btn--dec",
-      title: `-${step} dB`,
-      type: "button"
-    });
-    const btnInc = el("button", {
-      className: "meter-gain-btn meter-gain-btn--inc",
-      title: `+${step} dB`,
-      type: "button"
-    });
-    const valEl = el("div", { className: "meter-gain-val" });
-    btnDec.textContent = "\u2212";
-    btnInc.textContent = "+";
-    let current = initVal;
-    function refresh() {
-      valEl.textContent = String(current) + "\u202FdB";
-      btnDec.disabled = current <= min;
-      btnInc.disabled = current >= max;
-    }
-    function tryChange(delta) {
-      const next = current + delta;
-      if (next < min || next > max) return;
-      current = next;
-      refresh();
-      onSend(current);
-    }
-    function setValue(v) {
-      const clamped = Math.round(Math.max(min, Math.min(max, v)));
-      if (clamped === current) return;
-      current = clamped;
-      refresh();
-    }
-    btnDec.addEventListener("click", (e) => {
-      e.stopPropagation();
-      tryChange(-step);
-    });
-    btnInc.addEventListener("click", (e) => {
-      e.stopPropagation();
-      tryChange(+step);
-    });
-    refresh();
-    return { btnDec, btnInc, valEl, setValue };
-  }
-  function _buildGainByBuf3(inputChannels, outputChannels) {
-    const map = {};
-    inputChannels.forEach(({ ch, label, buf3 }) => {
-      if (buf3 !== void 0)
-        map[buf3] = { kind: "input", ch, label };
-    });
-    outputChannels.forEach(({ ch, label, buf3 }) => {
-      if (buf3 !== void 0)
-        map[buf3] = { kind: "output", ch, label };
-    });
-    return map;
-  }
-  function _createInlineGain(desc) {
-    const { kind, ch, label } = desc;
-    const isInput = kind === "input";
-    const min = isInput ? INPUT_GAIN_MIN : HP_GAIN_MIN;
-    const max = isInput ? INPUT_GAIN_MAX : HP_GAIN_MAX;
-    const step = isInput ? INPUT_GAIN_STEP : HP_GAIN_STEP;
-    const controls = _buildMeterGainControls(0, min, max, step, (val) => {
-      if (isInput) {
-        _sendGain({ event: "custom", inputGain: val, channel: ch });
-      } else {
-        _sendGain({ event: "custom", hpGain: val, channel: ch });
-      }
-    });
-    controls.btnDec.title = `${label}: -${step} dB`;
-    controls.btnInc.title = `${label}: +${step} dB`;
-    controls.valEl.title = isInput ? `${label} ADC gain (\u221212\u202610 dB)` : `${label} HP gain (\u221263\u20260 dB)`;
-    if (isInput)
-      _inputPickers[ch] = controls;
-    else
-      _outputPickers[ch] = controls;
-    return controls;
-  }
-  function syncCodecGains(buf) {
-    for (let ch = 0; ch < 10; ch++) {
-      if (_inputPickers[ch]) _inputPickers[ch].setValue(buf[ch]);
-      if (_outputPickers[ch]) _outputPickers[ch].setValue(buf[10 + ch]);
-    }
-  }
-  function createVuMeter(canvas, config) {
-    const max = config.max || 100;
-    const boxCount = config.boxCount || 15;
-    const boxCountRed = config.boxCountRed || 2;
-    const boxCountYellow = config.boxCountYellow || 3;
-    const boxGapFraction = config.boxGapFraction || 0.25;
-    const redStart = boxCount - boxCountRed + 1;
-    const yellowStart = boxCount - boxCountRed - boxCountYellow + 1;
-    const redOn = "rgba(255,47,30,0.9)";
-    const redOff = "rgba(64,12,8,0.9)";
-    const yellowOn = "rgba(255,215,5,0.9)";
-    const yellowOff = "rgba(64,53,0,0.9)";
-    const greenOn = "rgba(53,255,30,0.9)";
-    const greenOff = "rgba(13,64,8,0.9)";
-    const ctx2d = canvas.getContext("2d");
-    let width = 0;
-    let height = 0;
-    let boxHeight = 0;
-    let boxGapY = 0;
-    let boxWidth = 0;
-    let boxGapX = 0;
-    let curVal = 0;
-    let curPeakVal = 0;
-    let lastLitBoxes = -1;
-    let lastPeakPx = -1;
-    let needsRedraw = true;
-    function resize() {
-      const dpr = window.devicePixelRatio || 1;
-      const rect = canvas.getBoundingClientRect();
-      const style = window.getComputedStyle(canvas);
-      let cssW = rect.width;
-      let cssH = rect.height;
-      if (cssW < 2) cssW = parseFloat(style.width) || VU_CANVAS_W;
-      if (cssH < 2) cssH = parseFloat(style.height) || VU_CANVAS_H;
-      const newW = Math.max(1, Math.round(cssW));
-      const newH = Math.max(1, Math.round(cssH));
-      const pxW = Math.round(newW * dpr);
-      const pxH = Math.round(newH * dpr);
-      if (newW === width && newH === height && canvas.width === pxW && canvas.height === pxH)
-        return;
-      width = newW;
-      height = newH;
-      canvas.width = pxW;
-      canvas.height = pxH;
-      ctx2d.setTransform(dpr, 0, 0, dpr, 0, 0);
-      boxWidth = width / (boxCount + (boxCount + 1) * boxGapFraction);
-      boxGapX = boxWidth * boxGapFraction;
-      boxHeight = Math.max(8, height - boxGapX * 2);
-      boxGapY = boxGapX;
-      needsRedraw = true;
-    }
-    function litBoxCount(val) {
-      return Math.ceil(val / max * boxCount);
-    }
-    function boxColor(id, lit) {
-      const on = id <= lit;
-      if (id >= redStart) return on ? redOn : redOff;
-      if (id >= yellowStart) return on ? yellowOn : yellowOff;
-      return on ? greenOn : greenOff;
-    }
-    function drawBoxes(lit) {
-      ctx2d.save();
-      ctx2d.translate(boxGapX, boxGapY);
-      for (let i = 0; i < boxCount; i++) {
-        const id = i + 1;
-        ctx2d.fillStyle = boxColor(id, lit);
-        ctx2d.fillRect(0, 0, boxWidth, boxHeight);
-        ctx2d.translate(boxWidth + boxGapX, 0);
-      }
-      ctx2d.restore();
-    }
-    function drawPeakIndicator(peakVal) {
-      if (peakVal < 1.5) return;
-      const innerLeft = boxGapX;
-      const innerRight = width - boxGapX;
-      const x = innerLeft + peakVal / max * (innerRight - innerLeft);
-      ctx2d.strokeStyle = "#fff";
-      ctx2d.lineWidth = 2;
-      ctx2d.beginPath();
-      ctx2d.moveTo(x, boxGapY);
-      ctx2d.lineTo(x, height - boxGapY);
-      ctx2d.stroke();
-    }
-    if (typeof ResizeObserver !== "undefined") {
-      new ResizeObserver(() => {
-        resize();
-      }).observe(canvas);
-    }
-    resize();
-    return {
-      /** Sets current level and peak-hold percentages (0–max). */
-      setTargets(level, peak) {
-        curVal = Math.max(0, Math.min(max, level));
-        curPeakVal = Math.max(0, Math.min(max, peak));
-      },
-      /** Returns peak position as 0–100 (for peak label placement). */
-      getPeakPct() {
-        return curPeakVal;
-      },
-      /** Redraws only when lit boxes or peak pixel position changed. */
-      draw() {
-        const lit = litBoxCount(curVal);
-        const peakPx = curPeakVal < 1.5 ? -1 : Math.round(curPeakVal / max * width);
-        if (!needsRedraw && lit === lastLitBoxes && peakPx === lastPeakPx)
-          return;
-        lastLitBoxes = lit;
-        lastPeakPx = peakPx;
-        needsRedraw = false;
-        ctx2d.fillStyle = "rgb(32,32,32)";
-        ctx2d.fillRect(0, 0, width, height);
-        drawBoxes(lit);
-        drawPeakIndicator(curPeakVal);
-      },
-      resize
-    };
-  }
-  function levelToBarPct(raw) {
-    const dB = raw > 32e-6 ? 20 * Math.log10(raw) : -90;
-    return (Math.max(dB, -60) + 60) / 60 * 100;
-  }
-  function levelToDbLabel(raw) {
-    const dB = raw > 32e-6 ? 20 * Math.log10(raw) : -90;
-    return dB < -80 ? "-\u221E" : dB.toFixed(1) + "\u202FdB";
-  }
-  function buildMetersPane() {
-    const pane = el("div", { id: "pane-meters", className: "tab-pane" });
-    const wrap = el("div", { id: "meters-wrap" });
-    const columns = el("div", { className: "meters-columns" });
-    const { levelGroups, levelLabels, inputChannels, outputChannels } = buildFullRouting(ROUTING_CONFIG);
-    const gainByBuf3 = _buildGainByBuf3(inputChannels, outputChannels);
-    for (let ch = 0; ch < 10; ch++) {
-      _inputPickers[ch] = null;
-      _outputPickers[ch] = null;
-    }
-    const ctx = getContext();
-    ctx.meterVu = [];
-    ctx.meterPeakDbs = [];
-    ctx.meterClipLeds = [];
-    levelGroups.forEach((group) => {
-      const card = el("div", { className: "card meters-card" });
-      card.appendChild(cardTitle(group.label));
-      const row = el("div", { className: "meter-group" });
-      group.indices.forEach((idx) => {
-        const chRow = el("div", { className: "meter-ch" });
-        const mid = el("div", { className: "meter-id" });
-        const lbl = el("div", { className: "meter-lbl" });
-        lbl.textContent = levelLabels[idx] || String(idx);
-        mid.appendChild(lbl);
-        const gainDesc = gainByBuf3[idx];
-        const gainCtrl = gainDesc ? _createInlineGain(gainDesc) : null;
-        if (gainCtrl)
-          mid.appendChild(gainCtrl.valEl);
-        const strip = el("div", { className: "meter-strip" });
-        const body = el("div", { className: "meter-body" });
-        const mwrap = el("div", { className: "meter-wrap" });
-        mwrap.title = "Click to reset peak hold";
-        const cnv = el("canvas", { className: "meter-canvas", id: "mc-" + idx });
-        ctx.meterVu[idx] = createVuMeter(cnv, {
-          boxCount: VU_BOX_COUNT,
-          boxCountRed: VU_BOX_COUNT_RED,
-          boxCountYellow: VU_BOX_COUNT_YELLOW,
-          boxGapFraction: VU_BOX_GAP_FRACTION,
-          max: VU_MAX
-        });
-        const peakDb = el("div", { className: "meter-peak-db", id: "mpd-" + idx });
-        peakDb.style.left = "0%";
-        peakDb.textContent = "-\u221E";
-        ctx.meterPeakDbs[idx] = peakDb;
-        const clipLed = el("div", {
-          className: "meter-clip-led",
-          id: "mclip-" + idx,
-          title: "Clip (\u2265 " + (CLIP_THRESHOLD * 100).toFixed(0) + "% full scale)",
-          role: "img",
-          "aria-label": "Clip indicator off"
-        });
-        clipLed.innerHTML = '<span class="meter-clip-led__bezel"></span><span class="meter-clip-led__core"></span>';
-        ctx.meterClipLeds[idx] = clipLed;
-        mwrap.addEventListener("click", () => {
-          ctx.peakHoldLevel[idx] = 0;
-          ctx.peakHoldExpire[idx] = 0;
-        });
-        const scale = el("div", { className: "meter-scale" });
-        for (let t = 0; t < VU_SCALE_TICKS.length; t++) {
-          const tick = el("span");
-          tick.textContent = String(VU_SCALE_TICKS[t]);
-          scale.appendChild(tick);
-        }
-        mwrap.appendChild(cnv);
-        mwrap.appendChild(peakDb);
-        body.appendChild(mwrap);
-        body.appendChild(scale);
-        if (gainCtrl) {
-          strip.appendChild(gainCtrl.btnDec);
-          strip.appendChild(body);
-          strip.appendChild(gainCtrl.btnInc);
-        } else {
-          strip.appendChild(body);
-        }
-        chRow.appendChild(strip);
-        chRow.appendChild(clipLed);
-        chRow.appendChild(mid);
-        row.appendChild(chRow);
-      });
-      card.appendChild(row);
-      columns.appendChild(card);
-    });
-    wrap.appendChild(columns);
-    pane.appendChild(wrap);
-    return pane;
-  }
-  function startMeterAnim() {
-    if (getContext().meterAnimId != null) return;
-    function tick() {
-      const ctx = getContext();
-      if (ctx.currentTab !== 1) {
-        ctx.meterAnimId = null;
-        return;
-      }
-      updateMetersFrame();
-      ctx.meterAnimId = requestAnimationFrame(tick);
-    }
-    getContext().meterAnimId = requestAnimationFrame(tick);
-  }
-  function stopMeterAnim() {
-    const ctx = getContext();
-    if (ctx.meterAnimId == null) return;
-    cancelAnimationFrame(ctx.meterAnimId);
-    ctx.meterAnimId = null;
-  }
-  function updateMetersFrame() {
-    const ctx = getContext();
-    const now = performance.now();
-    for (let i = 0; i < METER_COUNT; i++) {
-      const vu = ctx.meterVu[i];
-      if (!vu) continue;
-      const raw = ctx.audioLevels[i];
-      const smooth = ctx.meterSmooth[i];
-      const coeff = raw > smooth ? METER_ATTACK : METER_RELEASE;
-      ctx.meterSmooth[i] = smooth + (raw - smooth) * coeff;
-      if (raw > ctx.peakHoldLevel[i]) {
-        ctx.peakHoldLevel[i] = raw;
-        ctx.peakHoldExpire[i] = now + PEAK_HOLD_MS;
-      } else if (now >= ctx.peakHoldExpire[i]) {
-        ctx.peakHoldLevel[i] *= PEAK_DECAY;
-      }
-      if (raw >= CLIP_THRESHOLD || ctx.peakHoldLevel[i] >= CLIP_THRESHOLD)
-        ctx.clipHoldUntil[i] = now + CLIP_HOLD_MS;
-      const clipping = now < ctx.clipHoldUntil[i];
-      const clipLed = ctx.meterClipLeds[i];
-      if (clipLed) {
-        const on = clipping;
-        if (clipLed.classList.contains("on") !== on) {
-          clipLed.classList.toggle("on", on);
-          clipLed.setAttribute(
-            "aria-label",
-            on ? "Clip indicator on" : "Clip indicator off"
-          );
-        }
-      }
-      const peakDb = ctx.meterPeakDbs[i];
-      if (peakDb)
-        peakDb.classList.toggle("clip", clipping);
-      vu.setTargets(
-        levelToBarPct(ctx.meterSmooth[i]),
-        levelToBarPct(ctx.peakHoldLevel[i])
-      );
-      vu.draw();
-      if (peakDb) {
-        const pkPct = vu.getPeakPct();
-        const peakLbl = levelToDbLabel(ctx.peakHoldLevel[i]);
-        if (peakDb.textContent !== peakLbl)
-          peakDb.textContent = peakLbl;
-        const left = pkPct.toFixed(2) + "%";
-        if (peakDb.style.left !== left)
-          peakDb.style.left = left;
-        const op = pkPct > 1.5 ? "1" : "0";
-        if (peakDb.style.opacity !== op)
-          peakDb.style.opacity = op;
-      }
     }
   }
 
@@ -2945,11 +2966,11 @@ border-radius:6px;background:#fafafa;
   }
   function updateMasterEq() {
     computeMasterCurve(getContext().potValues, getContext().switchStates);
-    if (getContext().currentTab === 2)
+    if (getContext().currentTab === TAB_MASTER_EQ)
       drawMasterEqCurve();
   }
   function resizeMasterEqCanvas() {
-    if (getContext().masterEqCanvas && getContext().currentTab === 2)
+    if (getContext().masterEqCanvas && getContext().currentTab === TAB_MASTER_EQ)
       drawMasterEqCurve();
   }
   function buildMasterEqPane() {
@@ -2999,8 +3020,8 @@ border-radius:6px;background:#fafafa;
     hdr.appendChild(logo);
     topChrome.appendChild(hdr);
     const tabBar = el("div", { id: "tab-bar" });
-    ["Live", "Meters", "Master EQ", "Mapping"].forEach((lbl, i) => {
-      const btn = el("button", { className: "tab-btn" + (i === 0 ? " active" : "") });
+    ["Live", "Console", "Master EQ", "Mapping"].forEach((lbl, i) => {
+      const btn = el("button", { className: "tab-btn" + (i === TAB_LIVE ? " active" : "") });
       btn.textContent = lbl;
       btn.dataset.tab = i;
       btn.addEventListener("click", () => switchTab(i));
@@ -3010,7 +3031,7 @@ border-radius:6px;background:#fafafa;
     root.appendChild(topChrome);
     const content = el("div", { id: "tab-content" });
     content.appendChild(buildLivePane());
-    content.appendChild(buildMetersPane());
+    content.appendChild(buildConsolePane());
     content.appendChild(buildMasterEqPane());
     content.appendChild(buildMappingPane());
     root.appendChild(content);
@@ -3018,11 +3039,11 @@ border-radius:6px;background:#fafafa;
   }
   function switchTab(idx) {
     const ctx = getContext();
-    if (idx !== 3) cancelDetect();
+    if (idx !== TAB_MAPPING) cancelDetect();
     ctx.currentTab = idx;
     document.querySelectorAll(".tab-btn").forEach((b, i) => b.classList.toggle("active", i === idx));
     document.querySelectorAll(".tab-pane").forEach((p, i) => p.classList.toggle("active", i === idx));
-    if (idx === 1) {
+    if (idx === TAB_LIVE) {
       ctx.meterVu.forEach((vu) => {
         if (vu) vu.resize();
       });
@@ -3030,7 +3051,7 @@ border-radius:6px;background:#fafafa;
     } else {
       stopMeterAnim();
     }
-    if (idx === 2)
+    if (idx === TAB_MASTER_EQ)
       drawMasterEqCurve();
   }
 
@@ -3203,7 +3224,7 @@ border-radius:6px;background:#fafafa;
       updateSwitches();
       updateMasterEq();
       updateBadge();
-      if (ctx.currentTab === 1 && ctx.meterAnimId == null) startMeterAnim();
+      if (ctx.currentTab === TAB_LIVE && ctx.meterAnimId == null) startMeterAnim();
       if (ctx.detectMode) updateDetectMode();
     };
   }

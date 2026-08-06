@@ -6,6 +6,7 @@ import {
     VU_SCALE_TICKS,
     METER_ATTACK, METER_RELEASE, PEAK_HOLD_MS, PEAK_DECAY,
     CLIP_THRESHOLD, CLIP_HOLD_MS,
+    TAB_LIVE,
     buildFullRouting,
 } from '../config.js';
 import { ROUTING_CONFIG } from '../routing-config.js';
@@ -325,9 +326,8 @@ function levelToDbLabel(raw) {
     return dB < -80 ? '-\u221e' : dB.toFixed(1) + '\u202FdB';
 }
 
-/** Builds the Meters tab pane (VU strips + inline codec gains). */
-export function buildMetersPane() {
-    const pane    = el('div', {id: 'pane-meters', className: 'tab-pane'});
+/** Builds the meters section (VU strips + inline codec gains) for the Live tab. */
+export function buildMetersSection() {
     const wrap    = el('div', {id: 'meters-wrap'});
     const columns = el('div', {className: 'meters-columns'});
 
@@ -431,16 +431,15 @@ export function buildMetersPane() {
     });
 
     wrap.appendChild(columns);
-    pane.appendChild(wrap);
-    return pane;
+    return wrap;
 }
 
-/** Starts the meter animation loop while the Meters tab is visible. */
+/** Starts the meter animation loop while the Live tab is visible. */
 export function startMeterAnim() {
     if (getContext().meterAnimId != null) return;
     function tick() {
         const ctx = getContext();
-        if (ctx.currentTab !== 1) {
+        if (ctx.currentTab !== TAB_LIVE) {
             ctx.meterAnimId = null;
             return;
         }

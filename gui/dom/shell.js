@@ -1,8 +1,12 @@
 /** Top-level UI shell: header, tabs, tab switching. */
 import { getContext } from '../context.js';
+import {
+    TAB_LIVE, TAB_MASTER_EQ, TAB_MAPPING
+} from '../config.js';
 import { el, projectFileUrl } from './utils.js';
 import { buildLivePane } from './live.js';
-import { buildMetersPane, startMeterAnim, stopMeterAnim } from './meters.js';
+import { buildConsolePane } from './console.js';
+import { startMeterAnim, stopMeterAnim } from './meters.js';
 import { buildMasterEqPane, drawMasterEqCurve } from './masterEq.js';
 import { buildMappingPane, cancelDetect } from './mapping.js';
 
@@ -10,10 +14,10 @@ import { buildMappingPane, cancelDetect } from './mapping.js';
 export function buildUI() {
     document.body.innerHTML = '';
 
-    const root = el('div', {id:'bela-gui'});
-    const topChrome = el('div', {id:'top-chrome'});
+    const root = el('div', {id: 'bela-gui'});
+    const topChrome = el('div', {id: 'top-chrome'});
 
-    const hdr = el('div', {id:'gui-header'});
+    const hdr = el('div', {id: 'gui-header'});
     const belaLogo = el('img', { id: 'gui-bela-logo', alt: 'Bela' });
     belaLogo.src = projectFileUrl('BELA.png');
     hdr.appendChild(belaLogo);
@@ -33,9 +37,9 @@ export function buildUI() {
     hdr.appendChild(logo);
     topChrome.appendChild(hdr);
 
-    const tabBar = el('div', {id:'tab-bar'});
-    ['Live','Meters','Master EQ','Mapping'].forEach((lbl, i) => {
-        const btn = el('button', {className:'tab-btn' + (i===0?' active':'')});
+    const tabBar = el('div', {id: 'tab-bar'});
+    ['Live', 'Console', 'Master EQ', 'Mapping'].forEach((lbl, i) => {
+        const btn = el('button', {className: 'tab-btn' + (i === TAB_LIVE ? ' active' : '')});
         btn.textContent = lbl;
         btn.dataset.tab = i;
         btn.addEventListener('click', () => switchTab(i));
@@ -44,9 +48,9 @@ export function buildUI() {
     topChrome.appendChild(tabBar);
     root.appendChild(topChrome);
 
-    const content = el('div', {id:'tab-content'});
+    const content = el('div', {id: 'tab-content'});
     content.appendChild(buildLivePane());
-    content.appendChild(buildMetersPane());
+    content.appendChild(buildConsolePane());
     content.appendChild(buildMasterEqPane());
     content.appendChild(buildMappingPane());
     root.appendChild(content);
@@ -57,18 +61,18 @@ export function buildUI() {
 /** Switches the active tab and starts/stops tab-specific animations. */
 export function switchTab(idx) {
     const ctx = getContext();
-    if(idx !== 3) cancelDetect();
+    if (idx !== TAB_MAPPING) cancelDetect();
     ctx.currentTab = idx;
     document.querySelectorAll('.tab-btn').forEach((b, i) =>
         b.classList.toggle('active', i === idx));
     document.querySelectorAll('.tab-pane').forEach((p, i) =>
         p.classList.toggle('active', i === idx));
-    if(idx === 1) {
-        ctx.meterVu.forEach(vu => { if(vu) vu.resize(); });
+    if (idx === TAB_LIVE) {
+        ctx.meterVu.forEach(vu => { if (vu) vu.resize(); });
         startMeterAnim();
     } else {
         stopMeterAnim();
     }
-    if(idx === 2)
+    if (idx === TAB_MASTER_EQ)
         drawMasterEqCurve();
 }

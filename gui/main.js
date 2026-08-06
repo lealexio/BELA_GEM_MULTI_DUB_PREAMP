@@ -6,8 +6,10 @@ import { initContext, getContext } from './context.js';
 import { injectCSS } from './css.js';
 import { buildUI } from './dom/shell.js';
 import { layoutTopChrome, hideP5Dom } from './dom/utils.js';
-import { updateSiren, updateSwitches, updateConsole, syncMicInputs } from './dom/live.js';
+import { updateSiren, syncMicInputs } from './dom/live.js';
+import { updateConsole, updateSwitches } from './dom/console.js';
 import { startMeterAnim, syncCodecGains } from './dom/meters.js';
+import { TAB_LIVE } from './config.js';
 import { updateMasterEq, resizeMasterEqCanvas } from './dom/masterEq.js';
 import { tryBuildMappingTable, updateDetectMode, fillRoutingFromConfigMeta } from './dom/mapping.js';
 import {
@@ -120,7 +122,7 @@ export default function sketch(p) {
         updateMasterEq();
         updateBadge();
 
-        if(ctx.currentTab === 1 && ctx.meterAnimId == null) startMeterAnim();
+        if(ctx.currentTab === TAB_LIVE && ctx.meterAnimId == null) startMeterAnim();
         if(ctx.detectMode) updateDetectMode();
     };
 }

@@ -1,6 +1,6 @@
 /** Master EQ theoretical frequency-response curve. */
 import { getContext } from '../context.js';
-import { MASTER_EQ_CONFIG, masterEqFreqs, MASTER_EQ_FREQ_TICKS } from '../config.js';
+import { MASTER_EQ_CONFIG, masterEqFreqs, MASTER_EQ_FREQ_TICKS, TAB_MASTER_EQ } from '../config.js';
 import { el, cardTitle } from './utils.js';
 
 export function masterEqPotToGainDb(pot, rangeDb) {
@@ -402,13 +402,13 @@ export function drawMasterEqCurve() {
 /** Recomputes and redraws the master EQ curve when inputs change. */
 export function updateMasterEq() {
     computeMasterCurve(getContext().potValues, getContext().switchStates);
-    if(getContext().currentTab === 2)
+    if(getContext().currentTab === TAB_MASTER_EQ)
         drawMasterEqCurve();
 }
 
 /** Resizes the master EQ canvas to its CSS layout box. */
 export function resizeMasterEqCanvas() {
-    if(getContext().masterEqCanvas && getContext().currentTab === 2)
+    if(getContext().masterEqCanvas && getContext().currentTab === TAB_MASTER_EQ)
         drawMasterEqCurve();
 }
 
