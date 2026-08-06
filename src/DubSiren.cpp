@@ -231,7 +231,9 @@ float DubSiren::process() {
     gateSmooth_ += coeff * (target - gateSmooth_);
     signal *= gateSmooth_;
 
-    lastFxOut_  = signal * fxSend_  * kSirenGainScale;
-    lastFxOut2_ = signal * fxSend2_ * kSirenGainScale;
-    return signal * gain_ * kSirenGainScale;
+    // Post-fader FX sends: gain_ scales dry and send together (same as ChannelStrip).
+    float dry = signal * gain_ * kSirenGainScale;
+    lastFxOut_  = dry * fxSend_;
+    lastFxOut2_ = dry * fxSend2_;
+    return dry;
 }

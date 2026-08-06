@@ -16,8 +16,8 @@
  *   LFO        ──► pitch (semitones)
  *   drop env   ──► pitch (semitones)
  *   OSC ──► × amp ──► × gain  ──► dry out
- *              ├──────────────────► × fxSend  ──► fx1 out
- *              └──────────────────► × fxSend2 ──► fx2 out
+ *                            ├─────► × fxSend  ──► fx1 out
+ *                            └─────► × fxSend2 ──► fx2 out
  *
  * Usage pattern:
  *   1. Call setup() once with the audio sample rate.
@@ -40,8 +40,8 @@ public:
      * @param typePot     [0.0–1.0] quantised to one of kNumPresets
      * @param modPot      [0.0–1.0] LFO intensity (depth + rate)
      * @param gainPot     [0.0–1.0] output gain
-     * @param fxSendPot   [0.0–1.0] FX send 1 level (pre-gain)
-     * @param fxSend2Pot  [0.0–1.0] FX send 2 level (pre-gain)
+     * @param fxSendPot   [0.0–1.0] FX send 1 level (post-gain)
+     * @param fxSend2Pot  [0.0–1.0] FX send 2 level (post-gain)
      * @param gate        true = siren active; false = fade to silence
      */
     void setControls(float typePot, float modPot, float gainPot,
