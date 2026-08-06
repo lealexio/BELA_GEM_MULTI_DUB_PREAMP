@@ -240,8 +240,8 @@ var __belaPreampSketch = (() => {
     return out;
   })();
   var MASTER_EQ_FREQ_TICKS = [20, 50, 100, 200, 500, 1e3, 2e3, 5e3, 1e4, 2e4];
-  var METER_ATTACK = 0.42;
-  var METER_RELEASE = 0.14;
+  var METER_ATTACK = 0.55;
+  var METER_RELEASE = 0.12;
   var PEAK_HOLD_MS = 750;
   var PEAK_DECAY = 0.94;
   var CLIP_THRESHOLD = 0.99;
@@ -252,7 +252,8 @@ var __belaPreampSketch = (() => {
   var VU_BOX_GAP_FRACTION = 0.25;
   var VU_MAX = 100;
   var VU_CANVAS_W = 300;
-  var VU_CANVAS_H = 44;
+  var VU_CANVAS_H = 50;
+  var VU_SCALE_TICKS = [-60, -40, -20, -6, 0];
   var MAX_CONSOLE = 10;
   var ROUTING_KEY_TO_BUFFER3 = {
     aux1: 0,
@@ -634,10 +635,11 @@ letter-spacing:.04em;line-height:1.2;
 /* --- Meters (canvas VU, horizontal) --- */
 #meters-wrap{display:flex;flex-direction:column;gap:8px}
 .meters-columns{
-display:flex;flex-wrap:wrap;
+display:grid;
+grid-template-columns:repeat(auto-fit,minmax(320px,1fr));
 gap:12px;align-items:flex-start;
 }
-.meters-card{min-width:0;flex:1 1 280px}
+.meters-card{min-width:0}
 .meter-group{
 display:flex;flex-direction:column;gap:12px;
 align-items:stretch;padding:12px 2px 8px;
@@ -648,17 +650,32 @@ width:100%;min-width:0;
 padding-top:18px;
 }
 .meter-id{
-display:flex;flex-direction:column;gap:2px;
-min-width:40px;flex-shrink:0;
+display:flex;flex-direction:column;gap:1px;
+min-width:56px;flex-shrink:0;
 align-items:flex-start;text-align:left;
+}
+.meter-strip{
+display:flex;flex-direction:row;align-items:stretch;
+flex:1 1 0;min-width:0;gap:0;
+}
+.meter-body{
+display:flex;flex-direction:column;gap:2px;
+flex:1 1 0;min-width:0;width:100%;
 }
 .meter-wrap{
 position:relative;flex:1 1 0;min-width:0;
-max-width:300px;height:44px;margin-bottom:2px;
+width:100%;height:50px;margin-bottom:0;
+cursor:pointer;
 }
 .meter-canvas{
-display:block;width:100%;height:44px;
-border-radius:4px;
+display:block;width:100%;height:50px;
+border-radius:0;
+}
+.meter-scale{
+display:flex;justify-content:space-between;
+width:100%;padding:0 1px;
+font-size:7px;font-family:monospace;color:#999;
+line-height:1;user-select:none;pointer-events:none;
 }
 .meter-peak-db{
 position:absolute;top:-15px;left:0;
@@ -669,15 +686,13 @@ opacity:0;
 transition:left 60ms linear,opacity 120ms ease;
 }
 .meter-lbl{
-font-size:9px;font-weight:700;color:#555;
+font-size:11px;font-weight:700;color:#555;
 text-align:left;letter-spacing:.03em;
 }
-.meter-db{
-font-size:9px;color:#888;font-family:monospace;
-text-align:left;line-height:1.2;
-transition:color 120ms ease;
+.meter-gain-val{
+font-size:13px;font-family:monospace;font-weight:700;
+color:#1a1a2e;line-height:1.25;
 }
-.meter-db.clip{color:#ff3b2a;font-weight:700}
 .meter-peak-db.clip{color:#ff3b2a;font-weight:700}
 .meter-clip-led{
 position:relative;flex:0 0 auto;
@@ -702,6 +717,20 @@ box-shadow:0 0 8px rgba(255,59,42,.85),0 0 14px rgba(255,59,42,.45),inset 0 -1px
 .meter-clip-led.on .meter-clip-led__bezel{
 box-shadow:inset 0 1px 2px rgba(255,255,255,.18),0 0 6px rgba(255,59,42,.35);
 }
+
+/* Gain \xB1 flush with VU bar (same height as canvas row) */
+.meter-gain-btn{
+flex:0 0 auto;align-self:flex-start;
+width:28px;height:50px;padding:0;margin:0;
+border:none;background:#202020;color:#c8c8c8;
+font-size:16px;font-weight:700;line-height:1;cursor:pointer;
+transition:background .1s,color .1s;
+}
+.meter-gain-btn--dec{border-radius:4px 0 0 4px}
+.meter-gain-btn--inc{border-radius:0 4px 4px 0}
+.meter-gain-btn:hover{background:#2e2e2e;color:#fff}
+.meter-gain-btn:active{background:#3a3a3a}
+.meter-gain-btn:disabled{color:#555;cursor:default;background:#1a1a1a}
 
 /* --- Mapping --- */
 #mapping-note{
@@ -924,8 +953,9 @@ font-size:12px;background:#fff;
 .mtable input[type=number],.mtable select{font-size:11px}
 }
 @media(min-width:860px){
-.meter-wrap{max-width:320px;height:48px}
-.meter-canvas{height:48px}
+.meter-wrap{height:52px}
+.meter-canvas{height:52px}
+.meter-gain-btn{height:52px}
 }
 
 /* --- Master EQ curve --- */
@@ -948,45 +978,6 @@ border-radius:6px;background:#fafafa;
 @media(min-width:720px){
 #master-eq-canvas{height:320px;min-height:320px}
 }
-
-/* --- Codec gain test card --- */
-.codec-gain-notice{
-font-size:11px;color:#888;margin-bottom:12px;line-height:1.45;
-}
-.codec-gain-row{
-display:flex;align-items:center;gap:14px;margin-bottom:10px;
-}
-.codec-gain-label{
-font-size:12px;font-weight:600;color:#3a3a44;white-space:nowrap;
-}
-.codec-gain-picker{
-display:flex;align-items:stretch;
-border:1px solid #ccc;border-radius:4px;overflow:hidden;
-}
-.codec-gain-btn{
-padding:6px 14px;background:#f0f0f2;border:none;
-font-size:18px;font-weight:700;color:#333;cursor:pointer;
-line-height:1;transition:background .1s;
-}
-.codec-gain-btn:hover{background:#e0e0e4}
-.codec-gain-btn:active{background:#d0d0d6}
-.codec-gain-btn:disabled{color:#bbb;cursor:default;background:#f8f8f8}
-.codec-gain-val{
-width:54px;text-align:center;
-font-family:monospace;font-size:15px;font-weight:700;
-border:none;
-border-left:1px solid #ccc;border-right:1px solid #ccc;
-padding:6px 4px;background:#fff;color:#1a1a2e;
-}
-.codec-gain-section{
-font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;
-color:#888;margin:10px 0 4px;padding-bottom:2px;border-bottom:1px solid #e8e8ec;
-}
-.codec-gain-status{
-font-size:11px;color:#999;margin-top:10px;line-height:1.4;
-}
-.codec-gain-status.ok{color:#27ae60;font-weight:600}
-.codec-gain-status.err{color:#e74c3c;font-weight:600}
     `;
     document.head.appendChild(s);
   }
@@ -2231,29 +2222,27 @@ font-size:11px;color:#999;margin-top:10px;line-height:1.4;
   function _belaControlReady2() {
     return typeof Bela !== "undefined" && Bela.control && Bela.control.ws && Bela.control.ws.readyState === 1;
   }
-  function _sendGain(payload, desc, statusEl) {
-    if (!_belaControlReady2()) {
-      statusEl.textContent = "Bela not connected \u2014 make sure the project is running";
-      statusEl.className = "codec-gain-status err";
-      return;
-    }
+  function _sendGain(payload, _desc) {
+    if (!_belaControlReady2()) return;
     Bela.control.send(payload);
-    statusEl.textContent = `Real-time: ${desc} (applied immediately, no restart)`;
-    statusEl.className = "codec-gain-status ok";
   }
-  function _buildPickerRow(label, initVal, min, max, step, onSend, statusEl) {
-    const row = el("div", { className: "codec-gain-row" });
-    const lbl = el("span", { className: "codec-gain-label" });
-    const picker = el("span", { className: "codec-gain-picker" });
-    const btnDec = el("button", { className: "codec-gain-btn", title: `-${step} dB` });
-    const valEl = el("input", { type: "text", className: "codec-gain-val", readOnly: true });
-    const btnInc = el("button", { className: "codec-gain-btn", title: `+${step} dB` });
-    lbl.textContent = label;
+  function _buildMeterGainControls(initVal, min, max, step, onSend) {
+    const btnDec = el("button", {
+      className: "meter-gain-btn meter-gain-btn--dec",
+      title: `-${step} dB`,
+      type: "button"
+    });
+    const btnInc = el("button", {
+      className: "meter-gain-btn meter-gain-btn--inc",
+      title: `+${step} dB`,
+      type: "button"
+    });
+    const valEl = el("div", { className: "meter-gain-val" });
     btnDec.textContent = "\u2212";
     btnInc.textContent = "+";
     let current = initVal;
     function refresh() {
-      valEl.value = String(current);
+      valEl.textContent = String(current) + "\u202FdB";
       btnDec.disabled = current <= min;
       btnInc.disabled = current >= max;
     }
@@ -2262,7 +2251,7 @@ font-size:11px;color:#999;margin-top:10px;line-height:1.4;
       if (next < min || next > max) return;
       current = next;
       refresh();
-      onSend(current, statusEl);
+      onSend(current);
     }
     function setValue(v) {
       const clamped = Math.round(Math.max(min, Math.min(max, v)));
@@ -2270,86 +2259,58 @@ font-size:11px;color:#999;margin-top:10px;line-height:1.4;
       current = clamped;
       refresh();
     }
-    function setLabel(text) {
-      lbl.textContent = text;
-    }
-    btnDec.addEventListener("click", () => tryChange(-step));
-    btnInc.addEventListener("click", () => tryChange(+step));
-    picker.appendChild(btnDec);
-    picker.appendChild(valEl);
-    picker.appendChild(btnInc);
-    row.appendChild(picker);
-    row.appendChild(lbl);
+    btnDec.addEventListener("click", (e) => {
+      e.stopPropagation();
+      tryChange(-step);
+    });
+    btnInc.addEventListener("click", (e) => {
+      e.stopPropagation();
+      tryChange(+step);
+    });
     refresh();
-    return { el: row, setValue, setLabel };
+    return { btnDec, btnInc, valEl, setValue };
   }
   var _inputPickers = new Array(10).fill(null);
   var _outputPickers = new Array(10).fill(null);
-  function buildCodecGainCard(inputChannels, outputChannels) {
-    const card = el("div", { id: "codec-gains-card", className: "card" });
-    card.appendChild(cardTitle("Codec Gains \u2014 real-time"));
-    const notice = el("p", { className: "codec-gain-notice" });
-    notice.textContent = "Changes are applied immediately via Bela.control. Values are volatile \u2014 they reset on project restart.";
-    card.appendChild(notice);
-    const statusEl = el("div", { className: "codec-gain-status" });
-    statusEl.textContent = "Waiting for Bela.control connection\u2026";
-    const inSection = el("div", { className: "codec-gain-section" });
-    inSection.textContent = "ADC Input PGA (-12\u201310 dB)";
-    card.appendChild(inSection);
-    inputChannels.forEach(({ ch, label }) => {
-      _inputPickers[ch] = null;
-      const picker = _buildPickerRow(
-        label,
-        _codecGains.inputs[ch],
-        INPUT_GAIN_MIN,
-        INPUT_GAIN_MAX,
-        INPUT_GAIN_STEP,
-        (val, st) => {
-          _codecGains.inputs[ch] = val;
-          _sendGain(
-            { event: "custom", inputGain: val, channel: ch },
-            `${label} \u2192 ${val} dB`,
-            st
-          );
-        },
-        statusEl
-      );
-      _inputPickers[ch] = picker;
-      card.appendChild(picker.el);
+  function _buildGainByBuf3(inputChannels, outputChannels) {
+    const map = {};
+    inputChannels.forEach(({ ch, label, buf3 }) => {
+      if (buf3 !== void 0)
+        map[buf3] = { kind: "input", ch, label };
     });
-    const outSection = el("div", { className: "codec-gain-section" });
-    outSection.textContent = "HP Output (-63\u20130 dB)";
-    card.appendChild(outSection);
-    outputChannels.forEach(({ ch, label }) => {
-      _outputPickers[ch] = null;
-      const picker = _buildPickerRow(
-        label,
-        _codecGains.outputs[ch],
-        HP_GAIN_MIN,
-        HP_GAIN_MAX,
-        HP_GAIN_STEP,
-        (val, st) => {
-          _codecGains.outputs[ch] = val;
-          _sendGain(
-            { event: "custom", hpGain: val, channel: ch },
-            `${label} \u2192 ${val} dB`,
-            st
-          );
-        },
-        statusEl
-      );
-      _outputPickers[ch] = picker;
-      card.appendChild(picker.el);
+    outputChannels.forEach(({ ch, label, buf3 }) => {
+      if (buf3 !== void 0)
+        map[buf3] = { kind: "output", ch, label };
     });
-    card.appendChild(statusEl);
-    const _poll = setInterval(() => {
-      if (_belaControlReady2()) {
-        statusEl.textContent = "Bela connected";
-        statusEl.className = "codec-gain-status ok";
-        clearInterval(_poll);
+    return map;
+  }
+  function _createInlineGain(desc) {
+    const { kind, ch, label } = desc;
+    const isInput = kind === "input";
+    const min = isInput ? INPUT_GAIN_MIN : HP_GAIN_MIN;
+    const max = isInput ? INPUT_GAIN_MAX : HP_GAIN_MAX;
+    const step = isInput ? INPUT_GAIN_STEP : HP_GAIN_STEP;
+    const init = isInput ? _codecGains.inputs[ch] : _codecGains.outputs[ch];
+    const controls = _buildMeterGainControls(init, min, max, step, (val) => {
+      if (isInput) {
+        _codecGains.inputs[ch] = val;
+        _sendGain(
+          { event: "custom", inputGain: val, channel: ch },
+          `${label} \u2192 ${val} dB`
+        );
+      } else {
+        _codecGains.outputs[ch] = val;
+        _sendGain(
+          { event: "custom", hpGain: val, channel: ch },
+          `${label} \u2192 ${val} dB`
+        );
       }
-    }, 1e3);
-    return card;
+    });
+    if (isInput)
+      _inputPickers[ch] = controls;
+    else
+      _outputPickers[ch] = controls;
+    return controls;
   }
   function syncCodecGains(buf) {
     for (let ch = 0; ch < 10; ch++) {
@@ -2378,8 +2339,9 @@ font-size:11px;color:#999;margin-top:10px;line-height:1.4;
     let boxGapX = 0;
     let curVal = 0;
     let curPeakVal = 0;
-    let targetVal = 0;
-    let targetPeakVal = 0;
+    let lastLitBoxes = -1;
+    let lastPeakPx = -1;
+    let needsRedraw = true;
     function resize() {
       const dpr = window.devicePixelRatio || 1;
       const rect = canvas.getBoundingClientRect();
@@ -2403,13 +2365,16 @@ font-size:11px;color:#999;margin-top:10px;line-height:1.4;
       boxGapX = boxWidth * boxGapFraction;
       boxHeight = Math.max(8, height - boxGapX * 2);
       boxGapY = boxGapX;
+      needsRedraw = true;
     }
     function getId(index) {
       return index + 1;
     }
+    function litBoxCount(val) {
+      return Math.ceil(val / max * boxCount);
+    }
     function isOn(id, val) {
-      const maxOn = Math.ceil(val / max * boxCount);
-      return id <= maxOn;
+      return id <= litBoxCount(val);
     }
     function getBoxColor(id, val) {
       if (id > boxCount - boxCountRed)
@@ -2424,12 +2389,6 @@ font-size:11px;color:#999;margin-top:10px;line-height:1.4;
       for (let i = 0; i < boxCount; i++) {
         const id = getId(i);
         ctx.beginPath();
-        if (isOn(id, val)) {
-          ctx.shadowBlur = 10;
-          ctx.shadowColor = getBoxColor(id, val);
-        } else {
-          ctx.shadowBlur = 0;
-        }
         ctx.rect(0, 0, boxWidth, boxHeight);
         ctx.fillStyle = getBoxColor(id, val);
         ctx.fill();
@@ -2444,8 +2403,6 @@ font-size:11px;color:#999;margin-top:10px;line-height:1.4;
       const x = innerLeft + peakVal / max * (innerRight - innerLeft);
       ctx.save();
       ctx.strokeStyle = "#fff";
-      ctx.shadowBlur = 5;
-      ctx.shadowColor = "#fff";
       ctx.lineWidth = 2;
       ctx.beginPath();
       ctx.moveTo(x, boxGapY);
@@ -2453,35 +2410,38 @@ font-size:11px;color:#999;margin-top:10px;line-height:1.4;
       ctx.stroke();
       ctx.restore();
     }
+    if (typeof ResizeObserver !== "undefined") {
+      const ro = new ResizeObserver(() => {
+        resize();
+      });
+      ro.observe(canvas);
+    }
+    resize();
     return {
-      /** Sets target level and peak-hold percentages (0–max). */
+      /** Sets current level and peak-hold percentages (0–max). */
       setTargets(level, peak) {
-        targetVal = Math.max(0, Math.min(max, level));
-        targetPeakVal = Math.max(0, Math.min(max, peak));
+        curVal = Math.max(0, Math.min(max, level));
+        curPeakVal = Math.max(0, Math.min(max, peak));
       },
-      /** Returns smoothed peak position as 0–100 (for external label placement). */
+      /** Returns peak position as 0–100 (for external label placement). */
       getPeakPct() {
         return curPeakVal;
       },
-      /** Advances smoothing and redraws the meter. */
+      /** Redraws the meter only when lit boxes or peak position changed. */
       draw() {
-        resize();
-        if (curVal <= targetVal)
-          curVal += (targetVal - curVal) / 5;
-        else
-          curVal -= (curVal - targetVal) / 5;
-        if (curPeakVal <= targetPeakVal)
-          curPeakVal += (targetPeakVal - curPeakVal) / 4;
-        else
-          curPeakVal -= (curPeakVal - targetPeakVal) / 6;
-        ctx.save();
+        const lit = litBoxCount(curVal);
+        const peakPx = curPeakVal < 1.5 ? -1 : Math.round(curPeakVal / max * width);
+        if (!needsRedraw && lit === lastLitBoxes && peakPx === lastPeakPx)
+          return;
+        lastLitBoxes = lit;
+        lastPeakPx = peakPx;
+        needsRedraw = false;
         ctx.fillStyle = "rgb(32,32,32)";
         ctx.fillRect(0, 0, width, height);
-        ctx.restore();
         drawBoxes(curVal);
         drawPeakIndicator(curPeakVal);
       },
-      /** Recomputes layout after a window resize. */
+      /** Recomputes layout after a window resize or tab switch. */
       resize
     };
   }
@@ -2490,6 +2450,11 @@ font-size:11px;color:#999;margin-top:10px;line-height:1.4;
     const wrap = el("div", { id: "meters-wrap" });
     const columns = el("div", { className: "meters-columns" });
     const { levelGroups, levelLabels, inputChannels, outputChannels } = buildFullRouting(ROUTING_CONFIG);
+    const gainByBuf3 = _buildGainByBuf3(inputChannels, outputChannels);
+    for (let ch = 0; ch < 10; ch++) {
+      _inputPickers[ch] = null;
+      _outputPickers[ch] = null;
+    }
     getContext().meterLabelEls = [];
     levelGroups.forEach((group) => {
       const card = el("div", { className: "card meters-card" });
@@ -2501,12 +2466,15 @@ font-size:11px;color:#999;margin-top:10px;line-height:1.4;
         const lbl = el("div", { className: "meter-lbl" });
         lbl.textContent = levelLabels[idx] || String(idx);
         getContext().meterLabelEls[idx] = lbl;
-        const dbv = el("div", { className: "meter-db", id: "md-" + idx });
-        dbv.textContent = "-\u221E";
-        getContext().meterDbs[idx] = dbv;
         mid.appendChild(lbl);
-        mid.appendChild(dbv);
+        const gainDesc = gainByBuf3[idx];
+        const gainCtrl = gainDesc ? _createInlineGain(gainDesc) : null;
+        if (gainCtrl)
+          mid.appendChild(gainCtrl.valEl);
+        const strip = el("div", { className: "meter-strip" });
+        const body = el("div", { className: "meter-body" });
         const mwrap = el("div", { className: "meter-wrap" });
+        mwrap.title = "Click to reset peak hold";
         const cnv = el("canvas", { className: "meter-canvas", id: "mc-" + idx });
         getContext().meterVu[idx] = createVuMeter(cnv, {
           boxCount: VU_BOX_COUNT,
@@ -2528,9 +2496,29 @@ font-size:11px;color:#999;margin-top:10px;line-height:1.4;
         });
         clipLed.innerHTML = '<span class="meter-clip-led__bezel"></span><span class="meter-clip-led__core"></span>';
         getContext().meterClipLeds[idx] = clipLed;
+        mwrap.addEventListener("click", () => {
+          const c = getContext();
+          c.peakHoldLevel[idx] = 0;
+          c.peakHoldExpire[idx] = 0;
+        });
+        const scale = el("div", { className: "meter-scale" });
+        VU_SCALE_TICKS.forEach((db) => {
+          const tick = el("span");
+          tick.textContent = String(db);
+          scale.appendChild(tick);
+        });
         mwrap.appendChild(cnv);
         mwrap.appendChild(peakDb);
-        ch.appendChild(mwrap);
+        body.appendChild(mwrap);
+        body.appendChild(scale);
+        if (gainCtrl) {
+          strip.appendChild(gainCtrl.btnDec);
+          strip.appendChild(body);
+          strip.appendChild(gainCtrl.btnInc);
+        } else {
+          strip.appendChild(body);
+        }
+        ch.appendChild(strip);
         ch.appendChild(clipLed);
         ch.appendChild(mid);
         row.appendChild(ch);
@@ -2540,7 +2528,6 @@ font-size:11px;color:#999;margin-top:10px;line-height:1.4;
     });
     wrap.appendChild(columns);
     pane.appendChild(wrap);
-    pane.appendChild(buildCodecGainCard(inputChannels, outputChannels));
     return pane;
   }
   function applyRoutingConfig(_configMeta) {
@@ -2592,11 +2579,12 @@ font-size:11px;color:#999;margin-top:10px;line-height:1.4;
       const clipping = now < ctx.clipHoldUntil[i];
       const clipLed = ctx.meterClipLeds[i];
       if (clipLed) {
-        clipLed.classList.toggle("on", clipping);
-        clipLed.setAttribute("aria-label", clipping ? "Clip indicator on" : "Clip indicator off");
+        const on = clipping;
+        if (clipLed.classList.contains("on") !== on) {
+          clipLed.classList.toggle("on", on);
+          clipLed.setAttribute("aria-label", on ? "Clip indicator on" : "Clip indicator off");
+        }
       }
-      if (ctx.meterDbs[i])
-        ctx.meterDbs[i].classList.toggle("clip", clipping);
       if (ctx.meterPeakDbs[i])
         ctx.meterPeakDbs[i].classList.toggle("clip", clipping);
       const vu = ctx.meterVu[i];
@@ -2610,12 +2598,16 @@ font-size:11px;color:#999;margin-top:10px;line-height:1.4;
       const peakDb = ctx.meterPeakDbs[i];
       if (peakDb && vu) {
         const pkPct = vu.getPeakPct();
-        peakDb.textContent = levelToDbLabel(ctx.peakHoldLevel[i]);
-        peakDb.style.left = pkPct.toFixed(2) + "%";
-        peakDb.style.opacity = pkPct > 1.5 ? "1" : "0";
+        const peakLbl = levelToDbLabel(ctx.peakHoldLevel[i]);
+        if (peakDb.textContent !== peakLbl)
+          peakDb.textContent = peakLbl;
+        const left = pkPct.toFixed(2) + "%";
+        if (peakDb.style.left !== left)
+          peakDb.style.left = left;
+        const op = pkPct > 1.5 ? "1" : "0";
+        if (peakDb.style.opacity !== op)
+          peakDb.style.opacity = op;
       }
-      if (ctx.meterDbs[i])
-        ctx.meterDbs[i].textContent = levelToDbLabel(ctx.meterSmooth[i]);
     }
   }
 

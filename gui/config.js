@@ -159,8 +159,8 @@ export const masterEqFreqs = (function() {
 
 /** X-axis tick labels for the master EQ plot (Hz). */
 export const MASTER_EQ_FREQ_TICKS = [20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000];
-export const METER_ATTACK     = 0.42;  // fast rise (~60 fps ballistic)
-export const METER_RELEASE    = 0.14;  // slow fall
+export const METER_ATTACK     = 0.55;  // fast rise (~60 fps LED ballistic)
+export const METER_RELEASE    = 0.12;  // slow fall
 export const PEAK_HOLD_MS     = 750;
 export const PEAK_DECAY       = 0.94;
 /** Clip detection — must match kClipThreshold in SoftwareConfig.h. */
@@ -173,7 +173,9 @@ export const VU_BOX_COUNT_YELLOW = 6;
 export const VU_BOX_GAP_FRACTION = 0.25;
 export const VU_MAX              = 100;
 export const VU_CANVAS_W         = 300;
-export const VU_CANVAS_H         = 44;
+export const VU_CANVAS_H         = 50;
+/** dB scale tick labels under each VU bar (-60 floor … 0). */
+export const VU_SCALE_TICKS      = [-60, -40, -20, -6, 0];
 export const MAX_CONSOLE         = 10;
 
 /**
