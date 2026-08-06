@@ -1381,6 +1381,14 @@ border-radius:6px;background:transparent;
   var _clipBadgesByIdx = null;
   var _inputPickers = new Array(10).fill(null);
   var _outputPickers = new Array(10).fill(null);
+  var _inputGainSyncHoldUntil = new Array(10).fill(0);
+  var _outputGainSyncHoldUntil = new Array(10).fill(0);
+  var GAIN_SYNC_HOLD_MS = 2500;
+  function _holdCodecGainSync(ch, isInput) {
+    const until = Date.now() + GAIN_SYNC_HOLD_MS;
+    if (isInput) _inputGainSyncHoldUntil[ch] = until;
+    else _outputGainSyncHoldUntil[ch] = until;
+  }
   function _sendGain(payload) {
     if (!belaControlReady()) return;
     Bela.control.send(payload);
@@ -1418,6 +1426,9 @@ border-radius:6px;background:transparent;
       current = clamped;
       refresh();
     }
+    function getValue() {
+      return current;
+    }
     btnDec.addEventListener("click", (e) => {
       e.stopPropagation();
       tryChange(-step);
@@ -1427,7 +1438,7 @@ border-radius:6px;background:transparent;
       tryChange(+step);
     });
     refresh();
-    return { btnDec, btnInc, valEl, setValue };
+    return { btnDec, btnInc, valEl, setValue, getValue };
   }
   function _buildGainByBuf3(inputChannels, outputChannels) {
     const map = {};
@@ -1448,6 +1459,7 @@ border-radius:6px;background:transparent;
     const max = isInput ? INPUT_GAIN_MAX : HP_GAIN_MAX;
     const step = isInput ? INPUT_GAIN_STEP : HP_GAIN_STEP;
     const controls = _buildMeterGainControls(0, min, max, step, (val) => {
+      _holdCodecGainSync(ch, isInput);
       if (isInput) {
         _sendGain({ event: "custom", inputGain: val, channel: ch });
       } else {
@@ -1464,9 +1476,29 @@ border-radius:6px;background:transparent;
     return controls;
   }
   function syncCodecGains(buf) {
+    if (!buf || buf.length < 20) return;
+    const now = Date.now();
     for (let ch = 0; ch < 10; ch++) {
-      if (_inputPickers[ch]) _inputPickers[ch].setValue(buf[ch]);
-      if (_outputPickers[ch]) _outputPickers[ch].setValue(buf[10 + ch]);
+      const inPicker = _inputPickers[ch];
+      if (inPicker) {
+        const remote = Math.round(buf[ch]);
+        if (now < _inputGainSyncHoldUntil[ch]) {
+          if (inPicker.getValue() === remote)
+            _inputGainSyncHoldUntil[ch] = 0;
+        } else {
+          inPicker.setValue(remote);
+        }
+      }
+      const outPicker = _outputPickers[ch];
+      if (outPicker) {
+        const remote = Math.round(buf[10 + ch]);
+        if (now < _outputGainSyncHoldUntil[ch]) {
+          if (outPicker.getValue() === remote)
+            _outputGainSyncHoldUntil[ch] = 0;
+        } else {
+          outPicker.setValue(remote);
+        }
+      }
     }
   }
   function createVuMeter(canvas, config) {

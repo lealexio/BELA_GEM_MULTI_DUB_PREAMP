@@ -42,6 +42,22 @@ let _clipBadgesByIdx = null;
 const _inputPickers  = new Array(10).fill(null);
 const _outputPickers = new Array(10).fill(null);
 
+/**
+ * After a local ± click, ignore buffer-8 echo until Bela catches up (or timeout).
+ * Same pattern as mic/HPF sync hold in live.js.
+ */
+const _inputGainSyncHoldUntil  = new Array(10).fill(0);
+const _outputGainSyncHoldUntil = new Array(10).fill(0);
+/** Must cover control round-trip + a few GUI buffer frames. */
+const GAIN_SYNC_HOLD_MS = 2500;
+
+/** Marks one codec gain channel as locally authoritative for a short window. */
+function _holdCodecGainSync(ch, isInput) {
+    const until = Date.now() + GAIN_SYNC_HOLD_MS;
+    if (isInput) _inputGainSyncHoldUntil[ch]  = until;
+    else         _outputGainSyncHoldUntil[ch] = until;
+}
+
 /** Sends a codec-gain payload to render.cpp via Bela.control. */
 function _sendGain(payload) {
     if (!belaControlReady()) return;
@@ -51,7 +67,7 @@ function _sendGain(payload) {
 
 /**
  * Builds split gain controls: − left of VU, + right, value under channel name.
- * @returns {{ btnDec: Element, btnInc: Element, valEl: Element, setValue: (n: number) => void }}
+ * @returns {{ btnDec: Element, btnInc: Element, valEl: Element, setValue: (n: number) => void, getValue: () => number }}
  */
 function _buildMeterGainControls(initVal, min, max, step, onSend) {
     const btnDec = el('button', {
@@ -93,6 +109,11 @@ function _buildMeterGainControls(initVal, min, max, step, onSend) {
         refresh();
     }
 
+    /** Returns the locally displayed gain (dB). */
+    function getValue() {
+        return current;
+    }
+
     btnDec.addEventListener('click', (e) => {
         e.stopPropagation();
         tryChange(-step);
@@ -103,7 +124,7 @@ function _buildMeterGainControls(initVal, min, max, step, onSend) {
     });
 
     refresh();
-    return { btnDec, btnInc, valEl, setValue };
+    return { btnDec, btnInc, valEl, setValue, getValue };
 }
 
 /**
@@ -135,6 +156,7 @@ function _createInlineGain(desc) {
     const step = isInput ? INPUT_GAIN_STEP : HP_GAIN_STEP;
 
     const controls = _buildMeterGainControls(0, min, max, step, (val) => {
+        _holdCodecGainSync(ch, isInput);
         if (isInput) {
             _sendGain({ event: 'custom', inputGain: val, channel: ch });
         } else {
@@ -159,12 +181,34 @@ function _createInlineGain(desc) {
 /**
  * Synchronises picker displays from buffer 8 (~20 fps).
  * buf[0..9] = ADC input gain, buf[10..19] = HP output gain (physical ch, dB).
+ * Skips channels with a recent local edit until remote matches (or hold expires).
  * @param {Float32Array} buf
  */
 export function syncCodecGains(buf) {
+    if (!buf || buf.length < 20) return;
+    const now = Date.now();
     for (let ch = 0; ch < 10; ch++) {
-        if (_inputPickers[ch])  _inputPickers[ch].setValue(buf[ch]);
-        if (_outputPickers[ch]) _outputPickers[ch].setValue(buf[10 + ch]);
+        const inPicker = _inputPickers[ch];
+        if (inPicker) {
+            const remote = Math.round(buf[ch]);
+            if (now < _inputGainSyncHoldUntil[ch]) {
+                if (inPicker.getValue() === remote)
+                    _inputGainSyncHoldUntil[ch] = 0;
+            } else {
+                inPicker.setValue(remote);
+            }
+        }
+
+        const outPicker = _outputPickers[ch];
+        if (outPicker) {
+            const remote = Math.round(buf[10 + ch]);
+            if (now < _outputGainSyncHoldUntil[ch]) {
+                if (outPicker.getValue() === remote)
+                    _outputGainSyncHoldUntil[ch] = 0;
+            } else {
+                outPicker.setValue(remote);
+            }
+        }
     }
 }
 
