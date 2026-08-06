@@ -14,27 +14,33 @@ export const ROUTING_CONFIG = {
   "in": {
     "fx1Return": {
       "channel": 6,
-      "mic": false
+      "mic": false,
+      "hpf": 0
     },
     "fx2Return": {
       "channel": 7,
-      "mic": false
+      "mic": false,
+      "hpf": 0
     },
     "aux1": {
       "channel": 0,
-      "mic": false
+      "mic": false,
+      "hpf": 0
     },
     "aux2": {
       "channel": 1,
-      "mic": false
+      "mic": false,
+      "hpf": 0
     },
     "aux3": {
       "channel": 3,
-      "mic": false
+      "mic": false,
+      "hpf": 0
     },
     "aux4": {
       "channel": 5,
-      "mic": false
+      "mic": false,
+      "hpf": 0
     }
   }
 };

@@ -92,8 +92,13 @@ export const CONFIG_META = {
     FX1_RET: 14, FX2_RET: 15,
     AUX1: 16, AUX2: 17, AUX3: 18, AUX4: 19,
     MIC_AUX1: 20, MIC_AUX2: 21, MIC_AUX3: 22, MIC_AUX4: 23,
-    IGNORED_COUNT: 24, IGNORED_BASE: 25
+    HPF_AUX1: 24, HPF_AUX2: 25, HPF_AUX3: 26, HPF_AUX4: 27,
+    IGNORED_COUNT: 28, IGNORED_BASE: 29
 };
+
+/** Mic-mode HPF Hz range — must match kMicHpfFMin/FMax in SoftwareConfig.h. */
+export const MIC_HPF_HZ_MIN = 0;
+export const MIC_HPF_HZ_MAX = 300;
 
 /**
  * Master EQ curve constants — must match SoftwareConfig.h / render.cpp mapping.

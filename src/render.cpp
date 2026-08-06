@@ -45,13 +45,16 @@ BiquadFilter    gFx2MidHpf;  // MIDS mode : HPF at kFxMidLowFreq
 BiquadFilter    gFx2MidLpf;  // MIDS mode : LPF at kFxMidHighFreq
 
 // VU meter band-split filters (post-MasterFx, one biquad per crossover edge).
-// Outputs are muted when the corresponding kill switch is active.
 BiquadFilter    gVuSubLpf;  // SUB  : LPF  @ kKillFc0 (80 Hz)
 BiquadFilter    gVuKickHpf; // KICK : HPF  @ kKillFc0 (80 Hz)
 BiquadFilter    gVuKickLpf; // KICK : LPF  @ kKillFc1 (200 Hz)
 BiquadFilter    gVuMidHpf;  // MID  : HPF  @ kKillFc1 (200 Hz)
 BiquadFilter    gVuMidLpf;  // MID  : LPF  @ kKillFc2 (1200 Hz)
 BiquadFilter    gVuTopHpf;  // TOP  : HPF  @ kKillFc2 (1200 Hz)
+
+// Mic-mode dry HPF: 24 dB/oct (kMicHpfStages × Butterworth) per AUX, config-time cutoff.
+BiquadFilter    gMicHpf[4][kMicHpfStages];
+bool            gMicHpfActive[4] = { false, false, false, false };
 
 Scope scope;
 
@@ -129,10 +132,14 @@ static void fillConfigMetaBuf() {
     gConfigMetaBuf[21] = AUX2_CONFIG.micMode ? 1.f : 0.f;
     gConfigMetaBuf[22] = AUX3_CONFIG.micMode ? 1.f : 0.f;
     gConfigMetaBuf[23] = AUX4_CONFIG.micMode ? 1.f : 0.f;
-    gConfigMetaBuf[24] = (float)kIgnoredPotsCount;
+    gConfigMetaBuf[24] = AUX1_CONFIG.hpfHz;
+    gConfigMetaBuf[25] = AUX2_CONFIG.hpfHz;
+    gConfigMetaBuf[26] = AUX3_CONFIG.hpfHz;
+    gConfigMetaBuf[27] = AUX4_CONFIG.hpfHz;
+    gConfigMetaBuf[28] = (float)kIgnoredPotsCount;
     for(int i = 0; i < kIgnoredPotsCount; ++i) {
-        gConfigMetaBuf[25 + i*2 + 0] = (float)kIgnoredPots[i].mux;
-        gConfigMetaBuf[25 + i*2 + 1] = (float)kIgnoredPots[i].pot;
+        gConfigMetaBuf[29 + i*2 + 0] = (float)kIgnoredPots[i].mux;
+        gConfigMetaBuf[29 + i*2 + 1] = (float)kIgnoredPots[i].pot;
     }
 }
 
@@ -211,6 +218,32 @@ static inline float readChannelInput(BelaContext* ctx, unsigned int frame,
         }
     }
     return (count > 0) ? sum / count : 0.f;
+}
+
+/**
+ * Configures one AUX mic HPF from ChannelConfig (config-time only).
+ * hpfHz <= 0 or !micMode → inactive bypass.
+ */
+static void setupMicHpf(int idx, const ChannelConfig& cfg, float sampleRate) {
+    gMicHpfActive[idx] = false;
+    if(!cfg.micMode || cfg.hpfHz <= 0.f)
+        return;
+    float fc = cfg.hpfHz;
+    if(fc < kMicHpfFMin) fc = kMicHpfFMin;
+    if(fc > kMicHpfFMax) fc = kMicHpfFMax;
+    for(int s = 0; s < kMicHpfStages; ++s) {
+        gMicHpf[idx][s].reset();
+        gMicHpf[idx][s].setHighPass(fc, kMicHpfQ, sampleRate);
+    }
+    gMicHpfActive[idx] = true;
+}
+
+/** Applies the mic-path HPF cascade when active; otherwise returns x unchanged. */
+static inline float applyMicHpf(int idx, float x) {
+    if(!gMicHpfActive[idx]) return x;
+    for(int s = 0; s < kMicHpfStages; ++s)
+        x = gMicHpf[idx][s].process(x);
+    return x;
 }
 
 // ---------------------------------------------------------------------------
@@ -402,6 +435,12 @@ bool setup(BelaContext* context, void* userData) {
     gVuMidHpf .setHighPass(kKillFc1, 0.707f, sr); // MID  > 200 Hz
     gVuMidLpf .setLowPass (kKillFc2, 0.707f, sr); // MID  < 1200 Hz
     gVuTopHpf .setHighPass(kKillFc2, 0.707f, sr); // TOP  > 1200 Hz
+
+    // Mic-mode dry HPF (24 dB/oct) — coeffs from config.json routing.in.*.hpf
+    setupMicHpf(0, AUX1_CONFIG, sr);
+    setupMicHpf(1, AUX2_CONFIG, sr);
+    setupMicHpf(2, AUX3_CONFIG, sr);
+    setupMicHpf(3, AUX4_CONFIG, sr);
 
     // Startup mute ramp: suppress DAC initialisation transient
     gStartupRampTotal     = (int)(sr * kStartupRampMs / 1000.f);
@@ -654,10 +693,10 @@ void render(BelaContext* context, void* userData) {
 
         float in2  = readChannelInput(context, n, AUX3_CONFIG);
         float in3  = readChannelInput(context, n, AUX4_CONFIG);
-        float dry1 = gChannelStrip.process(in0);
-        float dry2 = gChannelStrip2.process(in1);
-        float dry3 = gChannelStrip3.process(in2);
-        float dry4 = gChannelStrip4.process(in3);
+        float dry1 = applyMicHpf(0, gChannelStrip.process(in0));
+        float dry2 = applyMicHpf(1, gChannelStrip2.process(in1));
+        float dry3 = applyMicHpf(2, gChannelStrip3.process(in2));
+        float dry4 = applyMicHpf(3, gChannelStrip4.process(in3));
 
         // Siren: process before FX send to include its FX output
         float sirenOut = gDubSiren.process();

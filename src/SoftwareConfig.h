@@ -145,6 +145,16 @@ constexpr float kFilterOffThreshold = 0.01f;
 constexpr float kFilterBypassRampMs = 5.f;
 
 // ---------------------------------------------------------------------------
+// Mic-mode input HPF (config.json routing.in.*.hpf, Hz)
+// ---------------------------------------------------------------------------
+
+/// Cascaded 2nd-order stages → 24 dB/oct Butterworth slope.
+constexpr int   kMicHpfStages = 2;
+constexpr float kMicHpfQ      = 0.707f; ///< Butterworth pole Q (maximally flat)
+constexpr float kMicHpfFMin   = 20.f;   ///< Minimum cutoff when hpf > 0 (Hz)
+constexpr float kMicHpfFMax   = 300.f;  ///< Maximum cutoff (Hz); 0 in config = off
+
+// ---------------------------------------------------------------------------
 // Kill switches — crossover frequencies (KillSwitch)
 // ---------------------------------------------------------------------------
 
@@ -293,7 +303,7 @@ constexpr int kGuiUpdateIntervalSamples = 2205;
 constexpr int kGuiStaticBufSendDivisor = 40;
 
 /// Float count for GUI buffer 6 (mux, routing, ignoredPots). Must match sketch.js.
-constexpr int kGuiConfigMetaHeaderFloats = 25;
+constexpr int kGuiConfigMetaHeaderFloats = 29;
 constexpr int kGuiConfigMetaSize         = kGuiConfigMetaHeaderFloats + 32; // 16 ignored pairs max
 
 /// Raw MUX grid for GUI buffer 7: kNumMux × kPotsPerMux (must match HardwareConfig.h).

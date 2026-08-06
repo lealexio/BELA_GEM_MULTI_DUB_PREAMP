@@ -95,29 +95,34 @@ static bool boolOf(JSONValue* obj, const wchar_t* key, bool defaultVal) {
 }
 
 /**
- * Reads one routing.in entry as either a legacy number or {channel, mic}.
+ * Reads one routing.in entry as either a legacy number or {channel, mic, hpf}.
  * @param inObj       Parent "in" object
  * @param key         Entry key (e.g. L"aux1")
  * @param channelOut  Receives the Bela channel index
  * @param micOut      Receives mic flag (false when legacy number or absent)
+ * @param hpfOut      Receives HPF cutoff Hz (0 when legacy / absent); may be nullptr
  * @param channelDef  Default channel if key is missing
  * @param micDef      Default mic flag if key/field is missing
+ * @param hpfDef      Default HPF Hz if key/field is missing
  */
 static void readInEntry(JSONValue* inObj, const wchar_t* key,
-                        int* channelOut, bool* micOut,
-                        int channelDef, bool micDef) {
+                        int* channelOut, bool* micOut, float* hpfOut,
+                        int channelDef, bool micDef, float hpfDef) {
     *channelOut = channelDef;
     *micOut     = micDef;
+    if(hpfOut) *hpfOut = hpfDef;
     JSONValue* v = child(inObj, key);
     if(!v) return;
     if(v->IsNumber()) {
         *channelOut = (int)v->AsNumber();
         *micOut     = false;
+        if(hpfOut) *hpfOut = 0.f;
         return;
     }
     if(v->IsObject()) {
         *channelOut = (int)numOf(v, L"channel", channelDef);
         *micOut     = boolOf(v, L"mic", micDef);
+        if(hpfOut) *hpfOut = (float)numOf(v, L"hpf", hpfDef);
     }
 }
 
@@ -202,26 +207,27 @@ bool ConfigLoader::load(const char* path) {
             VU_MID_OUT   = (int)numOf(outObj, L"vuMid",   VU_MID_OUT);
             VU_TOP_OUT   = (int)numOf(outObj, L"vuTop",   VU_TOP_OUT);
         }
-        // inputs — fx returns + channel strip audio inputs ({channel, mic} or legacy int)
+        // inputs — fx returns + channel strip audio inputs ({channel, mic, hpf} or legacy int)
         JSONValue* inObj = child(routObj, L"in");
         if(inObj) {
-            bool micIgnored = false;
-            readInEntry(inObj, L"fx1Return", &FX1_RETURN_IN, &micIgnored,
-                        FX1_RETURN_IN, false);
-            readInEntry(inObj, L"fx2Return", &FX2_RETURN_IN, &micIgnored,
-                        FX2_RETURN_IN, false);
+            bool  micIgnored = false;
+            float hpfIgnored = 0.f;
+            readInEntry(inObj, L"fx1Return", &FX1_RETURN_IN, &micIgnored, &hpfIgnored,
+                        FX1_RETURN_IN, false, 0.f);
+            readInEntry(inObj, L"fx2Return", &FX2_RETURN_IN, &micIgnored, &hpfIgnored,
+                        FX2_RETURN_IN, false, 0.f);
             readInEntry(inObj, L"aux1",
-                        &AUX1_CONFIG.audioIns[0], &AUX1_CONFIG.micMode,
-                        AUX1_CONFIG.audioIns[0], AUX1_CONFIG.micMode);
+                        &AUX1_CONFIG.audioIns[0], &AUX1_CONFIG.micMode, &AUX1_CONFIG.hpfHz,
+                        AUX1_CONFIG.audioIns[0], AUX1_CONFIG.micMode, AUX1_CONFIG.hpfHz);
             readInEntry(inObj, L"aux2",
-                        &AUX2_CONFIG.audioIns[0], &AUX2_CONFIG.micMode,
-                        AUX2_CONFIG.audioIns[0], AUX2_CONFIG.micMode);
+                        &AUX2_CONFIG.audioIns[0], &AUX2_CONFIG.micMode, &AUX2_CONFIG.hpfHz,
+                        AUX2_CONFIG.audioIns[0], AUX2_CONFIG.micMode, AUX2_CONFIG.hpfHz);
             readInEntry(inObj, L"aux3",
-                        &AUX3_CONFIG.audioIns[0], &AUX3_CONFIG.micMode,
-                        AUX3_CONFIG.audioIns[0], AUX3_CONFIG.micMode);
+                        &AUX3_CONFIG.audioIns[0], &AUX3_CONFIG.micMode, &AUX3_CONFIG.hpfHz,
+                        AUX3_CONFIG.audioIns[0], AUX3_CONFIG.micMode, AUX3_CONFIG.hpfHz);
             readInEntry(inObj, L"aux4",
-                        &AUX4_CONFIG.audioIns[0], &AUX4_CONFIG.micMode,
-                        AUX4_CONFIG.audioIns[0], AUX4_CONFIG.micMode);
+                        &AUX4_CONFIG.audioIns[0], &AUX4_CONFIG.micMode, &AUX4_CONFIG.hpfHz,
+                        AUX4_CONFIG.audioIns[0], AUX4_CONFIG.micMode, AUX4_CONFIG.hpfHz);
         }
     }
 

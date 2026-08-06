@@ -168,9 +168,15 @@ var __belaPreampSketch = (() => {
     MIC_AUX2: 21,
     MIC_AUX3: 22,
     MIC_AUX4: 23,
-    IGNORED_COUNT: 24,
-    IGNORED_BASE: 25
+    HPF_AUX1: 24,
+    HPF_AUX2: 25,
+    HPF_AUX3: 26,
+    HPF_AUX4: 27,
+    IGNORED_COUNT: 28,
+    IGNORED_BASE: 29
   };
+  var MIC_HPF_HZ_MIN = 0;
+  var MIC_HPF_HZ_MAX = 300;
   var MASTER_EQ_CONFIG = {
     SAMPLE_RATE: 44100,
     FREQ_MIN: 20,
@@ -976,27 +982,33 @@ font-size:11px;color:#999;margin-top:10px;line-height:1.4;
     "in": {
       "fx1Return": {
         "channel": 6,
-        "mic": false
+        "mic": false,
+        "hpf": 0
       },
       "fx2Return": {
         "channel": 7,
-        "mic": false
+        "mic": false,
+        "hpf": 0
       },
       "aux1": {
         "channel": 0,
-        "mic": false
+        "mic": false,
+        "hpf": 0
       },
       "aux2": {
         "channel": 1,
-        "mic": false
+        "mic": false,
+        "hpf": 0
       },
       "aux3": {
         "channel": 3,
-        "mic": false
+        "mic": false,
+        "hpf": 0
       },
       "aux4": {
         "channel": 5,
-        "mic": false
+        "mic": false,
+        "hpf": 0
       }
     }
   };
@@ -1031,6 +1043,13 @@ font-size:11px;color:#999;margin-top:10px;line-height:1.4;
     if (val != null && typeof val === "object" && !Array.isArray(val))
       return !!val.mic;
     return false;
+  }
+  function routingInHpf(val) {
+    if (val != null && typeof val === "object" && !Array.isArray(val)) {
+      const h = Number(val.hpf);
+      return isNaN(h) ? 0 : h;
+    }
+    return 0;
   }
   function buildMappingPane() {
     const pane = el("div", { id: "pane-mapping", className: "tab-pane" });
@@ -1104,7 +1123,7 @@ font-size:11px;color:#999;margin-top:10px;line-height:1.4;
     title.textContent = "Audio I/O Routing";
     section.appendChild(title);
     const hint = el("div", { className: "routing-hint" });
-    hint.textContent = "Physical Bela channel numbers (0\u20139). Master may list one or two outputs, e.g. 0 or 0,1. Mic: bypass master ParamEQ / HPF-LPF / kills (Graphic EQ + Band Trim still apply).";
+    hint.textContent = "Physical Bela channel numbers (0\u20139). Master may list one or two outputs, e.g. 0 or 0,1. Mic: bypass master ParamEQ / HPF-LPF / kills (Graphic EQ + Band Trim still apply). HPF (Hz): mic dry high-pass (0 = off, 20\u2013300); DSP only when Mic is on.";
     section.appendChild(hint);
     const grid = el("div", { className: "routing-grid" });
     grid.appendChild(buildRoutingTable(
@@ -1135,16 +1154,16 @@ font-size:11px;color:#999;margin-top:10px;line-height:1.4;
     sub.textContent = heading;
     wrap.appendChild(sub);
     const tbl = el("table", { className: "mtable routing-table", id: `routing-${dir}-table` });
-    const micCol = withMic ? '<col class="col-check">' : "";
-    const micHead = withMic ? '<th class="col-check" title="Bypass ParamEQ / HPF-LPF / kills">Mic</th>' : "";
+    const extraCols = withMic ? '<col class="col-check"><col class="col-num">' : "";
+    const extraHead = withMic ? '<th class="col-check" title="Bypass ParamEQ / HPF-LPF / kills">Mic</th><th title="Mic dry HPF cutoff in Hz (0 = off)">HPF (Hz)</th>' : "";
     tbl.innerHTML = `
         <colgroup>
             <col class="col-name">
             <col class="col-num">
-            ${micCol}
+            ${extraCols}
         </colgroup>
         <thead><tr>
-            <th>Signal</th><th>Channel</th>${micHead}
+            <th>Signal</th><th>Channel</th>${extraHead}
         </tr></thead>
         <tbody id="routing-${dir}-tbody"></tbody>`;
     wrap.appendChild(tbl);
@@ -1162,7 +1181,8 @@ font-size:11px;color:#999;margin-top:10px;line-height:1.4;
       let cells = `<td class="pname" title="${key}">${key}</td><td><input type="${inputType}" value="${display}" data-dir="${dir}" data-key="${key}" class="ri" ${extraAttrs}></td>`;
       if (withMic) {
         const micChecked = routingInMic(raw) ? "checked" : "";
-        cells += `<td class="col-check"><input type="checkbox" class="ri-mic" data-dir="${dir}" data-key="${key}" ${micChecked} title="Mic mode: bypass ParamEQ / HPF-LPF / kills"></td>`;
+        const hpfVal = routingInHpf(raw);
+        cells += `<td class="col-check"><input type="checkbox" class="ri-mic" data-dir="${dir}" data-key="${key}" ${micChecked} title="Mic mode: bypass ParamEQ / HPF-LPF / kills"></td><td><input type="number" class="ri-hpf" data-dir="${dir}" data-key="${key}" value="${hpfVal}" min="${MIC_HPF_HZ_MIN}" max="${MIC_HPF_HZ_MAX}" step="1" title="Mic HPF Hz (0 = off)"></td>`;
       }
       tr.innerHTML = cells;
       tbody.appendChild(tr);
@@ -1225,6 +1245,12 @@ font-size:11px;color:#999;margin-top:10px;line-height:1.4;
       aux3: meta[M.MIC_AUX3] > 0.5,
       aux4: meta[M.MIC_AUX4] > 0.5
     };
+    const hpfHz = {
+      aux1: meta[M.HPF_AUX1] != null ? meta[M.HPF_AUX1] : 0,
+      aux2: meta[M.HPF_AUX2] != null ? meta[M.HPF_AUX2] : 0,
+      aux3: meta[M.HPF_AUX3] != null ? meta[M.HPF_AUX3] : 0,
+      aux4: meta[M.HPF_AUX4] != null ? meta[M.HPF_AUX4] : 0
+    };
     document.querySelectorAll(".ri").forEach((inp) => {
       const dir = inp.dataset.dir;
       const key = inp.dataset.key;
@@ -1235,6 +1261,11 @@ font-size:11px;color:#999;margin-top:10px;line-height:1.4;
     document.querySelectorAll(".ri-mic").forEach((cb) => {
       const key = cb.dataset.key;
       cb.checked = !!micFlags[key];
+    });
+    document.querySelectorAll(".ri-hpf").forEach((inp) => {
+      const key = inp.dataset.key;
+      const hz = hpfHz[key];
+      inp.value = hz != null ? String(Math.round(hz)) : "0";
     });
     updateMappingConflicts();
   }
@@ -1251,6 +1282,13 @@ font-size:11px;color:#999;margin-top:10px;line-height:1.4;
       const cb = document.querySelector(`.ri-mic[data-key="${key}"]`);
       return cb ? !!cb.checked : false;
     };
+    const readHpf = (key) => {
+      const inp = document.querySelector(`.ri-hpf[data-key="${key}"]`);
+      if (!inp) return 0;
+      const n = parseFloat(inp.value);
+      if (isNaN(n) || n < 0) return 0;
+      return Math.min(MIC_HPF_HZ_MAX, Math.max(MIC_HPF_HZ_MIN, Math.round(n)));
+    };
     const out = {};
     ROUTING_OUT_KEYS.forEach((key) => {
       const val = readChannel("out", key);
@@ -1260,7 +1298,7 @@ font-size:11px;color:#999;margin-top:10px;line-height:1.4;
     ROUTING_IN_KEYS.forEach((key) => {
       const ch = readChannel("in", key);
       if (ch === void 0) return;
-      inn[key] = { channel: ch, mic: readMic(key) };
+      inn[key] = { channel: ch, mic: readMic(key), hpf: readHpf(key) };
     });
     return { out, in: inn };
   }

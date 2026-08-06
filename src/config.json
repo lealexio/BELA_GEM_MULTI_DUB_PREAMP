@@ -27,12 +27,12 @@
       "vuTop":   6
     },
     "in": {
-      "fx1Return": { "channel": 6, "mic": false },
-      "fx2Return": { "channel": 7, "mic": false },
-      "aux1":      { "channel": 0, "mic": false },
-      "aux2":      { "channel": 1, "mic": false },
-      "aux3":      { "channel": 3, "mic": false },
-      "aux4":      { "channel": 5, "mic": false }
+      "fx1Return": { "channel": 6, "mic": false, "hpf": 0 },
+      "fx2Return": { "channel": 7, "mic": false, "hpf": 0 },
+      "aux1":      { "channel": 0, "mic": false, "hpf": 0 },
+      "aux2":      { "channel": 1, "mic": false, "hpf": 0 },
+      "aux3":      { "channel": 3, "mic": false, "hpf": 0 },
+      "aux4":      { "channel": 5, "mic": false, "hpf": 0 }
     }
   },
 

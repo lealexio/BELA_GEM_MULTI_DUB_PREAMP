@@ -82,8 +82,9 @@ extern int VU_TOP_OUT;
 // ---------------------------------------------------------------------------
 
 struct ChannelConfig {
-    int  audioIns[2]; ///< Bela audio input indices (-1 = unused slot).
-    bool micMode;     ///< true = bypass master ParamEq / HPF-LPF / kills.
+    int   audioIns[2]; ///< Bela audio input indices (-1 = unused slot).
+    bool  micMode;     ///< true = bypass master ParamEq / HPF-LPF / kills.
+    float hpfHz;       ///< Mic-path HPF cutoff (Hz); 0 = off. Applied only when micMode.
 };
 
 extern ChannelConfig AUX1_CONFIG;

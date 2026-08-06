@@ -2,7 +2,8 @@
 import { getContext } from '../context.js';
 import {
     POT_NAMES, SWITCH_NAMES, MUX_POTS_PER_MUX, MUX_RAW_SIZE,
-    CONFIG_META, I2C_BUS, DETECT_POT_MIN_DELTA
+    CONFIG_META, I2C_BUS, DETECT_POT_MIN_DELTA,
+    MIC_HPF_HZ_MIN, MIC_HPF_HZ_MAX
 } from '../config.js';
 import { ROUTING_CONFIG } from '../routing-config.js';
 import { el } from './utils.js';
@@ -22,7 +23,7 @@ const ROUTING_OUT_KEYS = [
 ];
 
 /**
- * Reads the channel number from a routing.in value (legacy number or {channel, mic}).
+ * Reads the channel number from a routing.in value (legacy number or {channel, mic, hpf}).
  * @param {*} val
  * @returns {number}
  */
@@ -42,6 +43,19 @@ function routingInMic(val) {
     if(val != null && typeof val === 'object' && !Array.isArray(val))
         return !!val.mic;
     return false;
+}
+
+/**
+ * Reads the HPF cutoff Hz from a routing.in value (legacy number → 0).
+ * @param {*} val
+ * @returns {number}
+ */
+function routingInHpf(val) {
+    if(val != null && typeof val === 'object' && !Array.isArray(val)) {
+        const h = Number(val.hpf);
+        return isNaN(h) ? 0 : h;
+    }
+    return 0;
 }
 
 export function buildMappingPane() {
@@ -143,7 +157,8 @@ function buildRoutingSection() {
     const hint = el('div', {className: 'routing-hint'});
     hint.textContent =
         'Physical Bela channel numbers (0–9). Master may list one or two outputs, e.g. 0 or 0,1. ' +
-        'Mic: bypass master ParamEQ / HPF-LPF / kills (Graphic EQ + Band Trim still apply).';
+        'Mic: bypass master ParamEQ / HPF-LPF / kills (Graphic EQ + Band Trim still apply). ' +
+        'HPF (Hz): mic dry high-pass (0 = off, 20–300); DSP only when Mic is on.';
     section.appendChild(hint);
 
     const grid = el('div', {className: 'routing-grid'});
@@ -170,7 +185,7 @@ function buildRoutingSection() {
  * @param {'in'|'out'} dir
  * @param {string[]} keys
  * @param {object} values
- * @param {boolean} withMic  When true, adds a Mic checkbox column (inputs only)
+ * @param {boolean} withMic  When true, adds Mic + HPF columns (inputs only)
  */
 function buildRoutingTable(heading, dir, keys, values, withMic) {
     const wrap = el('div', {className: 'mtable-wrap routing-table-wrap'});
@@ -179,20 +194,21 @@ function buildRoutingTable(heading, dir, keys, values, withMic) {
     wrap.appendChild(sub);
 
     const tbl = el('table', {className: 'mtable routing-table', id: `routing-${dir}-table`});
-    const micCol = withMic
-        ? '<col class="col-check">'
+    const extraCols = withMic
+        ? '<col class="col-check"><col class="col-num">'
         : '';
-    const micHead = withMic
-        ? '<th class="col-check" title="Bypass ParamEQ / HPF-LPF / kills">Mic</th>'
+    const extraHead = withMic
+        ? '<th class="col-check" title="Bypass ParamEQ / HPF-LPF / kills">Mic</th>' +
+          '<th title="Mic dry HPF cutoff in Hz (0 = off)">HPF (Hz)</th>'
         : '';
     tbl.innerHTML = `
         <colgroup>
             <col class="col-name">
             <col class="col-num">
-            ${micCol}
+            ${extraCols}
         </colgroup>
         <thead><tr>
-            <th>Signal</th><th>Channel</th>${micHead}
+            <th>Signal</th><th>Channel</th>${extraHead}
         </tr></thead>
         <tbody id="routing-${dir}-tbody"></tbody>`;
     wrap.appendChild(tbl);
@@ -216,10 +232,14 @@ function buildRoutingTable(heading, dir, keys, values, withMic) {
             `data-dir="${dir}" data-key="${key}" class="ri" ${extraAttrs}></td>`;
         if(withMic) {
             const micChecked = routingInMic(raw) ? 'checked' : '';
+            const hpfVal = routingInHpf(raw);
             cells +=
                 `<td class="col-check"><input type="checkbox" class="ri-mic" ` +
                 `data-dir="${dir}" data-key="${key}" ${micChecked} ` +
-                `title="Mic mode: bypass ParamEQ / HPF-LPF / kills"></td>`;
+                `title="Mic mode: bypass ParamEQ / HPF-LPF / kills"></td>` +
+                `<td><input type="number" class="ri-hpf" data-dir="${dir}" data-key="${key}" ` +
+                `value="${hpfVal}" min="${MIC_HPF_HZ_MIN}" max="${MIC_HPF_HZ_MAX}" step="1" ` +
+                `title="Mic HPF Hz (0 = off)"></td>`;
         }
         tr.innerHTML = cells;
         tbody.appendChild(tr);
@@ -299,6 +319,13 @@ export function fillRoutingFromConfigMeta() {
         aux4: meta[M.MIC_AUX4] > 0.5
     };
 
+    const hpfHz = {
+        aux1: meta[M.HPF_AUX1] != null ? meta[M.HPF_AUX1] : 0,
+        aux2: meta[M.HPF_AUX2] != null ? meta[M.HPF_AUX2] : 0,
+        aux3: meta[M.HPF_AUX3] != null ? meta[M.HPF_AUX3] : 0,
+        aux4: meta[M.HPF_AUX4] != null ? meta[M.HPF_AUX4] : 0
+    };
+
     document.querySelectorAll('.ri').forEach(inp => {
         const dir = inp.dataset.dir;
         const key = inp.dataset.key;
@@ -310,6 +337,12 @@ export function fillRoutingFromConfigMeta() {
     document.querySelectorAll('.ri-mic').forEach(cb => {
         const key = cb.dataset.key;
         cb.checked = !!micFlags[key];
+    });
+
+    document.querySelectorAll('.ri-hpf').forEach(inp => {
+        const key = inp.dataset.key;
+        const hz = hpfHz[key];
+        inp.value = hz != null ? String(Math.round(hz)) : '0';
     });
     updateMappingConflicts();
 }
@@ -330,6 +363,14 @@ export function collectRoutingFromForm() {
         return cb ? !!cb.checked : false;
     };
 
+    const readHpf = (key) => {
+        const inp = document.querySelector(`.ri-hpf[data-key="${key}"]`);
+        if(!inp) return 0;
+        const n = parseFloat(inp.value);
+        if(isNaN(n) || n < 0) return 0;
+        return Math.min(MIC_HPF_HZ_MAX, Math.max(MIC_HPF_HZ_MIN, Math.round(n)));
+    };
+
     const out = {};
     ROUTING_OUT_KEYS.forEach(key => {
         const val = readChannel('out', key);
@@ -340,7 +381,7 @@ export function collectRoutingFromForm() {
     ROUTING_IN_KEYS.forEach(key => {
         const ch = readChannel('in', key);
         if(ch === undefined) return;
-        inn[key] = { channel: ch, mic: readMic(key) };
+        inn[key] = { channel: ch, mic: readMic(key), hpf: readHpf(key) };
     });
 
     return { out, in: inn };
