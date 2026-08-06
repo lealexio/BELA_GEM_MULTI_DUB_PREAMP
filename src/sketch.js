@@ -327,7 +327,6 @@ var __belaPreampSketch = (() => {
       meterAnimId: null,
       meterVu: [],
       meterPeakDbs: [],
-      meterDbs: [],
       meterClipLeds: [],
       recentChanges: [],
       prevPotValues: new Float32Array(60).fill(-1),
@@ -2209,20 +2208,19 @@ border-radius:6px;background:#fafafa;
   }
 
   // gui/dom/meters.js
-  var _codecGains = {
-    inputs: new Array(10).fill(0),
-    outputs: new Array(10).fill(0)
-  };
   var INPUT_GAIN_MIN = -12;
   var INPUT_GAIN_MAX = 10;
   var INPUT_GAIN_STEP = 1;
   var HP_GAIN_MIN = -63;
   var HP_GAIN_MAX = 0;
   var HP_GAIN_STEP = 1;
+  var METER_COUNT = 13;
+  var _inputPickers = new Array(10).fill(null);
+  var _outputPickers = new Array(10).fill(null);
   function _belaControlReady2() {
     return typeof Bela !== "undefined" && Bela.control && Bela.control.ws && Bela.control.ws.readyState === 1;
   }
-  function _sendGain(payload, _desc) {
+  function _sendGain(payload) {
     if (!_belaControlReady2()) return;
     Bela.control.send(payload);
   }
@@ -2270,8 +2268,6 @@ border-radius:6px;background:#fafafa;
     refresh();
     return { btnDec, btnInc, valEl, setValue };
   }
-  var _inputPickers = new Array(10).fill(null);
-  var _outputPickers = new Array(10).fill(null);
   function _buildGainByBuf3(inputChannels, outputChannels) {
     const map = {};
     inputChannels.forEach(({ ch, label, buf3 }) => {
@@ -2290,22 +2286,16 @@ border-radius:6px;background:#fafafa;
     const min = isInput ? INPUT_GAIN_MIN : HP_GAIN_MIN;
     const max = isInput ? INPUT_GAIN_MAX : HP_GAIN_MAX;
     const step = isInput ? INPUT_GAIN_STEP : HP_GAIN_STEP;
-    const init = isInput ? _codecGains.inputs[ch] : _codecGains.outputs[ch];
-    const controls = _buildMeterGainControls(init, min, max, step, (val) => {
+    const controls = _buildMeterGainControls(0, min, max, step, (val) => {
       if (isInput) {
-        _codecGains.inputs[ch] = val;
-        _sendGain(
-          { event: "custom", inputGain: val, channel: ch },
-          `${label} \u2192 ${val} dB`
-        );
+        _sendGain({ event: "custom", inputGain: val, channel: ch });
       } else {
-        _codecGains.outputs[ch] = val;
-        _sendGain(
-          { event: "custom", hpGain: val, channel: ch },
-          `${label} \u2192 ${val} dB`
-        );
+        _sendGain({ event: "custom", hpGain: val, channel: ch });
       }
     });
+    controls.btnDec.title = `${label}: -${step} dB`;
+    controls.btnInc.title = `${label}: +${step} dB`;
+    controls.valEl.title = isInput ? `${label} ADC gain (\u221212\u202610 dB)` : `${label} HP gain (\u221263\u20260 dB)`;
     if (isInput)
       _inputPickers[ch] = controls;
     else
@@ -2324,13 +2314,15 @@ border-radius:6px;background:#fafafa;
     const boxCountRed = config.boxCountRed || 2;
     const boxCountYellow = config.boxCountYellow || 3;
     const boxGapFraction = config.boxGapFraction || 0.25;
+    const redStart = boxCount - boxCountRed + 1;
+    const yellowStart = boxCount - boxCountRed - boxCountYellow + 1;
     const redOn = "rgba(255,47,30,0.9)";
     const redOff = "rgba(64,12,8,0.9)";
     const yellowOn = "rgba(255,215,5,0.9)";
     const yellowOff = "rgba(64,53,0,0.9)";
     const greenOn = "rgba(53,255,30,0.9)";
     const greenOff = "rgba(13,64,8,0.9)";
-    const ctx = canvas.getContext("2d");
+    const ctx2d = canvas.getContext("2d");
     let width = 0;
     let height = 0;
     let boxHeight = 0;
@@ -2360,61 +2352,49 @@ border-radius:6px;background:#fafafa;
       height = newH;
       canvas.width = pxW;
       canvas.height = pxH;
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx2d.setTransform(dpr, 0, 0, dpr, 0, 0);
       boxWidth = width / (boxCount + (boxCount + 1) * boxGapFraction);
       boxGapX = boxWidth * boxGapFraction;
       boxHeight = Math.max(8, height - boxGapX * 2);
       boxGapY = boxGapX;
       needsRedraw = true;
     }
-    function getId(index) {
-      return index + 1;
-    }
     function litBoxCount(val) {
       return Math.ceil(val / max * boxCount);
     }
-    function isOn(id, val) {
-      return id <= litBoxCount(val);
+    function boxColor(id, lit) {
+      const on = id <= lit;
+      if (id >= redStart) return on ? redOn : redOff;
+      if (id >= yellowStart) return on ? yellowOn : yellowOff;
+      return on ? greenOn : greenOff;
     }
-    function getBoxColor(id, val) {
-      if (id > boxCount - boxCountRed)
-        return isOn(id, val) ? redOn : redOff;
-      if (id > boxCount - boxCountRed - boxCountYellow)
-        return isOn(id, val) ? yellowOn : yellowOff;
-      return isOn(id, val) ? greenOn : greenOff;
-    }
-    function drawBoxes(val) {
-      ctx.save();
-      ctx.translate(boxGapX, boxGapY);
+    function drawBoxes(lit) {
+      ctx2d.save();
+      ctx2d.translate(boxGapX, boxGapY);
       for (let i = 0; i < boxCount; i++) {
-        const id = getId(i);
-        ctx.beginPath();
-        ctx.rect(0, 0, boxWidth, boxHeight);
-        ctx.fillStyle = getBoxColor(id, val);
-        ctx.fill();
-        ctx.translate(boxWidth + boxGapX, 0);
+        const id = i + 1;
+        ctx2d.fillStyle = boxColor(id, lit);
+        ctx2d.fillRect(0, 0, boxWidth, boxHeight);
+        ctx2d.translate(boxWidth + boxGapX, 0);
       }
-      ctx.restore();
+      ctx2d.restore();
     }
     function drawPeakIndicator(peakVal) {
       if (peakVal < 1.5) return;
       const innerLeft = boxGapX;
       const innerRight = width - boxGapX;
       const x = innerLeft + peakVal / max * (innerRight - innerLeft);
-      ctx.save();
-      ctx.strokeStyle = "#fff";
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.moveTo(x, boxGapY);
-      ctx.lineTo(x, height - boxGapY);
-      ctx.stroke();
-      ctx.restore();
+      ctx2d.strokeStyle = "#fff";
+      ctx2d.lineWidth = 2;
+      ctx2d.beginPath();
+      ctx2d.moveTo(x, boxGapY);
+      ctx2d.lineTo(x, height - boxGapY);
+      ctx2d.stroke();
     }
     if (typeof ResizeObserver !== "undefined") {
-      const ro = new ResizeObserver(() => {
+      new ResizeObserver(() => {
         resize();
-      });
-      ro.observe(canvas);
+      }).observe(canvas);
     }
     resize();
     return {
@@ -2423,11 +2403,11 @@ border-radius:6px;background:#fafafa;
         curVal = Math.max(0, Math.min(max, level));
         curPeakVal = Math.max(0, Math.min(max, peak));
       },
-      /** Returns peak position as 0–100 (for external label placement). */
+      /** Returns peak position as 0–100 (for peak label placement). */
       getPeakPct() {
         return curPeakVal;
       },
-      /** Redraws the meter only when lit boxes or peak position changed. */
+      /** Redraws only when lit boxes or peak pixel position changed. */
       draw() {
         const lit = litBoxCount(curVal);
         const peakPx = curPeakVal < 1.5 ? -1 : Math.round(curPeakVal / max * width);
@@ -2436,14 +2416,21 @@ border-radius:6px;background:#fafafa;
         lastLitBoxes = lit;
         lastPeakPx = peakPx;
         needsRedraw = false;
-        ctx.fillStyle = "rgb(32,32,32)";
-        ctx.fillRect(0, 0, width, height);
-        drawBoxes(curVal);
+        ctx2d.fillStyle = "rgb(32,32,32)";
+        ctx2d.fillRect(0, 0, width, height);
+        drawBoxes(lit);
         drawPeakIndicator(curPeakVal);
       },
-      /** Recomputes layout after a window resize or tab switch. */
       resize
     };
+  }
+  function levelToBarPct(raw) {
+    const dB = raw > 32e-6 ? 20 * Math.log10(raw) : -90;
+    return (Math.max(dB, -60) + 60) / 60 * 100;
+  }
+  function levelToDbLabel(raw) {
+    const dB = raw > 32e-6 ? 20 * Math.log10(raw) : -90;
+    return dB < -80 ? "-\u221E" : dB.toFixed(1) + "\u202FdB";
   }
   function buildMetersPane() {
     const pane = el("div", { id: "pane-meters", className: "tab-pane" });
@@ -2455,17 +2442,19 @@ border-radius:6px;background:#fafafa;
       _inputPickers[ch] = null;
       _outputPickers[ch] = null;
     }
-    getContext().meterLabelEls = [];
+    const ctx = getContext();
+    ctx.meterVu = [];
+    ctx.meterPeakDbs = [];
+    ctx.meterClipLeds = [];
     levelGroups.forEach((group) => {
       const card = el("div", { className: "card meters-card" });
       card.appendChild(cardTitle(group.label));
       const row = el("div", { className: "meter-group" });
       group.indices.forEach((idx) => {
-        const ch = el("div", { className: "meter-ch" });
+        const chRow = el("div", { className: "meter-ch" });
         const mid = el("div", { className: "meter-id" });
         const lbl = el("div", { className: "meter-lbl" });
         lbl.textContent = levelLabels[idx] || String(idx);
-        getContext().meterLabelEls[idx] = lbl;
         mid.appendChild(lbl);
         const gainDesc = gainByBuf3[idx];
         const gainCtrl = gainDesc ? _createInlineGain(gainDesc) : null;
@@ -2476,7 +2465,7 @@ border-radius:6px;background:#fafafa;
         const mwrap = el("div", { className: "meter-wrap" });
         mwrap.title = "Click to reset peak hold";
         const cnv = el("canvas", { className: "meter-canvas", id: "mc-" + idx });
-        getContext().meterVu[idx] = createVuMeter(cnv, {
+        ctx.meterVu[idx] = createVuMeter(cnv, {
           boxCount: VU_BOX_COUNT,
           boxCountRed: VU_BOX_COUNT_RED,
           boxCountYellow: VU_BOX_COUNT_YELLOW,
@@ -2486,7 +2475,7 @@ border-radius:6px;background:#fafafa;
         const peakDb = el("div", { className: "meter-peak-db", id: "mpd-" + idx });
         peakDb.style.left = "0%";
         peakDb.textContent = "-\u221E";
-        getContext().meterPeakDbs[idx] = peakDb;
+        ctx.meterPeakDbs[idx] = peakDb;
         const clipLed = el("div", {
           className: "meter-clip-led",
           id: "mclip-" + idx,
@@ -2495,18 +2484,17 @@ border-radius:6px;background:#fafafa;
           "aria-label": "Clip indicator off"
         });
         clipLed.innerHTML = '<span class="meter-clip-led__bezel"></span><span class="meter-clip-led__core"></span>';
-        getContext().meterClipLeds[idx] = clipLed;
+        ctx.meterClipLeds[idx] = clipLed;
         mwrap.addEventListener("click", () => {
-          const c = getContext();
-          c.peakHoldLevel[idx] = 0;
-          c.peakHoldExpire[idx] = 0;
+          ctx.peakHoldLevel[idx] = 0;
+          ctx.peakHoldExpire[idx] = 0;
         });
         const scale = el("div", { className: "meter-scale" });
-        VU_SCALE_TICKS.forEach((db) => {
+        for (let t = 0; t < VU_SCALE_TICKS.length; t++) {
           const tick = el("span");
-          tick.textContent = String(db);
+          tick.textContent = String(VU_SCALE_TICKS[t]);
           scale.appendChild(tick);
-        });
+        }
         mwrap.appendChild(cnv);
         mwrap.appendChild(peakDb);
         body.appendChild(mwrap);
@@ -2518,10 +2506,10 @@ border-radius:6px;background:#fafafa;
         } else {
           strip.appendChild(body);
         }
-        ch.appendChild(strip);
-        ch.appendChild(clipLed);
-        ch.appendChild(mid);
-        row.appendChild(ch);
+        chRow.appendChild(strip);
+        chRow.appendChild(clipLed);
+        chRow.appendChild(mid);
+        row.appendChild(chRow);
       });
       card.appendChild(row);
       columns.appendChild(card);
@@ -2530,40 +2518,31 @@ border-radius:6px;background:#fafafa;
     pane.appendChild(wrap);
     return pane;
   }
-  function applyRoutingConfig(_configMeta) {
-  }
-  function levelToBarPct(raw) {
-    const dB = raw > 32e-6 ? 20 * Math.log10(raw) : -90;
-    return (Math.max(dB, -60) + 60) / 60 * 100;
-  }
-  function levelToDbLabel(raw) {
-    const dB = raw > 32e-6 ? 20 * Math.log10(raw) : -90;
-    return dB < -80 ? "-\u221E" : dB.toFixed(1) + "\u202FdB";
-  }
   function startMeterAnim() {
     if (getContext().meterAnimId != null) return;
     function tick() {
-      if (getContext().currentTab !== 1) {
-        getContext().meterAnimId = null;
+      const ctx = getContext();
+      if (ctx.currentTab !== 1) {
+        ctx.meterAnimId = null;
         return;
       }
       updateMetersFrame();
-      getContext().meterAnimId = requestAnimationFrame(tick);
+      ctx.meterAnimId = requestAnimationFrame(tick);
     }
     getContext().meterAnimId = requestAnimationFrame(tick);
   }
   function stopMeterAnim() {
-    if (getContext().meterAnimId == null) return;
-    cancelAnimationFrame(getContext().meterAnimId);
-    getContext().meterAnimId = null;
-  }
-  function isLevelClipping(raw) {
-    return raw >= CLIP_THRESHOLD;
+    const ctx = getContext();
+    if (ctx.meterAnimId == null) return;
+    cancelAnimationFrame(ctx.meterAnimId);
+    ctx.meterAnimId = null;
   }
   function updateMetersFrame() {
     const ctx = getContext();
     const now = performance.now();
-    for (let i = 0; i < 13; i++) {
+    for (let i = 0; i < METER_COUNT; i++) {
+      const vu = ctx.meterVu[i];
+      if (!vu) continue;
       const raw = ctx.audioLevels[i];
       const smooth = ctx.meterSmooth[i];
       const coeff = raw > smooth ? METER_ATTACK : METER_RELEASE;
@@ -2574,7 +2553,7 @@ border-radius:6px;background:#fafafa;
       } else if (now >= ctx.peakHoldExpire[i]) {
         ctx.peakHoldLevel[i] *= PEAK_DECAY;
       }
-      if (isLevelClipping(raw) || isLevelClipping(ctx.peakHoldLevel[i]))
+      if (raw >= CLIP_THRESHOLD || ctx.peakHoldLevel[i] >= CLIP_THRESHOLD)
         ctx.clipHoldUntil[i] = now + CLIP_HOLD_MS;
       const clipping = now < ctx.clipHoldUntil[i];
       const clipLed = ctx.meterClipLeds[i];
@@ -2582,21 +2561,21 @@ border-radius:6px;background:#fafafa;
         const on = clipping;
         if (clipLed.classList.contains("on") !== on) {
           clipLed.classList.toggle("on", on);
-          clipLed.setAttribute("aria-label", on ? "Clip indicator on" : "Clip indicator off");
+          clipLed.setAttribute(
+            "aria-label",
+            on ? "Clip indicator on" : "Clip indicator off"
+          );
         }
       }
-      if (ctx.meterPeakDbs[i])
-        ctx.meterPeakDbs[i].classList.toggle("clip", clipping);
-      const vu = ctx.meterVu[i];
-      if (vu) {
-        vu.setTargets(
-          levelToBarPct(ctx.meterSmooth[i]),
-          levelToBarPct(ctx.peakHoldLevel[i])
-        );
-        vu.draw();
-      }
       const peakDb = ctx.meterPeakDbs[i];
-      if (peakDb && vu) {
+      if (peakDb)
+        peakDb.classList.toggle("clip", clipping);
+      vu.setTargets(
+        levelToBarPct(ctx.meterSmooth[i]),
+        levelToBarPct(ctx.peakHoldLevel[i])
+      );
+      vu.draw();
+      if (peakDb) {
         const pkPct = vu.getPeakPct();
         const peakLbl = levelToDbLabel(ctx.peakHoldLevel[i]);
         if (peakDb.textContent !== peakLbl)
@@ -3210,7 +3189,6 @@ border-radius:6px;background:#fafafa;
       }
       if (b[6] && !ctx.configMeta) {
         ctx.configMeta = Float32Array.from(b[6]);
-        applyRoutingConfig(ctx.configMeta);
         fillRoutingFromConfigMeta();
       }
       if (b[6]) {

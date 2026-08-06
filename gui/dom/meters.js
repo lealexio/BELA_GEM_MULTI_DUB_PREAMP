@@ -12,28 +12,9 @@ import { ROUTING_CONFIG } from '../routing-config.js';
 import { el, cardTitle } from './utils.js';
 
 // ---------------------------------------------------------------------------
-// Real-time codec gain control via Bela.control WebSocket.
-//
-// Flow:  [Button] → Bela.control.send({ event:'custom', ...payload })
-//                       ↓  ws://bela:5555/gui_control
-//                   render.cpp : gGui.setControlDataCallback(...)
-//                       ↓  seasocks thread (non-RT, I2C-safe)
-//                   Bela_setHpLevel / Bela_setAudioInputGain  (written immediately)
-//
-// Supported payloads:
-//   { event:'custom', hpGain: N, channel: C }    — HP out ch C, [-63, 0] dB
-//   { event:'custom', inputGain: N, channel: C } — ADC PGA ch C, [-12, 10] dB
+// Codec gains via Bela.control (non-RT seasocks → Bela_setHpLevel / InputGain).
+// Payloads: { event:'custom', hpGain|inputGain: N, channel: C }
 // ---------------------------------------------------------------------------
-
-/**
- * Codec gain state — indexed by physical channel, all defaults 0 dB.
- * inputs[ch] = ADC PGA gain for physical ADC channel ch.
- * outputs[ch] = HP output gain for physical output channel ch.
- */
-const _codecGains = {
-    inputs:  new Array(10).fill(0),
-    outputs: new Array(10).fill(0),
-};
 
 const INPUT_GAIN_MIN  = -12;
 const INPUT_GAIN_MAX  = 10;
@@ -41,6 +22,11 @@ const INPUT_GAIN_STEP = 1;
 const HP_GAIN_MIN     = -63;
 const HP_GAIN_MAX     = 0;
 const HP_GAIN_STEP    = 1;
+const METER_COUNT     = 13;
+
+/** Picker handles for syncCodecGains() — indexed by physical channel. */
+const _inputPickers  = new Array(10).fill(null);
+const _outputPickers = new Array(10).fill(null);
 
 /** Returns true when Bela.control WebSocket is open and ready to send. */
 function _belaControlReady() {
@@ -48,29 +34,19 @@ function _belaControlReady() {
     return typeof Bela !== 'undefined' &&
            Bela.control &&
            Bela.control.ws &&
-           Bela.control.ws.readyState === 1; // WebSocket.OPEN
+           Bela.control.ws.readyState === 1;
 }
 
-/**
- * Sends a JSON payload to render.cpp via Bela.control.
- * @param {object} payload
- * @param {string} _desc - unused (kept for call-site clarity)
- */
-function _sendGain(payload, _desc) {
+/** Sends a codec-gain payload to render.cpp via Bela.control. */
+function _sendGain(payload) {
     if (!_belaControlReady()) return;
     /* global Bela */
     Bela.control.send(payload);
 }
 
 /**
- * Builds split gain controls for a meter row: − left of VU, + right of VU,
- * value display under the channel name.
- * @returns {{
- *   btnDec: Element,
- *   btnInc: Element,
- *   valEl: Element,
- *   setValue: (n: number) => void
- * }}
+ * Builds split gain controls: − left of VU, + right, value under channel name.
+ * @returns {{ btnDec: Element, btnInc: Element, valEl: Element, setValue: (n: number) => void }}
  */
 function _buildMeterGainControls(initVal, min, max, step, onSend) {
     const btnDec = el('button', {
@@ -104,7 +80,7 @@ function _buildMeterGainControls(initVal, min, max, step, onSend) {
         onSend(current);
     }
 
-    /** Silently update display to match a value received from the C++ state. */
+    /** Silently update display from buffer 8 (no Bela.control send). */
     function setValue(v) {
         const clamped = Math.round(Math.max(min, Math.min(max, v)));
         if (clamped === current) return;
@@ -125,16 +101,8 @@ function _buildMeterGainControls(initVal, min, max, step, onSend) {
     return { btnDec, btnInc, valEl, setValue };
 }
 
-// Picker handles for external sync via syncCodecGains() — indexed by physical channel.
-// _inputPickers[ch]  = ADC input picker for physical ADC channel ch.
-// _outputPickers[ch] = HP output picker for physical output channel ch.
-const _inputPickers  = new Array(10).fill(null);
-const _outputPickers = new Array(10).fill(null);
-
 /**
  * Builds buf3-index → codec gain descriptor map from routing channels.
- * @param {Array<{ch:number, label:string, buf3:number}>} inputChannels
- * @param {Array<{ch:number, label:string, buf3:number}>} outputChannels
  * @returns {Object<number, {kind:'input'|'output', ch:number, label:string}>}
  */
 function _buildGainByBuf3(inputChannels, outputChannels) {
@@ -151,10 +119,8 @@ function _buildGainByBuf3(inputChannels, outputChannels) {
 }
 
 /**
- * Builds split − / + / value controls for one meter and registers setValue
- * in _inputPickers / _outputPickers for syncCodecGains().
+ * Creates − / + / value controls for one meter and registers them for sync.
  * @param {{kind:'input'|'output', ch:number, label:string}} desc
- * @returns {{btnDec: Element, btnInc: Element, valEl: Element}|null}
  */
 function _createInlineGain(desc) {
     const { kind, ch, label } = desc;
@@ -162,19 +128,20 @@ function _createInlineGain(desc) {
     const min  = isInput ? INPUT_GAIN_MIN  : HP_GAIN_MIN;
     const max  = isInput ? INPUT_GAIN_MAX  : HP_GAIN_MAX;
     const step = isInput ? INPUT_GAIN_STEP : HP_GAIN_STEP;
-    const init = isInput ? _codecGains.inputs[ch] : _codecGains.outputs[ch];
 
-    const controls = _buildMeterGainControls(init, min, max, step, (val) => {
+    const controls = _buildMeterGainControls(0, min, max, step, (val) => {
         if (isInput) {
-            _codecGains.inputs[ch] = val;
-            _sendGain({ event: 'custom', inputGain: val, channel: ch },
-                `${label} → ${val} dB`);
+            _sendGain({ event: 'custom', inputGain: val, channel: ch });
         } else {
-            _codecGains.outputs[ch] = val;
-            _sendGain({ event: 'custom', hpGain: val, channel: ch },
-                `${label} → ${val} dB`);
+            _sendGain({ event: 'custom', hpGain: val, channel: ch });
         }
     });
+
+    controls.btnDec.title = `${label}: -${step} dB`;
+    controls.btnInc.title = `${label}: +${step} dB`;
+    controls.valEl.title  = isInput
+        ? `${label} ADC gain (−12…10 dB)`
+        : `${label} HP gain (−63…0 dB)`;
 
     if (isInput)
         _inputPickers[ch] = controls;
@@ -185,10 +152,8 @@ function _createInlineGain(desc) {
 }
 
 /**
- * Synchronises picker displays from buffer 8 broadcast by render.cpp (~20 fps).
- * Layout: buf[0..9] = ADC input gain by physical ch (dB),
- *         buf[10..19] = HP output gain by physical ch (dB).
- * Called from main.js draw loop — does NOT trigger Bela.control.send().
+ * Synchronises picker displays from buffer 8 (~20 fps).
+ * buf[0..9] = ADC input gain, buf[10..19] = HP output gain (physical ch, dB).
  * @param {Float32Array} buf
  */
 export function syncCodecGains(buf) {
@@ -198,12 +163,19 @@ export function syncCodecGains(buf) {
     }
 }
 
-export function createVuMeter(canvas, config) {
+/**
+ * Creates a segmented horizontal VU meter on a canvas.
+ * @returns {{ setTargets: Function, getPeakPct: Function, draw: Function, resize: Function }}
+ */
+function createVuMeter(canvas, config) {
     const max            = config.max || 100;
     const boxCount       = config.boxCount || 15;
     const boxCountRed    = config.boxCountRed || 2;
     const boxCountYellow = config.boxCountYellow || 3;
     const boxGapFraction = config.boxGapFraction || 0.25;
+
+    const redStart    = boxCount - boxCountRed + 1;
+    const yellowStart = boxCount - boxCountRed - boxCountYellow + 1;
 
     const redOn     = 'rgba(255,47,30,0.9)';
     const redOff    = 'rgba(64,12,8,0.9)';
@@ -212,7 +184,7 @@ export function createVuMeter(canvas, config) {
     const greenOn   = 'rgba(53,255,30,0.9)';
     const greenOff  = 'rgba(13,64,8,0.9)';
 
-    const ctx = canvas.getContext('2d');
+    const ctx2d = canvas.getContext('2d');
     let width = 0;
     let height = 0;
     let boxHeight = 0;
@@ -233,24 +205,23 @@ export function createVuMeter(canvas, config) {
         const style = window.getComputedStyle(canvas);
         let cssW = rect.width;
         let cssH = rect.height;
-        // Hidden tab panes report 0×0 — fall back to CSS size.
-        if(cssW < 2) cssW = parseFloat(style.width)  || VU_CANVAS_W;
-        if(cssH < 2) cssH = parseFloat(style.height) || VU_CANVAS_H;
+        if (cssW < 2) cssW = parseFloat(style.width)  || VU_CANVAS_W;
+        if (cssH < 2) cssH = parseFloat(style.height) || VU_CANVAS_H;
 
         const newW = Math.max(1, Math.round(cssW));
         const newH = Math.max(1, Math.round(cssH));
         const pxW  = Math.round(newW * dpr);
         const pxH  = Math.round(newH * dpr);
 
-        if(newW === width && newH === height &&
-           canvas.width === pxW && canvas.height === pxH)
+        if (newW === width && newH === height &&
+            canvas.width === pxW && canvas.height === pxH)
             return;
 
         width  = newW;
         height = newH;
         canvas.width  = pxW;
         canvas.height = pxH;
-        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        ctx2d.setTransform(dpr, 0, 0, dpr, 0, 0);
 
         boxWidth  = width / (boxCount + (boxCount + 1) * boxGapFraction);
         boxGapX   = boxWidth * boxGapFraction;
@@ -259,69 +230,51 @@ export function createVuMeter(canvas, config) {
         needsRedraw = true;
     }
 
-    /** Maps draw-loop index to logical box id (left = 1, right = boxCount). */
-    function getId(index) {
-        return index + 1;
-    }
-
     /** Returns lit-box count for a 0–max level. */
     function litBoxCount(val) {
         return Math.ceil((val / max) * boxCount);
     }
 
-    /** Returns true when a box should be lit at the current value. */
-    function isOn(id, val) {
-        return id <= litBoxCount(val);
+    /** Fill colour for box id (1..boxCount) given how many boxes are lit. */
+    function boxColor(id, lit) {
+        const on = id <= lit;
+        if (id >= redStart)    return on ? redOn : redOff;
+        if (id >= yellowStart) return on ? yellowOn : yellowOff;
+        return on ? greenOn : greenOff;
     }
 
-    /** Returns on/off fill colour for one box. */
-    function getBoxColor(id, val) {
-        if(id > boxCount - boxCountRed)
-            return isOn(id, val) ? redOn : redOff;
-        if(id > boxCount - boxCountRed - boxCountYellow)
-            return isOn(id, val) ? yellowOn : yellowOff;
-        return isOn(id, val) ? greenOn : greenOff;
-    }
-
-    /** Draws all segmented boxes for the current level (left → right). */
-    function drawBoxes(val) {
-        ctx.save();
-        ctx.translate(boxGapX, boxGapY);
-        for(let i = 0; i < boxCount; i++) {
-            const id = getId(i);
-            ctx.beginPath();
-            ctx.rect(0, 0, boxWidth, boxHeight);
-            ctx.fillStyle = getBoxColor(id, val);
-            ctx.fill();
-            ctx.translate(boxWidth + boxGapX, 0);
+    /** Draws all segmented boxes for the current lit count. */
+    function drawBoxes(lit) {
+        ctx2d.save();
+        ctx2d.translate(boxGapX, boxGapY);
+        for (let i = 0; i < boxCount; i++) {
+            const id = i + 1;
+            ctx2d.fillStyle = boxColor(id, lit);
+            ctx2d.fillRect(0, 0, boxWidth, boxHeight);
+            ctx2d.translate(boxWidth + boxGapX, 0);
         }
-        ctx.restore();
+        ctx2d.restore();
     }
 
-    /** Draws the white peak-hold line (vertical marker, no glow). */
+    /** Draws the white peak-hold line (no glow). */
     function drawPeakIndicator(peakVal) {
-        if(peakVal < 1.5) return;
+        if (peakVal < 1.5) return;
 
         const innerLeft  = boxGapX;
         const innerRight = width - boxGapX;
         const x = innerLeft + (peakVal / max) * (innerRight - innerLeft);
 
-        ctx.save();
-        ctx.strokeStyle = '#fff';
-        ctx.lineWidth   = 2;
-        ctx.beginPath();
-        ctx.moveTo(x, boxGapY);
-        ctx.lineTo(x, height - boxGapY);
-        ctx.stroke();
-        ctx.restore();
+        ctx2d.strokeStyle = '#fff';
+        ctx2d.lineWidth   = 2;
+        ctx2d.beginPath();
+        ctx2d.moveTo(x, boxGapY);
+        ctx2d.lineTo(x, height - boxGapY);
+        ctx2d.stroke();
     }
 
-    // Observe size changes — resize is NOT called from draw().
-    if(typeof ResizeObserver !== 'undefined') {
-        const ro = new ResizeObserver(() => { resize(); });
-        ro.observe(canvas);
+    if (typeof ResizeObserver !== 'undefined') {
+        new ResizeObserver(() => { resize(); }).observe(canvas);
     }
-
     resize();
 
     return {
@@ -331,70 +284,79 @@ export function createVuMeter(canvas, config) {
             curPeakVal = Math.max(0, Math.min(max, peak));
         },
 
-        /** Returns peak position as 0–100 (for external label placement). */
+        /** Returns peak position as 0–100 (for peak label placement). */
         getPeakPct() {
             return curPeakVal;
         },
 
-        /** Redraws the meter only when lit boxes or peak position changed. */
+        /** Redraws only when lit boxes or peak pixel position changed. */
         draw() {
             const lit = litBoxCount(curVal);
             const peakPx = curPeakVal < 1.5
                 ? -1
                 : Math.round((curPeakVal / max) * width);
 
-            if(!needsRedraw && lit === lastLitBoxes && peakPx === lastPeakPx)
+            if (!needsRedraw && lit === lastLitBoxes && peakPx === lastPeakPx)
                 return;
 
             lastLitBoxes = lit;
             lastPeakPx   = peakPx;
             needsRedraw  = false;
 
-            ctx.fillStyle = 'rgb(32,32,32)';
-            ctx.fillRect(0, 0, width, height);
-
-            drawBoxes(curVal);
+            ctx2d.fillStyle = 'rgb(32,32,32)';
+            ctx2d.fillRect(0, 0, width, height);
+            drawBoxes(lit);
             drawPeakIndicator(curPeakVal);
         },
 
-        /** Recomputes layout after a window resize or tab switch. */
         resize
     };
 }
 
-export function buildMetersPane() {
-    const pane    = el('div', {id:'pane-meters', className:'tab-pane'});
-    const wrap    = el('div', {id:'meters-wrap'});
-    const columns = el('div', {className:'meters-columns'});
+/** Converts a linear peak level to a 0–100 % bar (-60 dBFS floor). */
+function levelToBarPct(raw) {
+    const dB = raw > 0.000032 ? 20 * Math.log10(raw) : -90;
+    return ((Math.max(dB, -60) + 60) / 60) * 100;
+}
 
-    // Build routing descriptor from the bundled config.json at load time —
-    // labels and channel numbers are correct from the first render.
+/** Formats a linear peak level as a dB string. */
+function levelToDbLabel(raw) {
+    const dB = raw > 0.000032 ? 20 * Math.log10(raw) : -90;
+    return dB < -80 ? '-\u221e' : dB.toFixed(1) + '\u202FdB';
+}
+
+/** Builds the Meters tab pane (VU strips + inline codec gains). */
+export function buildMetersPane() {
+    const pane    = el('div', {id: 'pane-meters', className: 'tab-pane'});
+    const wrap    = el('div', {id: 'meters-wrap'});
+    const columns = el('div', {className: 'meters-columns'});
+
     const { levelGroups, levelLabels, inputChannels, outputChannels } =
         buildFullRouting(ROUTING_CONFIG);
 
     const gainByBuf3 = _buildGainByBuf3(inputChannels, outputChannels);
 
-    // Clear any previous picker handles (hot-rebuild safety).
     for (let ch = 0; ch < 10; ch++) {
         _inputPickers[ch]  = null;
         _outputPickers[ch] = null;
     }
 
-    getContext().meterLabelEls = [];
+    const ctx = getContext();
+    ctx.meterVu = [];
+    ctx.meterPeakDbs = [];
+    ctx.meterClipLeds = [];
 
     levelGroups.forEach(group => {
-        const card = el('div', {className:'card meters-card'});
+        const card = el('div', {className: 'card meters-card'});
         card.appendChild(cardTitle(group.label));
-        const row = el('div', {className:'meter-group'});
+        const row = el('div', {className: 'meter-group'});
 
         group.indices.forEach(idx => {
-            const ch  = el('div', {className:'meter-ch'});
-            const mid = el('div', {className:'meter-id'});
+            const chRow = el('div', {className: 'meter-ch'});
+            const mid   = el('div', {className: 'meter-id'});
 
-            const lbl = el('div', {className:'meter-lbl'});
+            const lbl = el('div', {className: 'meter-lbl'});
             lbl.textContent = levelLabels[idx] || String(idx);
-            getContext().meterLabelEls[idx] = lbl;
-
             mid.appendChild(lbl);
 
             const gainDesc = gainByBuf3[idx];
@@ -403,23 +365,23 @@ export function buildMetersPane() {
                 mid.appendChild(gainCtrl.valEl);
 
             const strip = el('div', {className: 'meter-strip'});
-            const body  = el('div', {className:'meter-body'});
-            const mwrap = el('div', {className:'meter-wrap'});
+            const body  = el('div', {className: 'meter-body'});
+            const mwrap = el('div', {className: 'meter-wrap'});
             mwrap.title = 'Click to reset peak hold';
 
-            const cnv = el('canvas', {className:'meter-canvas', id:'mc-'+idx});
-            getContext().meterVu[idx] = createVuMeter(cnv, {
-                boxCount:        VU_BOX_COUNT,
-                boxCountRed:     VU_BOX_COUNT_RED,
-                boxCountYellow:  VU_BOX_COUNT_YELLOW,
-                boxGapFraction:  VU_BOX_GAP_FRACTION,
-                max:             VU_MAX
+            const cnv = el('canvas', {className: 'meter-canvas', id: 'mc-' + idx});
+            ctx.meterVu[idx] = createVuMeter(cnv, {
+                boxCount:       VU_BOX_COUNT,
+                boxCountRed:    VU_BOX_COUNT_RED,
+                boxCountYellow: VU_BOX_COUNT_YELLOW,
+                boxGapFraction: VU_BOX_GAP_FRACTION,
+                max:            VU_MAX
             });
 
-            const peakDb = el('div', {className:'meter-peak-db', id:'mpd-'+idx});
+            const peakDb = el('div', {className: 'meter-peak-db', id: 'mpd-' + idx});
             peakDb.style.left = '0%';
             peakDb.textContent = '-\u221e';
-            getContext().meterPeakDbs[idx] = peakDb;
+            ctx.meterPeakDbs[idx] = peakDb;
 
             const clipLed = el('div', {
                 className: 'meter-clip-led',
@@ -431,28 +393,25 @@ export function buildMetersPane() {
             clipLed.innerHTML =
                 '<span class="meter-clip-led__bezel"></span>' +
                 '<span class="meter-clip-led__core"></span>';
-            getContext().meterClipLeds[idx] = clipLed;
+            ctx.meterClipLeds[idx] = clipLed;
 
-            /** Resets peak hold for this channel on click. */
             mwrap.addEventListener('click', () => {
-                const c = getContext();
-                c.peakHoldLevel[idx]  = 0;
-                c.peakHoldExpire[idx] = 0;
+                ctx.peakHoldLevel[idx]  = 0;
+                ctx.peakHoldExpire[idx] = 0;
             });
 
-            const scale = el('div', {className:'meter-scale'});
-            VU_SCALE_TICKS.forEach(db => {
+            const scale = el('div', {className: 'meter-scale'});
+            for (let t = 0; t < VU_SCALE_TICKS.length; t++) {
                 const tick = el('span');
-                tick.textContent = String(db);
+                tick.textContent = String(VU_SCALE_TICKS[t]);
                 scale.appendChild(tick);
-            });
+            }
 
             mwrap.appendChild(cnv);
             mwrap.appendChild(peakDb);
             body.appendChild(mwrap);
             body.appendChild(scale);
 
-            // − | VU | + as one continuous strip
             if (gainCtrl) {
                 strip.appendChild(gainCtrl.btnDec);
                 strip.appendChild(body);
@@ -461,10 +420,10 @@ export function buildMetersPane() {
                 strip.appendChild(body);
             }
 
-            ch.appendChild(strip);
-            ch.appendChild(clipLed);
-            ch.appendChild(mid);
-            row.appendChild(ch);
+            chRow.appendChild(strip);
+            chRow.appendChild(clipLed);
+            chRow.appendChild(mid);
+            row.appendChild(chRow);
         });
 
         card.appendChild(row);
@@ -476,110 +435,87 @@ export function buildMetersPane() {
     return pane;
 }
 
-/**
- * Called from main.js when buffer 6 (configMeta) first arrives.
- * Routing is now built at load time from ROUTING_CONFIG (bundled from config.json),
- * so no label or picker updates are needed here. Kept for API compatibility.
- * @param {Float32Array} _configMeta
- */
-export function applyRoutingConfig(_configMeta) {
-    // No-op: meters pane and codec pickers are built from ROUTING_CONFIG in
-    // buildMetersPane(), which runs before any buffer arrives.
-}
-
-/** Converts a linear peak level to a 0–100 % bar height (-60 dBFS floor). */
-export function levelToBarPct(raw) {
-    const dB = raw > 0.000032 ? 20 * Math.log10(raw) : -90;
-    return ((Math.max(dB, -60) + 60) / 60) * 100;
-}
-
-/** Formats a linear peak level as a dB string. */
-export function levelToDbLabel(raw) {
-    const dB = raw > 0.000032 ? 20 * Math.log10(raw) : -90;
-    return dB < -80 ? '-\u221e' : dB.toFixed(1) + '\u202FdB';
-}
-
-/** Starts the 60 fps meter animation loop while the Meters tab is visible. */
+/** Starts the meter animation loop while the Meters tab is visible. */
 export function startMeterAnim() {
-    if(getContext().meterAnimId != null) return;
+    if (getContext().meterAnimId != null) return;
     function tick() {
-        if(getContext().currentTab !== 1) {
-            getContext().meterAnimId = null;
+        const ctx = getContext();
+        if (ctx.currentTab !== 1) {
+            ctx.meterAnimId = null;
             return;
         }
         updateMetersFrame();
-        getContext().meterAnimId = requestAnimationFrame(tick);
+        ctx.meterAnimId = requestAnimationFrame(tick);
     }
     getContext().meterAnimId = requestAnimationFrame(tick);
 }
 
 /** Stops the meter animation loop. */
 export function stopMeterAnim() {
-    if(getContext().meterAnimId == null) return;
-    cancelAnimationFrame(getContext().meterAnimId);
-    getContext().meterAnimId = null;
-}
-
-/** Returns true when a linear peak level is at or above the clip threshold. */
-export function isLevelClipping(raw) {
-    return raw >= CLIP_THRESHOLD;
+    const ctx = getContext();
+    if (ctx.meterAnimId == null) return;
+    cancelAnimationFrame(ctx.meterAnimId);
+    ctx.meterAnimId = null;
 }
 
 /** Updates canvas VU meters with peak-hold and segmented box rendering. */
-export function updateMetersFrame() {
+function updateMetersFrame() {
     const ctx = getContext();
     const now = performance.now();
 
-    for(let i = 0; i < 13; i++) {
-        const raw = ctx.audioLevels[i];
+    for (let i = 0; i < METER_COUNT; i++) {
+        const vu = ctx.meterVu[i];
+        if (!vu) continue;
 
+        const raw = ctx.audioLevels[i];
         const smooth = ctx.meterSmooth[i];
         const coeff  = raw > smooth ? METER_ATTACK : METER_RELEASE;
         ctx.meterSmooth[i] = smooth + (raw - smooth) * coeff;
 
-        if(raw > ctx.peakHoldLevel[i]) {
+        if (raw > ctx.peakHoldLevel[i]) {
             ctx.peakHoldLevel[i]  = raw;
             ctx.peakHoldExpire[i] = now + PEAK_HOLD_MS;
-        } else if(now >= ctx.peakHoldExpire[i]) {
+        } else if (now >= ctx.peakHoldExpire[i]) {
             ctx.peakHoldLevel[i] *= PEAK_DECAY;
         }
 
-        if(isLevelClipping(raw) || isLevelClipping(ctx.peakHoldLevel[i]))
+        if (raw >= CLIP_THRESHOLD || ctx.peakHoldLevel[i] >= CLIP_THRESHOLD)
             ctx.clipHoldUntil[i] = now + CLIP_HOLD_MS;
 
         const clipping = now < ctx.clipHoldUntil[i];
 
         const clipLed = ctx.meterClipLeds[i];
-        if(clipLed) {
+        if (clipLed) {
             const on = clipping;
-            if(clipLed.classList.contains('on') !== on) {
+            if (clipLed.classList.contains('on') !== on) {
                 clipLed.classList.toggle('on', on);
-                clipLed.setAttribute('aria-label', on ? 'Clip indicator on' : 'Clip indicator off');
+                clipLed.setAttribute(
+                    'aria-label',
+                    on ? 'Clip indicator on' : 'Clip indicator off'
+                );
             }
-        }
-        if(ctx.meterPeakDbs[i])
-            ctx.meterPeakDbs[i].classList.toggle('clip', clipping);
-
-        const vu = ctx.meterVu[i];
-        if(vu) {
-            vu.setTargets(
-                levelToBarPct(ctx.meterSmooth[i]),
-                levelToBarPct(ctx.peakHoldLevel[i])
-            );
-            vu.draw();
         }
 
         const peakDb = ctx.meterPeakDbs[i];
-        if(peakDb && vu) {
+        if (peakDb)
+            peakDb.classList.toggle('clip', clipping);
+
+        vu.setTargets(
+            levelToBarPct(ctx.meterSmooth[i]),
+            levelToBarPct(ctx.peakHoldLevel[i])
+        );
+        vu.draw();
+
+        if (peakDb) {
             const pkPct = vu.getPeakPct();
             const peakLbl = levelToDbLabel(ctx.peakHoldLevel[i]);
-            if(peakDb.textContent !== peakLbl)
+            if (peakDb.textContent !== peakLbl)
                 peakDb.textContent = peakLbl;
             const left = pkPct.toFixed(2) + '%';
-            if(peakDb.style.left !== left)
+            if (peakDb.style.left !== left)
                 peakDb.style.left = left;
             const op = pkPct > 1.5 ? '1' : '0';
-            if(peakDb.style.opacity !== op)
+            if (peakDb.style.opacity !== op)
                 peakDb.style.opacity = op;
         }
     }

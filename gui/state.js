@@ -19,7 +19,6 @@ export function createState() {
         meterAnimId: null,
         meterVu: [],
         meterPeakDbs: [],
-        meterDbs: [],
         meterClipLeds: [],
         recentChanges: [],
         prevPotValues: new Float32Array(60).fill(-1),
