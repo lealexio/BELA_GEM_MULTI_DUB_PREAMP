@@ -89,19 +89,6 @@ export const SWITCH_GROUPS = [
     { label: 'Siren',          type: 'siren', indices: [8]          }
 ];
 
-/** Human-readable labels for the 13 audio peak channels. */
-export const LEVEL_LABELS = [
-    'IN 1','IN 2','IN 3','IN 4',
-    'FX Ret 1','FX Ret 2',
-    'Master','FX Snd 1','FX Snd 2',
-    'VU SUB','VU KICK','VU MID','VU TOP'
-];
-
-export const LEVEL_GROUPS = [
-    { label: 'INPUTS',  indices: [0,1,2,3,4,5]        },
-    { label: 'OUTPUTS', indices: [6,7,8,9,10,11,12]   }
-];
-
 /** I2C bus string — must match kI2cBus in HardwareConfig.h. */
 export const I2C_BUS = '/dev/i2c-1';
 

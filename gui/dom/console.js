@@ -32,9 +32,6 @@ export function buildConsoleCard(listId) {
         btn.dataset.mode = mode;
         btn.addEventListener('click', () => setConsoleFilterMode(mode));
         filterBar.appendChild(btn);
-        if (!getContext().consoleFilterBtns)
-            getContext().consoleFilterBtns = [];
-        getContext().consoleFilterBtns.push(btn);
     });
     consoleHdr.appendChild(filterBar);
     card.appendChild(consoleHdr);
@@ -43,7 +40,6 @@ export function buildConsoleCard(listId) {
     if (!getContext().consoleLists)
         getContext().consoleLists = [];
     getContext().consoleLists.push(list);
-    getContext().consoleList = list;
     renderConsole();
     return card;
 }
@@ -93,12 +89,11 @@ function buildSwitchTile(index, name, type) {
     lbl.textContent = switchDisplayName(name);
     tile.appendChild(led);
     tile.appendChild(lbl);
-    getContext().switchPills[index] = tile;
     return tile;
 }
 
 /** Resyncs pot baselines from current live values. */
-export function syncConsolePotBaselines() {
+function syncConsolePotBaselines() {
     getContext().prevPotValues.set(getContext().potValues);
     getContext().prevPotValuesNormal.set(getContext().potValues);
     if (getContext().muxRawValues && getContext().prevMuxRawValues) {
@@ -108,7 +103,7 @@ export function syncConsolePotBaselines() {
 }
 
 /** Switches console filter mode and clears stale entries. */
-export function setConsoleFilterMode(mode) {
+function setConsoleFilterMode(mode) {
     if (mode !== 'normal' && mode !== 'detailed') return;
     if (mode === getContext().consoleFilterMode) return;
     getContext().consoleFilterMode = mode;
@@ -202,9 +197,6 @@ function pushConsoleEntry(entry) {
 /** Renders all console lists (fixed MAX_CONSOLE slots). */
 function renderConsole() {
     const lists = getContext().consoleLists || [];
-    if (getContext().consoleList && lists.indexOf(getContext().consoleList) < 0)
-        lists.push(getContext().consoleList);
-    getContext().consoleLists = lists;
     if (!lists.length) return;
 
     // Fill even if not yet connected (Live mounts the card right after build).

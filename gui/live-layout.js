@@ -6,7 +6,7 @@ import {
 } from './config.js';
 
 /** Returns default Live layout: enabled map + tile order. */
-export function defaultLiveLayout() {
+function defaultLiveLayout() {
     const enabled = {};
     const order = [];
     LIVE_TILES.forEach(t => {

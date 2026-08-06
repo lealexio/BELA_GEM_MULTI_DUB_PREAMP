@@ -214,7 +214,7 @@ transition:background .1s,color .1s,border-color .1s;
 .console-filter-btn.active{
 background:var(--ink);color:#fff;border-color:var(--ink);
 }
-#console-list{list-style:none}
+.console-list{list-style:none;margin:0;padding:0}
 .crow{
 display:flex;align-items:center;gap:8px;
 padding:5px 0;border-bottom:1px solid var(--line-soft);
@@ -682,24 +682,24 @@ font-size:12px;background:#fff;
 }
 
 /* --- Master EQ curve --- */
-#master-eq-card,.live-tile[data-tile="masterEq"]{margin-bottom:12px}
-#master-eq-notice,.master-eq-notice{
+.live-tile[data-tile="masterEq"]{margin-bottom:12px}
+.master-eq-notice{
 font-size:12px;font-weight:700;color:#3a3a44;
 margin-bottom:6px;line-height:1.4;
 }
-#master-eq-caption,.master-eq-caption{
+.master-eq-caption{
 font-size:11px;color:#888;margin-bottom:10px;line-height:1.45;
 }
-#master-eq-wrap,.master-eq-wrap{
+.master-eq-wrap{
 width:100%;max-width:900px;margin:0 auto;
 }
-#master-eq-canvas,.master-eq-canvas{
+.master-eq-canvas{
 display:block;width:100%;
 height:240px;min-height:240px;
 border-radius:6px;background:transparent;
 }
 @media(min-width:720px){
-#master-eq-canvas,.master-eq-canvas{height:320px;min-height:320px}
+.master-eq-canvas{height:320px;min-height:320px}
 }
     `;
     document.head.appendChild(s);

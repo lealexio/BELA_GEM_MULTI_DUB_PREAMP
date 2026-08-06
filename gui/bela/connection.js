@@ -5,12 +5,22 @@ import {
     CPU_TEMP_WARM_C, CPU_TEMP_HOT_C
 } from '../config.js';
 
+/** Returns true when the Bela data WebSocket looks open. */
 export function belaSocketOpen() {
     if(typeof Bela === 'undefined') return false;
     const ws = Bela.socket || Bela.ws || (Bela.data && Bela.data.socket);
     if(ws && typeof ws.readyState === 'number')
         return ws.readyState === WebSocket.OPEN;
     return true;
+}
+
+/** Returns true when Bela.control WebSocket is open and ready to send. */
+export function belaControlReady() {
+    /* global Bela */
+    return typeof Bela !== 'undefined' &&
+           Bela.control &&
+           Bela.control.ws &&
+           Bela.control.ws.readyState === 1;
 }
 
 export function sampleBelaFingerprint(b) {

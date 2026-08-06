@@ -4,10 +4,10 @@ import {
     SIREN_PRESETS, CONFIG_META, MIC_HPF_HZ_MIN, MIC_HPF_HZ_MAX,
     LIVE_TILES, TAB_LIVE
 } from '../config.js';
-import {
-    loadLiveLayout, saveLiveLayout, isLiveTileOn,
+import { loadLiveLayout, saveLiveLayout, isLiveTileOn,
     moveLiveTile, orderedLiveTiles
 } from '../live-layout.js';
+import { belaControlReady } from '../bela/connection.js';
 import { el, cardTitle } from './utils.js';
 import { buildMetersSection, startMeterAnim, stopMeterAnim } from './meters.js';
 import { buildConsoleCard, buildSwitchesCard } from './console.js';
@@ -37,15 +37,6 @@ function _holdMicSync(idx, kind) {
     if (kind === 'hpf' || kind === 'both') _hpfSyncHoldUntil[idx] = until;
 }
 
-/** Returns true when Bela.control WebSocket is open. */
-function _belaControlReady() {
-    /* global Bela */
-    return typeof Bela !== 'undefined' &&
-           Bela.control &&
-           Bela.control.ws &&
-           Bela.control.ws.readyState === 1;
-}
-
 /**
  * Sends a custom control payload to render.cpp via Bela.control.
  * @param {object} payload
@@ -53,7 +44,7 @@ function _belaControlReady() {
  * @param {Element|null} statusEl
  */
 function _sendMicControl(payload, desc, statusEl) {
-    if (!_belaControlReady()) {
+    if (!belaControlReady()) {
         if (statusEl) {
             statusEl.textContent = 'Bela not connected — project must be running';
             statusEl.className = 'mic-live-status err';
@@ -69,7 +60,7 @@ function _sendMicControl(payload, desc, statusEl) {
 }
 
 /** Builds the Siren status card. */
-export function buildSirenCard() {
+function buildSirenCard() {
     const sirenCard = el('div', {className: 'card live-tile'});
     sirenCard.dataset.tile = 'siren';
     sirenCard.appendChild(cardTitle('Siren'));
@@ -117,7 +108,7 @@ export function buildSirenCard() {
  * Builds the Live "Mic inputs" card: Mic toggle + HPF Hz per AUX1–4.
  * Changes are sent via Bela.control (immediate DSP, lost on Bela restart).
  */
-export function buildMicInputsCard() {
+function buildMicInputsCard() {
     const card = el('div', {
         className: 'card live-tile',
         id: 'mic-inputs-card'
@@ -222,7 +213,7 @@ export function buildMicInputsCard() {
     card.appendChild(list);
 
     const poll = setInterval(() => {
-        if (_belaControlReady()) {
+        if (belaControlReady()) {
             statusEl.textContent = 'Live — lost on Bela restart';
             statusEl.className = 'mic-live-status ok';
             clearInterval(poll);
@@ -463,8 +454,6 @@ export function renderLiveBoard() {
     }
     getContext().consoleLists =
         (getContext().consoleLists || []).filter(l => l.isConnected);
-    getContext().consoleFilterBtns =
-        (getContext().consoleFilterBtns || []).filter(b => b.isConnected);
 
     const pairedDone = { done: false };
     orderedLiveTiles(prefs).forEach(id => {

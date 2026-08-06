@@ -33,16 +33,6 @@ export default function sketch(p) {
         }
         hideP5Dom();
 
-        document.documentElement.style.margin = '0';
-        document.documentElement.style.padding = '0';
-        document.documentElement.style.width = '100%';
-        document.documentElement.style.overflowX = 'hidden';
-        document.body.style.margin = '0';
-        document.body.style.padding = '0';
-        document.body.style.width = '100%';
-        document.body.style.overflowX = 'hidden';
-
-        layoutTopChrome();
         window.addEventListener('resize', () => {
             layoutTopChrome();
             getContext().meterVu.forEach(vu => { if(vu) vu.resize(); });

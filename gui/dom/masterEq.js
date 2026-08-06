@@ -4,22 +4,22 @@ import { MASTER_EQ_CONFIG, masterEqFreqs, MASTER_EQ_FREQ_TICKS, TAB_LIVE } from 
 import { isLiveTileOn } from '../live-layout.js';
 import { el, cardTitle } from './utils.js';
 
-export function masterEqPotToGainDb(pot, rangeDb) {
+function masterEqPotToGainDb(pot, rangeDb) {
     return (pot - 0.5) * 2 * rangeDb;
 }
 
 /** Logarithmic pot → frequency mapping (matches ParametricEq / FilterSection). */
-export function masterEqLogInterp(fMin, fMax, t) {
+function masterEqLogInterp(fMin, fMax, t) {
     return fMin * Math.pow(fMax / fMin, t);
 }
 
 /** Linear pot → Q mapping (FilterSection resonance). */
-export function masterEqLinInterp(vMin, vMax, t) {
+function masterEqLinInterp(vMin, vMax, t) {
     return vMin + t * (vMax - vMin);
 }
 
 /** Returns linear magnitude of a biquad at frequency f (Audio EQ Cookbook coeffs). */
-export function biquadMagLinear(c, f, fs) {
+function biquadMagLinear(c, f, fs) {
     const w = 2 * Math.PI * f / fs;
     const cw = Math.cos(w);
     const sw = Math.sin(w);
@@ -34,15 +34,9 @@ export function biquadMagLinear(c, f, fs) {
     return den > 1e-15 ? num / den : 0;
 }
 
-/** Returns dB magnitude for one biquad (optionally cascaded stages). */
-export function biquadMagDb(c, f, fs, stages) {
-    let m = biquadMagLinear(c, f, fs);
-    if(stages > 1) m = Math.pow(m, stages);
-    return 20 * Math.log10(Math.max(m, 1e-12));
-}
 
 /** Builds peaking biquad coefficients (matches Biquad.cpp setPeaking). */
-export function biquadPeaking(freq, gainDb, q, fs) {
+function biquadPeaking(freq, gainDb, q, fs) {
     const A = Math.pow(10, gainDb / 40);
     const w0 = 2 * Math.PI * freq / fs;
     const alpha = Math.sin(w0) / (2 * q);
@@ -58,7 +52,7 @@ export function biquadPeaking(freq, gainDb, q, fs) {
 }
 
 /** Builds low-shelf biquad coefficients (matches Biquad.cpp setLowShelf). */
-export function biquadLowShelf(freq, gainDb, fs) {
+function biquadLowShelf(freq, gainDb, fs) {
     const A = Math.pow(10, gainDb / 40);
     const w0 = 2 * Math.PI * freq / fs;
     const cw = Math.cos(w0);
@@ -76,7 +70,7 @@ export function biquadLowShelf(freq, gainDb, fs) {
 }
 
 /** Builds high-shelf biquad coefficients (matches Biquad.cpp setHighShelf). */
-export function biquadHighShelf(freq, gainDb, fs) {
+function biquadHighShelf(freq, gainDb, fs) {
     const A = Math.pow(10, gainDb / 40);
     const w0 = 2 * Math.PI * freq / fs;
     const cw = Math.cos(w0);
@@ -94,7 +88,7 @@ export function biquadHighShelf(freq, gainDb, fs) {
 }
 
 /** Builds low-pass biquad coefficients (matches Biquad.cpp setLowPass). */
-export function biquadLowPass(freq, q, fs) {
+function biquadLowPass(freq, q, fs) {
     const w0 = 2 * Math.PI * freq / fs;
     const cw = Math.cos(w0);
     const alpha = Math.sin(w0) / (2 * q);
@@ -109,7 +103,7 @@ export function biquadLowPass(freq, q, fs) {
 }
 
 /** Builds high-pass biquad coefficients (matches Biquad.cpp setHighPass). */
-export function biquadHighPass(freq, q, fs) {
+function biquadHighPass(freq, q, fs) {
     const w0 = 2 * Math.PI * freq / fs;
     const cw = Math.cos(w0);
     const alpha = Math.sin(w0) / (2 * q);
@@ -124,7 +118,7 @@ export function biquadHighPass(freq, q, fs) {
 }
 
 /** Kill-switch band magnitude: cascaded LP/HP stages (matches KillSwitch.cpp). */
-export function killBandMagLinear(band, f, fs, cfg) {
+function killBandMagLinear(band, f, fs, cfg) {
     const q = cfg.KILL_CROSSOVER_Q;
     const st = cfg.KILL_FILTER_STAGES;
     const fc = cfg.KILL_FC;
@@ -153,7 +147,7 @@ export function killBandMagLinear(band, f, fs, cfg) {
  * Computes the master-bus dry-chain magnitude curve in dB (20 Hz–20 kHz).
  * Models ParametricEq → GraphicEq → FilterSection → BandTrim → KillSwitch.
  */
-export function computeMasterCurve(pots, switches) {
+function computeMasterCurve(pots, switches) {
     const cfg = MASTER_EQ_CONFIG;
     const fs = cfg.SAMPLE_RATE;
     const eps = cfg.GAIN_EPSILON_DB;
@@ -186,8 +180,6 @@ export function computeMasterCurve(pots, switches) {
 
     const hpfActive = pots[p.HPF_FREQ] >= cfg.FILTER_OFF_THRESHOLD;
     const lpfActive = pots[p.LPF_FREQ] >= cfg.FILTER_OFF_THRESHOLD;
-    const hpfMix = hpfActive ? 1 : 0;
-    const lpfMix = lpfActive ? 1 : 0;
 
     let hpfCoeffs = null;
     let lpfCoeffs = null;
@@ -205,7 +197,6 @@ export function computeMasterCurve(pots, switches) {
     const kill = cfg.KILL_SWITCH;
     const anyKill = switches[kill.SUB] > 0.5 || switches[kill.KICK] > 0.5 ||
                     switches[kill.MID] > 0.5 || switches[kill.TOP] > 0.5;
-    const crossoverMix = anyKill ? 1 : 0;
     const bandGain = [
         switches[kill.SUB]  > 0.5 ? 0 : 1,
         switches[kill.KICK] > 0.5 ? 0 : 1,
@@ -233,12 +224,8 @@ export function computeMasterCurve(pots, switches) {
             }
         }
 
-        if(hpfCoeffs)
-            h *= (1 - hpfMix) + hpfMix * biquadMagLinear(hpfCoeffs, f, fs);
-        if(lpfCoeffs) {
-            const hMid = h;
-            h = hMid * ((1 - lpfMix) + lpfMix * biquadMagLinear(lpfCoeffs, f, fs));
-        }
+        if(hpfCoeffs) h *= biquadMagLinear(hpfCoeffs, f, fs);
+        if(lpfCoeffs) h *= biquadMagLinear(lpfCoeffs, f, fs);
 
         if(Math.abs(btrimGainDb[0]) > eps)
             h *= biquadMagLinear(biquadLowShelf(cfg.KILL_FC[0], btrimGainDb[0], fs), f, fs);
@@ -253,14 +240,13 @@ export function computeMasterCurve(pots, switches) {
         if(Math.abs(btrimGainDb[3]) > eps)
             h *= biquadMagLinear(biquadHighShelf(cfg.KILL_FC[2], btrimGainDb[3], fs), f, fs);
 
-        if(crossoverMix > 0) {
+        if(anyKill) {
             const hSub  = killBandMagLinear('sub',  f, fs, cfg);
             const hKick = killBandMagLinear('kick', f, fs, cfg);
             const hMid  = killBandMagLinear('mid',  f, fs, cfg);
             const hTop  = killBandMagLinear('top',  f, fs, cfg);
-            const hKill = bandGain[0] * hSub + bandGain[1] * hKick +
-                          bandGain[2] * hMid + bandGain[3] * hTop;
-            h *= (1 - crossoverMix) + crossoverMix * hKill;
+            h *= bandGain[0] * hSub + bandGain[1] * hKick +
+                 bandGain[2] * hMid + bandGain[3] * hTop;
         }
 
         out[i] = 20 * Math.log10(Math.max(h, 1e-12));
@@ -269,7 +255,7 @@ export function computeMasterCurve(pots, switches) {
 }
 
 /** Formats a frequency tick label for the master EQ X axis. */
-export function formatMasterEqFreqLabel(hz) {
+function formatMasterEqFreqLabel(hz) {
     if(hz >= 1000) {
         const k = hz / 1000;
         const n = k % 1 === 0 ? k.toFixed(0) : k.toFixed(1);
@@ -279,7 +265,7 @@ export function formatMasterEqFreqLabel(hz) {
 }
 
 /** Maps frequency (Hz) to canvas X using a log scale. */
-export function masterEqFreqToX(f, plotX, plotW) {
+function masterEqFreqToX(f, plotX, plotW) {
     const cfg = MASTER_EQ_CONFIG;
     const t = (Math.log10(f) - Math.log10(cfg.FREQ_MIN)) /
               (Math.log10(cfg.FREQ_MAX) - Math.log10(cfg.FREQ_MIN));
@@ -287,7 +273,7 @@ export function masterEqFreqToX(f, plotX, plotW) {
 }
 
 /** Maps dB value to canvas Y. */
-export function masterEqDbToY(db, plotY, plotH) {
+function masterEqDbToY(db, plotY, plotH) {
     const cfg = MASTER_EQ_CONFIG;
     const t = (cfg.Y_MAX_DB - db) / (cfg.Y_MAX_DB - cfg.Y_MIN_DB);
     return plotY + t * plotH;
@@ -399,17 +385,10 @@ function drawMasterEqOnCanvas(canvas, ctx2d) {
 
 /** Redraws the master EQ plot on every registered canvas. */
 export function drawMasterEqCurve() {
-    const targets = getContext().masterEqTargets || [];
-    if (getContext().masterEqCanvas && getContext().masterEqCtx) {
-        const has = targets.some(t => t.canvas === getContext().masterEqCanvas);
-        if (!has)
-            targets.push({
-                canvas: getContext().masterEqCanvas,
-                ctx: getContext().masterEqCtx
-            });
-    }
-    getContext().masterEqTargets = targets.filter(t => t.canvas && t.canvas.isConnected);
-    getContext().masterEqTargets.forEach(t => drawMasterEqOnCanvas(t.canvas, t.ctx));
+    const targets = (getContext().masterEqTargets || [])
+        .filter(t => t.canvas && t.canvas.isConnected);
+    getContext().masterEqTargets = targets;
+    targets.forEach(t => drawMasterEqOnCanvas(t.canvas, t.ctx));
 }
 
 /** Recomputes and redraws the master EQ curve when inputs change. */
@@ -460,8 +439,6 @@ export function buildMasterEqCard(opts) {
     if (!getContext().masterEqTargets)
         getContext().masterEqTargets = [];
     getContext().masterEqTargets.push({ canvas, ctx: ctx2d });
-    getContext().masterEqCanvas = canvas;
-    getContext().masterEqCtx = ctx2d;
 
     return card;
 }

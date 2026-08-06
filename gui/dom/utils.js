@@ -15,9 +15,17 @@ export function projectFileUrl(filename) {
     return filename;
 }
 
+/** Creates an element; hyphenated keys become attributes (aria-*, data-*). */
 export function el(tag, props) {
     const e = document.createElement(tag);
-    if(props) Object.assign(e, props);
+    if (!props) return e;
+    for (const key of Object.keys(props)) {
+        const val = props[key];
+        if (key.indexOf('-') >= 0)
+            e.setAttribute(key, val);
+        else
+            e[key] = val;
+    }
     return e;
 }
 

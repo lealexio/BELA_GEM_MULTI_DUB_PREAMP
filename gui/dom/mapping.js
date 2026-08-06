@@ -348,7 +348,7 @@ export function fillRoutingFromConfigMeta() {
 }
 
 /** Reads routing.in / routing.out from the Mapping form (stable key order). */
-export function collectRoutingFromForm() {
+function collectRoutingFromForm() {
     const readChannel = (dir, key) => {
         const inp = document.querySelector(`.ri[data-dir="${dir}"][data-key="${key}"]`);
         const parsed = parseRoutingInput(inp);
@@ -454,7 +454,7 @@ export function tryBuildMappingTable() {
  * Highlights rows and lists groups that share the same MUX/channel (pots),
  * port/pin (switches), or physical audio channel (routing in/out).
  */
-export function updateMappingConflicts() {
+function updateMappingConflicts() {
     const messages = [];
 
     document.querySelectorAll('#pot-tbody tr, #sw-tbody tr, #routing-in-tbody tr, #routing-out-tbody tr')
@@ -562,7 +562,7 @@ export function updateMappingConflicts() {
 }
 
 /** Creates a per-row Detect / Cancel button. */
-export function createDetectButton(table, index) {
+function createDetectButton(table, index) {
     const btn = el('button', {className: 'btn-detect-row', type: 'button'});
     btn.textContent = 'Map';
     btn.title       = 'Detect control';
@@ -580,19 +580,19 @@ export function createDetectButton(table, index) {
     return btn;
 }
 
-export function showDetectStatus(msg, isError) {
+function showDetectStatus(msg, isError) {
     if(!getContext().detectStatusEl) return;
     getContext().detectStatusEl.textContent = msg;
     getContext().detectStatusEl.className     = isError ? 'show err' : 'show';
 }
 
-export function hideDetectStatus() {
+function hideDetectStatus() {
     if(!getContext().detectStatusEl) return;
     getContext().detectStatusEl.textContent = '';
     getContext().detectStatusEl.className   = '';
 }
 
-export function setDetectUiActive(active) {
+function setDetectUiActive(active) {
     document.querySelectorAll('.btn-detect-row').forEach(btn => {
         const t = btn.dataset.table;
         const i = parseInt(btn.dataset.index, 10);
@@ -656,7 +656,7 @@ export function formatUnmappedPotLabel(mux, pot) {
 }
 
 /** Snapshots live pot/switch values for movement detection. */
-export function snapshotControlValues() {
+function snapshotControlValues() {
     const snapPot = new Float32Array(POT_NAMES.length);
     const snapSw  = new Float32Array(SWITCH_NAMES.length);
     const snapMuxRaw = new Float32Array(MUX_RAW_SIZE);
@@ -670,7 +670,7 @@ export function snapshotControlValues() {
 }
 
 /** Starts listening for a pot move (≥25%) or switch toggle for one row. */
-export function startDetect(table, index) {
+function startDetect(table, index) {
     if(getContext().detectMode) cancelDetect();
     if(!getContext().mappingBuilt) {
         showDetectStatus('Waiting for Bela mapping…', true);
@@ -708,7 +708,7 @@ export function cancelDetect() {
 }
 
 /** Sets one mapping form field and notifies conflict checker. */
-export function setMappingField(table, rowIndex, field, value) {
+function setMappingField(table, rowIndex, field, value) {
     const cls = table === 'pot' ? 'pi' : 'si';
     const inp = document.querySelector(`.${cls}[data-i="${rowIndex}"][data-f="${field}"]`);
     if(!inp) return;
@@ -720,7 +720,7 @@ export function setMappingField(table, rowIndex, field, value) {
 }
 
 /** Finds the MUX channel with the largest raw change since the detect snapshot. */
-export function findMovedMuxPot(snapMuxRaw) {
+function findMovedMuxPot(snapMuxRaw) {
     if(!getContext().muxRawValues) return null;
     const activeMux = getActiveMuxCount();
     let bestMux = -1;
@@ -743,24 +743,8 @@ export function findMovedMuxPot(snapMuxRaw) {
     return {mux: bestMux, pot: bestPot, label: formatUnmappedPotLabel(bestMux, bestPot)};
 }
 
-/** Finds the pot index with the largest change since the detect snapshot. */
-export function findMovedPotIndex(snapPot) {
-    let bestIdx = -1;
-    let bestDelta = 0;
-    for(let i = 0; i < POT_NAMES.length; i++) {
-        const cur   = getContext().potValues[i] != null ? getContext().potValues[i] : 0;
-        const delta = Math.abs(cur - snapPot[i]);
-        if(delta > bestDelta) {
-            bestDelta = delta;
-            bestIdx   = i;
-        }
-    }
-    if(bestIdx < 0 || bestDelta < DETECT_POT_MIN_DELTA) return -1;
-    return bestIdx;
-}
-
 /** Finds a switch that toggled since the detect snapshot. */
-export function findToggledSwitchIndex(snapSw) {
+function findToggledSwitchIndex(snapSw) {
     for(let i = 0; i < SWITCH_NAMES.length; i++) {
         const cur = getContext().switchStates[i] != null ? getContext().switchStates[i] : 0;
         if((cur > 0.5) !== (snapSw[i] > 0.5)) return i;
@@ -769,7 +753,7 @@ export function findToggledSwitchIndex(snapSw) {
 }
 
 /** Reads mux/pot/rev/cen for one pot row from the mapping table. */
-export function readPotMappingRow(i) {
+function readPotMappingRow(i) {
     const muxInp = document.querySelector(`.pi[data-i="${i}"][data-f="mux"]`);
     const potInp = document.querySelector(`.pi[data-i="${i}"][data-f="pot"]`);
     const revInp = document.querySelector(`.pi[data-i="${i}"][data-f="rev"]`);
@@ -784,7 +768,7 @@ export function readPotMappingRow(i) {
 }
 
 /** Reads pin/port/rev for one switch row from the mapping table. */
-export function readSwitchMappingRow(i) {
+function readSwitchMappingRow(i) {
     const pinInp  = document.querySelector(`.si[data-i="${i}"][data-f="pin"]`);
     const portInp = document.querySelector(`.si[data-i="${i}"][data-f="port"]`);
     const revInp  = document.querySelector(`.si[data-i="${i}"][data-f="rev"]`);
@@ -797,7 +781,7 @@ export function readSwitchMappingRow(i) {
 }
 
 /** Applies a detected physical MUX channel to the selected pot row. */
-export function finishDetectPotFromPhysical(mux, pot, label) {
+function finishDetectPotFromPhysical(mux, pot, label) {
     const dst = getContext().detectMode.targetIndex;
     setMappingField('pot', dst, 'mux', mux);
     setMappingField('pot', dst, 'pot', pot);
@@ -823,7 +807,7 @@ export function finishDetectPotFromPhysical(mux, pot, label) {
 }
 
 /** Applies detect result to the selected row, then ends the session. */
-export function finishDetect(sourceIndex, sourceName) {
+function finishDetect(sourceIndex, sourceName) {
     const dst = getContext().detectMode.targetIndex;
     const table = getContext().detectMode.table;
 
@@ -868,7 +852,7 @@ export function updateDetectMode() {
     }
 }
 
-export function collectMappingFromForm() {
+function collectMappingFromForm() {
     const pm = new Float32Array(POT_NAMES.length * 4);
     document.querySelectorAll('.pi').forEach(inp => {
         const i = parseInt(inp.dataset.i, 10);
@@ -892,7 +876,7 @@ export function collectMappingFromForm() {
 }
 
 /** Builds a config.json string from form data and Bela metadata buffer. */
-export function buildConfigJsonText(pm, sm) {
+function buildConfigJsonText(pm, sm) {
     if(!getContext().configMeta) return null;
 
     const M = CONFIG_META;
@@ -945,7 +929,7 @@ export function buildConfigJsonText(pm, sm) {
 }
 
 /** Triggers a browser download of config.json built from the mapping tables. */
-export function downloadConfigJson() {
+function downloadConfigJson() {
     if(!getContext().mappingBuilt) {
         showDownloadStatus('Waiting for Bela mapping…', true);
         return;
@@ -987,7 +971,7 @@ export function downloadConfigJson() {
     showDownloadStatus('Downloaded ✓', false);
 }
 
-export function showDownloadStatus(msg, isError) {
+function showDownloadStatus(msg, isError) {
     if(!getContext().downloadStatusEl) return;
     getContext().downloadStatusEl.textContent = msg;
     getContext().downloadStatusEl.className   = isError ? 'err' : '';

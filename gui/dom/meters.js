@@ -11,6 +11,7 @@ import {
 } from '../config.js';
 import { ROUTING_CONFIG } from '../routing-config.js';
 import { el, cardTitle } from './utils.js';
+import { belaControlReady } from '../bela/connection.js';
 
 // ---------------------------------------------------------------------------
 // Codec gains via Bela.control (non-RT seasocks → Bela_setHpLevel / InputGain).
@@ -29,18 +30,9 @@ const METER_COUNT     = 13;
 const _inputPickers  = new Array(10).fill(null);
 const _outputPickers = new Array(10).fill(null);
 
-/** Returns true when Bela.control WebSocket is open and ready to send. */
-function _belaControlReady() {
-    /* global Bela */
-    return typeof Bela !== 'undefined' &&
-           Bela.control &&
-           Bela.control.ws &&
-           Bela.control.ws.readyState === 1;
-}
-
 /** Sends a codec-gain payload to render.cpp via Bela.control. */
 function _sendGain(payload) {
-    if (!_belaControlReady()) return;
+    if (!belaControlReady()) return;
     /* global Bela */
     Bela.control.send(payload);
 }

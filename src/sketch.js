@@ -366,17 +366,12 @@ var __belaPreampSketch = (() => {
       mappingBuilt: false,
       routingFilledFromMeta: false,
       detectMode: null,
-      masterEqCanvas: null,
-      masterEqCtx: null,
       masterEqCurveDb: new Float32Array(MASTER_EQ_CONFIG.CURVE_POINTS),
       sirenPresetPills: [],
       sirenNameEl: null,
       sirenGateEl: null,
       sirenModFill: null,
       sirenModLbl: null,
-      consoleList: null,
-      consoleFilterBtns: [],
-      switchPills: [],
       downloadStatusEl: null,
       detectStatusEl: null,
       micLiveStatusEl: null,
@@ -614,7 +609,7 @@ transition:background .1s,color .1s,border-color .1s;
 .console-filter-btn.active{
 background:var(--ink);color:#fff;border-color:var(--ink);
 }
-#console-list{list-style:none}
+.console-list{list-style:none;margin:0;padding:0}
 .crow{
 display:flex;align-items:center;gap:8px;
 padding:5px 0;border-bottom:1px solid var(--line-soft);
@@ -1082,24 +1077,24 @@ font-size:12px;background:#fff;
 }
 
 /* --- Master EQ curve --- */
-#master-eq-card,.live-tile[data-tile="masterEq"]{margin-bottom:12px}
-#master-eq-notice,.master-eq-notice{
+.live-tile[data-tile="masterEq"]{margin-bottom:12px}
+.master-eq-notice{
 font-size:12px;font-weight:700;color:#3a3a44;
 margin-bottom:6px;line-height:1.4;
 }
-#master-eq-caption,.master-eq-caption{
+.master-eq-caption{
 font-size:11px;color:#888;margin-bottom:10px;line-height:1.45;
 }
-#master-eq-wrap,.master-eq-wrap{
+.master-eq-wrap{
 width:100%;max-width:900px;margin:0 auto;
 }
-#master-eq-canvas,.master-eq-canvas{
+.master-eq-canvas{
 display:block;width:100%;
 height:240px;min-height:240px;
 border-radius:6px;background:transparent;
 }
 @media(min-width:720px){
-#master-eq-canvas,.master-eq-canvas{height:320px;min-height:320px}
+.master-eq-canvas{height:320px;min-height:320px}
 }
     `;
     document.head.appendChild(s);
@@ -1123,7 +1118,14 @@ border-radius:6px;background:transparent;
   }
   function el(tag, props) {
     const e = document.createElement(tag);
-    if (props) Object.assign(e, props);
+    if (!props) return e;
+    for (const key of Object.keys(props)) {
+      const val = props[key];
+      if (key.indexOf("-") >= 0)
+        e.setAttribute(key, val);
+      else
+        e[key] = val;
+    }
     return e;
   }
   function cardTitle(text) {
@@ -1220,6 +1222,85 @@ border-radius:6px;background:transparent;
     return prefs.order.filter((id) => isLiveTileOn(prefs, id));
   }
 
+  // gui/bela/connection.js
+  function belaSocketOpen() {
+    if (typeof Bela === "undefined") return false;
+    const ws = Bela.socket || Bela.ws || Bela.data && Bela.data.socket;
+    if (ws && typeof ws.readyState === "number")
+      return ws.readyState === WebSocket.OPEN;
+    return true;
+  }
+  function belaControlReady() {
+    return typeof Bela !== "undefined" && Bela.control && Bela.control.ws && Bela.control.ws.readyState === 1;
+  }
+  function sampleBelaFingerprint(b) {
+    const parts = [];
+    if (b[0]) {
+      parts.push("p");
+      for (let i = 0; i < Math.min(6, b[0].length); i++)
+        parts.push(b[0][i].toFixed(4));
+    }
+    if (b[3]) {
+      parts.push("a");
+      for (let i = 0; i < b[3].length; i++)
+        parts.push(b[3][i].toFixed(5));
+    }
+    return parts.join(",");
+  }
+  function updateBelaRxWatchdog(b) {
+    if (!b || !b[0]) return;
+    const now = Date.now();
+    const fp = sampleBelaFingerprint(b);
+    if (fp !== getContext().belaRxFingerprint) {
+      getContext().belaRxFingerprint = fp;
+      getContext().lastBelaRxMs = now;
+    } else if (getContext().lastBelaRxMs === 0) {
+      getContext().belaRxFingerprint = fp;
+      getContext().lastBelaRxMs = now;
+    }
+  }
+  function getBelaConnState() {
+    if (typeof Bela === "undefined") return "offline";
+    if (!belaSocketOpen()) return "offline";
+    if (getContext().lastBelaRxMs === 0) return "offline";
+    const staleMs = Date.now() - getContext().lastBelaRxMs;
+    if (staleMs >= BELA_OFFLINE_TIMEOUT_MS) return "offline";
+    if (staleMs >= BELA_LAG_THRESHOLD_MS) return "lag";
+    return "live";
+  }
+  function isBelaConnected() {
+    return getBelaConnState() !== "offline";
+  }
+  function updateBadge() {
+    const badge = document.getElementById("conn-badge");
+    if (!badge) return;
+    const state = getBelaConnState();
+    if (state === "live") {
+      badge.textContent = "LIVE";
+      badge.className = "badge live";
+    } else if (state === "lag") {
+      badge.textContent = "LAG";
+      badge.className = "badge lag";
+    } else {
+      badge.textContent = "OFFLINE";
+      badge.className = "badge";
+    }
+  }
+  function updateTempBadge(tempC) {
+    const badge = document.getElementById("temp-badge");
+    if (!badge) return;
+    if (typeof tempC !== "number" || !isFinite(tempC) || tempC < 0) {
+      badge.textContent = "--\xB0C";
+      badge.className = "badge temp unknown";
+      return;
+    }
+    badge.textContent = `${Math.round(tempC)}\xB0C`;
+    let cls = "badge temp";
+    if (tempC >= CPU_TEMP_HOT_C) cls += " hot";
+    else if (tempC >= CPU_TEMP_WARM_C) cls += " warm";
+    badge.className = cls;
+  }
+
   // gui/routing-config.js
   var ROUTING_CONFIG = {
     "out": {
@@ -1277,11 +1358,8 @@ border-radius:6px;background:transparent;
   var METER_COUNT = 13;
   var _inputPickers = new Array(10).fill(null);
   var _outputPickers = new Array(10).fill(null);
-  function _belaControlReady() {
-    return typeof Bela !== "undefined" && Bela.control && Bela.control.ws && Bela.control.ws.readyState === 1;
-  }
   function _sendGain(payload) {
-    if (!_belaControlReady()) return;
+    if (!belaControlReady()) return;
     Bela.control.send(payload);
   }
   function _buildMeterGainControls(initVal, min, max, step, onSend) {
@@ -2446,9 +2524,6 @@ border-radius:6px;background:transparent;
       btn.dataset.mode = mode;
       btn.addEventListener("click", () => setConsoleFilterMode(mode));
       filterBar.appendChild(btn);
-      if (!getContext().consoleFilterBtns)
-        getContext().consoleFilterBtns = [];
-      getContext().consoleFilterBtns.push(btn);
     });
     consoleHdr.appendChild(filterBar);
     card.appendChild(consoleHdr);
@@ -2457,7 +2532,6 @@ border-radius:6px;background:transparent;
     if (!getContext().consoleLists)
       getContext().consoleLists = [];
     getContext().consoleLists.push(list);
-    getContext().consoleList = list;
     renderConsole();
     return card;
   }
@@ -2498,7 +2572,6 @@ border-radius:6px;background:transparent;
     lbl.textContent = switchDisplayName(name);
     tile.appendChild(led);
     tile.appendChild(lbl);
-    getContext().switchPills[index] = tile;
     return tile;
   }
   function syncConsolePotBaselines() {
@@ -2586,9 +2659,6 @@ border-radius:6px;background:transparent;
   }
   function renderConsole() {
     const lists = getContext().consoleLists || [];
-    if (getContext().consoleList && lists.indexOf(getContext().consoleList) < 0)
-      lists.push(getContext().consoleList);
-    getContext().consoleLists = lists;
     if (!lists.length) return;
     lists.forEach((list) => {
       if (!list) return;
@@ -2759,8 +2829,6 @@ border-radius:6px;background:transparent;
     ];
     const hpfActive = pots[p.HPF_FREQ] >= cfg.FILTER_OFF_THRESHOLD;
     const lpfActive = pots[p.LPF_FREQ] >= cfg.FILTER_OFF_THRESHOLD;
-    const hpfMix = hpfActive ? 1 : 0;
-    const lpfMix = lpfActive ? 1 : 0;
     let hpfCoeffs = null;
     let lpfCoeffs = null;
     if (hpfActive) {
@@ -2775,7 +2843,6 @@ border-radius:6px;background:transparent;
     }
     const kill = cfg.KILL_SWITCH;
     const anyKill = switches[kill.SUB] > 0.5 || switches[kill.KICK] > 0.5 || switches[kill.MID] > 0.5 || switches[kill.TOP] > 0.5;
-    const crossoverMix = anyKill ? 1 : 0;
     const bandGain = [
       switches[kill.SUB] > 0.5 ? 0 : 1,
       switches[kill.KICK] > 0.5 ? 0 : 1,
@@ -2802,12 +2869,8 @@ border-radius:6px;background:transparent;
           h *= biquadMagLinear(c, f, fs);
         }
       }
-      if (hpfCoeffs)
-        h *= 1 - hpfMix + hpfMix * biquadMagLinear(hpfCoeffs, f, fs);
-      if (lpfCoeffs) {
-        const hMid = h;
-        h = hMid * (1 - lpfMix + lpfMix * biquadMagLinear(lpfCoeffs, f, fs));
-      }
+      if (hpfCoeffs) h *= biquadMagLinear(hpfCoeffs, f, fs);
+      if (lpfCoeffs) h *= biquadMagLinear(lpfCoeffs, f, fs);
       if (Math.abs(btrimGainDb[0]) > eps)
         h *= biquadMagLinear(biquadLowShelf(cfg.KILL_FC[0], btrimGainDb[0], fs), f, fs);
       if (Math.abs(btrimGainDb[1]) > eps)
@@ -2834,13 +2897,12 @@ border-radius:6px;background:transparent;
         );
       if (Math.abs(btrimGainDb[3]) > eps)
         h *= biquadMagLinear(biquadHighShelf(cfg.KILL_FC[2], btrimGainDb[3], fs), f, fs);
-      if (crossoverMix > 0) {
+      if (anyKill) {
         const hSub = killBandMagLinear("sub", f, fs, cfg);
         const hKick = killBandMagLinear("kick", f, fs, cfg);
         const hMid = killBandMagLinear("mid", f, fs, cfg);
         const hTop = killBandMagLinear("top", f, fs, cfg);
-        const hKill = bandGain[0] * hSub + bandGain[1] * hKick + bandGain[2] * hMid + bandGain[3] * hTop;
-        h *= 1 - crossoverMix + crossoverMix * hKill;
+        h *= bandGain[0] * hSub + bandGain[1] * hKick + bandGain[2] * hMid + bandGain[3] * hTop;
       }
       out[i] = 20 * Math.log10(Math.max(h, 1e-12));
     }
@@ -2960,17 +3022,9 @@ border-radius:6px;background:transparent;
     ctx2d.globalAlpha = 1;
   }
   function drawMasterEqCurve() {
-    const targets = getContext().masterEqTargets || [];
-    if (getContext().masterEqCanvas && getContext().masterEqCtx) {
-      const has = targets.some((t) => t.canvas === getContext().masterEqCanvas);
-      if (!has)
-        targets.push({
-          canvas: getContext().masterEqCanvas,
-          ctx: getContext().masterEqCtx
-        });
-    }
-    getContext().masterEqTargets = targets.filter((t) => t.canvas && t.canvas.isConnected);
-    getContext().masterEqTargets.forEach((t) => drawMasterEqOnCanvas(t.canvas, t.ctx));
+    const targets = (getContext().masterEqTargets || []).filter((t) => t.canvas && t.canvas.isConnected);
+    getContext().masterEqTargets = targets;
+    targets.forEach((t) => drawMasterEqOnCanvas(t.canvas, t.ctx));
   }
   function updateMasterEq() {
     computeMasterCurve(getContext().potValues, getContext().switchStates);
@@ -3005,8 +3059,6 @@ border-radius:6px;background:transparent;
     if (!getContext().masterEqTargets)
       getContext().masterEqTargets = [];
     getContext().masterEqTargets.push({ canvas, ctx: ctx2d });
-    getContext().masterEqCanvas = canvas;
-    getContext().masterEqCtx = ctx2d;
     return card;
   }
 
@@ -3028,11 +3080,8 @@ border-radius:6px;background:transparent;
     if (kind === "mic" || kind === "both") _micSyncHoldUntil[idx] = until;
     if (kind === "hpf" || kind === "both") _hpfSyncHoldUntil[idx] = until;
   }
-  function _belaControlReady2() {
-    return typeof Bela !== "undefined" && Bela.control && Bela.control.ws && Bela.control.ws.readyState === 1;
-  }
   function _sendMicControl(payload, desc, statusEl) {
-    if (!_belaControlReady2()) {
+    if (!belaControlReady()) {
       if (statusEl) {
         statusEl.textContent = "Bela not connected \u2014 project must be running";
         statusEl.className = "mic-live-status err";
@@ -3175,7 +3224,7 @@ border-radius:6px;background:transparent;
     }
     card.appendChild(list);
     const poll = setInterval(() => {
-      if (_belaControlReady2()) {
+      if (belaControlReady()) {
         statusEl.textContent = "Live \u2014 lost on Bela restart";
         statusEl.className = "mic-live-status ok";
         clearInterval(poll);
@@ -3379,7 +3428,6 @@ border-radius:6px;background:transparent;
       );
     }
     getContext().consoleLists = (getContext().consoleLists || []).filter((l) => l.isConnected);
-    getContext().consoleFilterBtns = (getContext().consoleFilterBtns || []).filter((b) => b.isConnected);
     const pairedDone = { done: false };
     orderedLiveTiles(prefs).forEach((id) => {
       _appendTile(_liveBoard, id, prefs, pairedDone);
@@ -3531,82 +3579,6 @@ border-radius:6px;background:transparent;
     }
   }
 
-  // gui/bela/connection.js
-  function belaSocketOpen() {
-    if (typeof Bela === "undefined") return false;
-    const ws = Bela.socket || Bela.ws || Bela.data && Bela.data.socket;
-    if (ws && typeof ws.readyState === "number")
-      return ws.readyState === WebSocket.OPEN;
-    return true;
-  }
-  function sampleBelaFingerprint(b) {
-    const parts = [];
-    if (b[0]) {
-      parts.push("p");
-      for (let i = 0; i < Math.min(6, b[0].length); i++)
-        parts.push(b[0][i].toFixed(4));
-    }
-    if (b[3]) {
-      parts.push("a");
-      for (let i = 0; i < b[3].length; i++)
-        parts.push(b[3][i].toFixed(5));
-    }
-    return parts.join(",");
-  }
-  function updateBelaRxWatchdog(b) {
-    if (!b || !b[0]) return;
-    const now = Date.now();
-    const fp = sampleBelaFingerprint(b);
-    if (fp !== getContext().belaRxFingerprint) {
-      getContext().belaRxFingerprint = fp;
-      getContext().lastBelaRxMs = now;
-    } else if (getContext().lastBelaRxMs === 0) {
-      getContext().belaRxFingerprint = fp;
-      getContext().lastBelaRxMs = now;
-    }
-  }
-  function getBelaConnState() {
-    if (typeof Bela === "undefined") return "offline";
-    if (!belaSocketOpen()) return "offline";
-    if (getContext().lastBelaRxMs === 0) return "offline";
-    const staleMs = Date.now() - getContext().lastBelaRxMs;
-    if (staleMs >= BELA_OFFLINE_TIMEOUT_MS) return "offline";
-    if (staleMs >= BELA_LAG_THRESHOLD_MS) return "lag";
-    return "live";
-  }
-  function isBelaConnected() {
-    return getBelaConnState() !== "offline";
-  }
-  function updateBadge() {
-    const badge = document.getElementById("conn-badge");
-    if (!badge) return;
-    const state = getBelaConnState();
-    if (state === "live") {
-      badge.textContent = "LIVE";
-      badge.className = "badge live";
-    } else if (state === "lag") {
-      badge.textContent = "LAG";
-      badge.className = "badge lag";
-    } else {
-      badge.textContent = "OFFLINE";
-      badge.className = "badge";
-    }
-  }
-  function updateTempBadge(tempC) {
-    const badge = document.getElementById("temp-badge");
-    if (!badge) return;
-    if (typeof tempC !== "number" || !isFinite(tempC) || tempC < 0) {
-      badge.textContent = "--\xB0C";
-      badge.className = "badge temp unknown";
-      return;
-    }
-    badge.textContent = `${Math.round(tempC)}\xB0C`;
-    let cls = "badge temp";
-    if (tempC >= CPU_TEMP_HOT_C) cls += " hot";
-    else if (tempC >= CPU_TEMP_WARM_C) cls += " warm";
-    badge.className = cls;
-  }
-
   // gui/main.js
   function sketch(p) {
     initContext(createState());
@@ -3621,15 +3593,6 @@ border-radius:6px;background:transparent;
         cnv.elt.style.display = "none";
       }
       hideP5Dom();
-      document.documentElement.style.margin = "0";
-      document.documentElement.style.padding = "0";
-      document.documentElement.style.width = "100%";
-      document.documentElement.style.overflowX = "hidden";
-      document.body.style.margin = "0";
-      document.body.style.padding = "0";
-      document.body.style.width = "100%";
-      document.body.style.overflowX = "hidden";
-      layoutTopChrome();
       window.addEventListener("resize", () => {
         layoutTopChrome();
         getContext().meterVu.forEach((vu) => {
