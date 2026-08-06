@@ -2,7 +2,13 @@
 import { getContext } from '../context.js';
 import { TAB_LIVE, TAB_MAPPING } from '../config.js';
 import { el, projectFileUrl } from './utils.js';
-import { buildLivePane } from './live.js';
+import {
+    buildLivePane,
+    setLiveLayoutGearButton,
+    setLiveLayoutPanelOpen,
+    toggleLiveLayoutPanel
+} from './live.js';
+import { isLiveTileOn } from '../live-layout.js';
 import { startMeterAnim, stopMeterAnim } from './meters.js';
 import { drawMasterEqCurve } from './masterEq.js';
 import { buildMappingPane, cancelDetect } from './mapping.js';
@@ -42,6 +48,29 @@ export function buildUI() {
         btn.addEventListener('click', () => switchTab(i));
         tabBar.appendChild(btn);
     });
+
+    tabBar.appendChild(el('span', {className: 'tab-bar-spacer'}));
+
+    const gear = el('button', {
+        type: 'button',
+        id: 'live-layout-gear',
+        className: 'live-layout-gear',
+        title: 'Live layout',
+        'aria-label': 'Settings'
+    });
+    gear.textContent = 'Settings';
+    gear.addEventListener('click', () => {
+        const ctx = getContext();
+        if (ctx.currentTab !== TAB_LIVE) {
+            switchTab(TAB_LIVE);
+            setLiveLayoutPanelOpen(true);
+            return;
+        }
+        toggleLiveLayoutPanel();
+    });
+    tabBar.appendChild(gear);
+    setLiveLayoutGearButton(gear);
+
     topChrome.appendChild(tabBar);
     root.appendChild(topChrome);
 
@@ -64,11 +93,12 @@ export function switchTab(idx) {
         p.classList.toggle('active', i === idx));
     if (idx === TAB_LIVE) {
         ctx.meterVu.forEach(vu => { if (vu) vu.resize(); });
-        if (ctx.liveLayoutPrefs && ctx.liveLayoutPrefs.meters)
+        if (isLiveTileOn(ctx.liveLayoutPrefs, 'meters'))
             startMeterAnim();
-        if (ctx.liveLayoutPrefs && ctx.liveLayoutPrefs.masterEq)
+        if (isLiveTileOn(ctx.liveLayoutPrefs, 'masterEq'))
             drawMasterEqCurve();
     } else {
         stopMeterAnim();
+        setLiveLayoutPanelOpen(false);
     }
 }

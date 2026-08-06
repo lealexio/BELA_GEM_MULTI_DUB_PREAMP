@@ -21,7 +21,21 @@ var __belaPreampSketch = (() => {
   var __defProp = Object.defineProperty;
   var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
   var __getOwnPropNames = Object.getOwnPropertyNames;
+  var __getOwnPropSymbols = Object.getOwnPropertySymbols;
   var __hasOwnProp = Object.prototype.hasOwnProperty;
+  var __propIsEnum = Object.prototype.propertyIsEnumerable;
+  var __defNormalProp = (obj, key, value) => key in obj ? __defProp(obj, key, { enumerable: true, configurable: true, writable: true, value }) : obj[key] = value;
+  var __spreadValues = (a, b) => {
+    for (var prop in b || (b = {}))
+      if (__hasOwnProp.call(b, prop))
+        __defNormalProp(a, prop, b[prop]);
+    if (__getOwnPropSymbols)
+      for (var prop of __getOwnPropSymbols(b)) {
+        if (__propIsEnum.call(b, prop))
+          __defNormalProp(a, prop, b[prop]);
+      }
+    return a;
+  };
   var __export = (target, all) => {
     for (var name in all)
       __defProp(target, name, { get: all[name], enumerable: true });
@@ -53,7 +67,8 @@ var __belaPreampSketch = (() => {
     { id: "console", label: "Console", pair: false, defaultOn: false },
     { id: "masterEq", label: "Master EQ", pair: false, defaultOn: false }
   ];
-  var LIVE_LAYOUT_STORAGE_KEY = "belaDubPreamp.liveLayout.v1";
+  var LIVE_LAYOUT_STORAGE_KEY_V1 = "belaDubPreamp.liveLayout.v1";
+  var LIVE_LAYOUT_STORAGE_KEY = "belaDubPreamp.liveLayout.v2";
   var DETECT_POT_MIN_DELTA = 0.25;
   var MUX_POTS_PER_MUX = 16;
   var MUX_RAW_SIZE = 64;
@@ -468,7 +483,7 @@ letter-spacing:.02em;min-width:3.6em;text-align:center;
 
 /* --- Tab bar --- */
 #tab-bar{
-display:flex;background:var(--bg-elev);
+display:flex;align-items:stretch;background:var(--bg-elev);
 border-bottom:1px solid var(--line);
 width:100%;
 padding:0 6px;
@@ -481,6 +496,19 @@ transition:color .15s,border-color .15s;letter-spacing:.02em;
 }
 .tab-btn:hover{color:var(--ink)}
 .tab-btn.active{color:var(--ink);border-bottom-color:var(--accent)}
+.tab-bar-spacer{flex:1;min-width:8px}
+.live-layout-gear{
+align-self:center;height:32px;margin-right:4px;
+padding:0 10px;font-size:12px;font-weight:600;letter-spacing:.02em;
+line-height:1;color:var(--muted);
+cursor:pointer;border:1px solid transparent;border-radius:7px;
+background:transparent;position:relative;z-index:210;
+transition:color .12s,background .12s,border-color .12s;
+}
+.live-layout-gear:hover{color:var(--ink);background:var(--surface);border-color:var(--line)}
+.live-layout-gear.active{
+color:#fff;background:var(--ink);border-color:var(--ink);
+}
 
 /* --- Content --- */
 #tab-content{
@@ -932,25 +960,21 @@ flex:1;
 }
 }
 
-#live-toolbar{
-display:flex;justify-content:flex-end;align-items:center;
-margin:0 0 10px;gap:8px;
+#live-layout-popup{
+position:fixed;inset:0;z-index:200;
 }
-.live-layout-btn{
-padding:6px 12px;font-size:11px;font-weight:700;letter-spacing:.04em;
-text-transform:uppercase;color:var(--muted);cursor:pointer;
-background:var(--bg-elev);border:1px solid var(--line);border-radius:7px;
-transition:background .12s,color .12s,border-color .12s;
-}
-.live-layout-btn:hover{color:var(--ink);border-color:#c8c8d0}
-.live-layout-btn.active{
-color:#fff;background:var(--ink);border-color:var(--ink);
+#live-layout-popup[hidden]{display:none!important}
+.live-layout-backdrop{
+position:absolute;inset:0;
+background:rgba(26,26,46,.22);
 }
 .live-layout-panel{
+position:absolute;z-index:1;
+max-height:min(70vh,520px);overflow-y:auto;
 background:var(--bg-elev);border:1px solid var(--line);border-radius:var(--radius);
-box-shadow:var(--shadow);padding:12px 14px;margin-bottom:12px;
+box-shadow:0 8px 28px rgba(26,26,46,.18),var(--shadow);
+padding:12px 14px;
 }
-.live-layout-panel[hidden]{display:none!important}
 .live-layout-title{
 font-size:11px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;
 color:var(--ink-soft);margin-bottom:4px;
@@ -959,14 +983,25 @@ color:var(--ink-soft);margin-bottom:4px;
 font-size:11px;color:var(--muted);line-height:1.4;margin-bottom:10px;
 }
 .live-layout-list{
-display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:6px 12px;
+display:flex;flex-direction:column;gap:6px;
 }
 .live-layout-row{
-display:flex;align-items:center;gap:8px;font-size:13px;font-weight:600;
-color:var(--ink);cursor:pointer;user-select:none;
+display:flex;align-items:center;justify-content:space-between;gap:10px;
+font-size:13px;font-weight:600;color:var(--ink);user-select:none;
 padding:6px 8px;border-radius:6px;background:var(--surface);border:1px solid var(--line-soft);
 }
-.live-layout-row input{width:15px;height:15px;accent-color:var(--ink);cursor:pointer}
+.live-layout-check{
+display:flex;align-items:center;gap:8px;cursor:pointer;flex:1;min-width:0;
+}
+.live-layout-check input{width:15px;height:15px;accent-color:var(--ink);cursor:pointer}
+.live-layout-moves{display:flex;gap:4px;flex-shrink:0}
+.live-layout-move{
+width:28px;height:28px;padding:0;font-size:11px;line-height:1;
+color:var(--muted);cursor:pointer;border:1px solid var(--line);
+border-radius:6px;background:var(--bg-elev);
+}
+.live-layout-move:hover:not(:disabled){color:var(--ink);border-color:#c8c8d0}
+.live-layout-move:disabled{opacity:.35;cursor:default}
 #live-board{display:flex;flex-direction:column;gap:12px}
 #live-board > .card,
 #live-board > #meters-wrap,
@@ -1108,26 +1143,57 @@ border-radius:6px;background:transparent;
 
   // gui/live-layout.js
   function defaultLiveLayout() {
-    const prefs = {};
+    const enabled = {};
+    const order = [];
     LIVE_TILES.forEach((t) => {
-      prefs[t.id] = !!t.defaultOn;
+      enabled[t.id] = !!t.defaultOn;
+      order.push(t.id);
+    });
+    return { enabled, order };
+  }
+  function _normalize(prefs) {
+    const def = defaultLiveLayout();
+    const enabled = __spreadValues({}, def.enabled);
+    const known = new Set(LIVE_TILES.map((t) => t.id));
+    if (prefs && prefs.enabled && typeof prefs.enabled === "object") {
+      LIVE_TILES.forEach((t) => {
+        if (typeof prefs.enabled[t.id] === "boolean")
+          enabled[t.id] = prefs.enabled[t.id];
+      });
+    }
+    let order = Array.isArray(prefs && prefs.order) ? prefs.order.slice() : [];
+    order = order.filter((id) => known.has(id));
+    LIVE_TILES.forEach((t) => {
+      if (!order.includes(t.id)) order.push(t.id);
+    });
+    return { enabled, order };
+  }
+  function _migrateV1(parsed) {
+    const prefs = defaultLiveLayout();
+    if (!parsed || typeof parsed !== "object") return prefs;
+    LIVE_TILES.forEach((t) => {
+      if (typeof parsed[t.id] === "boolean")
+        prefs.enabled[t.id] = parsed[t.id];
     });
     return prefs;
   }
   function loadLiveLayout() {
-    const prefs = defaultLiveLayout();
     try {
-      const raw = localStorage.getItem(LIVE_LAYOUT_STORAGE_KEY);
-      if (!raw) return prefs;
-      const parsed = JSON.parse(raw);
-      if (!parsed || typeof parsed !== "object") return prefs;
-      LIVE_TILES.forEach((t) => {
-        if (typeof parsed[t.id] === "boolean")
-          prefs[t.id] = parsed[t.id];
-      });
+      const rawV2 = localStorage.getItem(LIVE_LAYOUT_STORAGE_KEY);
+      if (rawV2) {
+        const parsed = JSON.parse(rawV2);
+        if (parsed && typeof parsed === "object" && parsed.enabled)
+          return _normalize(parsed);
+      }
+      const rawV1 = localStorage.getItem(LIVE_LAYOUT_STORAGE_KEY_V1);
+      if (rawV1) {
+        const migrated = _migrateV1(JSON.parse(rawV1));
+        saveLiveLayout(migrated);
+        return migrated;
+      }
     } catch (_) {
     }
-    return prefs;
+    return defaultLiveLayout();
   }
   function saveLiveLayout(prefs) {
     try {
@@ -1136,7 +1202,22 @@ border-radius:6px;background:transparent;
     }
   }
   function isLiveTileOn(prefs, id) {
-    return !!(prefs && prefs[id]);
+    return !!(prefs && prefs.enabled && prefs.enabled[id]);
+  }
+  function moveLiveTile(prefs, id, dir) {
+    if (!prefs || !Array.isArray(prefs.order)) return false;
+    const i = prefs.order.indexOf(id);
+    if (i < 0) return false;
+    const j = i + dir;
+    if (j < 0 || j >= prefs.order.length) return false;
+    const tmp = prefs.order[i];
+    prefs.order[i] = prefs.order[j];
+    prefs.order[j] = tmp;
+    return true;
+  }
+  function orderedLiveTiles(prefs) {
+    if (!prefs || !Array.isArray(prefs.order)) return [];
+    return prefs.order.filter((id) => isLiveTileOn(prefs, id));
   }
 
   // gui/routing-config.js
@@ -2893,7 +2974,7 @@ border-radius:6px;background:transparent;
   }
   function updateMasterEq() {
     computeMasterCurve(getContext().potValues, getContext().switchStates);
-    const liveHasEq = !!(getContext().liveLayoutPrefs && getContext().liveLayoutPrefs.masterEq);
+    const liveHasEq = isLiveTileOn(getContext().liveLayoutPrefs, "masterEq");
     if (liveHasEq && getContext().currentTab === TAB_LIVE)
       drawMasterEqCurve();
   }
@@ -2937,7 +3018,11 @@ border-radius:6px;background:transparent;
   var HPF_DEBOUNCE_MS = 150;
   var MIC_SYNC_HOLD_MS = 2500;
   var _liveBoard = null;
+  var _layoutPopup = null;
   var _layoutPanel = null;
+  var _layoutList = null;
+  var _layoutGearBtn = null;
+  var _layoutEscBound = null;
   function _holdMicSync(idx, kind) {
     const until = Date.now() + MIC_SYNC_HOLD_MS;
     if (kind === "mic" || kind === "both") _micSyncHoldUntil[idx] = until;
@@ -3104,38 +3189,184 @@ border-radius:6px;background:transparent;
     wrap.dataset.tile = "meters";
     return wrap;
   }
-  function buildLayoutPanel(prefs) {
-    const panel = el("div", {
-      id: "live-layout-panel",
-      className: "live-layout-panel",
+  function _buildLayoutRow(prefs, tileId, index) {
+    const tile = LIVE_TILES.find((t) => t.id === tileId);
+    if (!tile) return null;
+    const row = el("div", { className: "live-layout-row" });
+    const left = el("label", { className: "live-layout-check" });
+    const cb = el("input", { type: "checkbox" });
+    cb.checked = isLiveTileOn(prefs, tile.id);
+    cb.addEventListener("change", () => {
+      const p = getContext().liveLayoutPrefs;
+      p.enabled[tile.id] = cb.checked;
+      saveLiveLayout(p);
+      renderLiveBoard();
+    });
+    const lbl = el("span");
+    lbl.textContent = tile.label;
+    left.appendChild(cb);
+    left.appendChild(lbl);
+    const moves = el("div", { className: "live-layout-moves" });
+    const up = el("button", {
+      type: "button",
+      className: "live-layout-move",
+      title: "Move up",
+      "aria-label": "Move up"
+    });
+    up.textContent = "\u25B2";
+    up.disabled = index === 0;
+    up.addEventListener("click", () => {
+      const p = getContext().liveLayoutPrefs;
+      if (!moveLiveTile(p, tile.id, -1)) return;
+      saveLiveLayout(p);
+      rebuildLayoutPanelRows();
+      renderLiveBoard();
+    });
+    const down = el("button", {
+      type: "button",
+      className: "live-layout-move",
+      title: "Move down",
+      "aria-label": "Move down"
+    });
+    down.textContent = "\u25BC";
+    down.disabled = index >= prefs.order.length - 1;
+    down.addEventListener("click", () => {
+      const p = getContext().liveLayoutPrefs;
+      if (!moveLiveTile(p, tile.id, 1)) return;
+      saveLiveLayout(p);
+      rebuildLayoutPanelRows();
+      renderLiveBoard();
+    });
+    moves.appendChild(up);
+    moves.appendChild(down);
+    row.appendChild(left);
+    row.appendChild(moves);
+    return row;
+  }
+  function rebuildLayoutPanelRows() {
+    if (!_layoutList) return;
+    const prefs = getContext().liveLayoutPrefs;
+    _layoutList.innerHTML = "";
+    prefs.order.forEach((id, i) => {
+      const row = _buildLayoutRow(prefs, id, i);
+      if (row) _layoutList.appendChild(row);
+    });
+  }
+  function _positionLayoutPopup() {
+    if (!_layoutPanel || !_layoutGearBtn) return;
+    const r = _layoutGearBtn.getBoundingClientRect();
+    const gap = 8;
+    const width = Math.min(300, window.innerWidth - 16);
+    let left = r.right - width;
+    left = Math.max(8, Math.min(left, window.innerWidth - width - 8));
+    _layoutPanel.style.top = Math.round(r.bottom + gap) + "px";
+    _layoutPanel.style.left = Math.round(left) + "px";
+    _layoutPanel.style.width = width + "px";
+  }
+  function buildLayoutPopup() {
+    const popup = el("div", {
+      id: "live-layout-popup",
       hidden: true
+    });
+    const backdrop = el("div", { className: "live-layout-backdrop" });
+    backdrop.addEventListener("click", () => setLiveLayoutPanelOpen(false));
+    const panel = el("div", {
+      className: "live-layout-panel",
+      role: "dialog",
+      "aria-label": "Live layout"
     });
     const title = el("div", { className: "live-layout-title" });
     title.textContent = "Live layout";
     panel.appendChild(title);
     const hint = el("p", { className: "live-layout-hint" });
-    hint.textContent = "Choose which tiles appear on Live. Saved in this browser.";
+    hint.textContent = "Show/hide and reorder tiles. Saved in this browser.";
     panel.appendChild(hint);
-    const list = el("div", { className: "live-layout-list" });
-    LIVE_TILES.forEach((tile) => {
-      const row = el("label", { className: "live-layout-row" });
-      const cb = el("input", { type: "checkbox" });
-      cb.checked = isLiveTileOn(prefs, tile.id);
-      cb.dataset.tileId = tile.id;
-      cb.addEventListener("change", () => {
-        const p = getContext().liveLayoutPrefs;
-        p[tile.id] = cb.checked;
-        saveLiveLayout(p);
-        renderLiveBoard();
-      });
-      const lbl = el("span");
-      lbl.textContent = tile.label;
-      row.appendChild(cb);
-      row.appendChild(lbl);
-      list.appendChild(row);
-    });
-    panel.appendChild(list);
-    return panel;
+    _layoutList = el("div", { className: "live-layout-list" });
+    panel.appendChild(_layoutList);
+    rebuildLayoutPanelRows();
+    popup.appendChild(backdrop);
+    popup.appendChild(panel);
+    _layoutPanel = panel;
+    return popup;
+  }
+  function setLiveLayoutPanelOpen(open) {
+    if (!_layoutPopup) return;
+    if (open) {
+      rebuildLayoutPanelRows();
+      _layoutPopup.removeAttribute("hidden");
+      _positionLayoutPopup();
+      if (!_layoutEscBound) {
+        _layoutEscBound = (e) => {
+          if (e.key === "Escape") setLiveLayoutPanelOpen(false);
+        };
+        document.addEventListener("keydown", _layoutEscBound);
+      }
+      window.addEventListener("resize", _positionLayoutPopup);
+    } else {
+      _layoutPopup.setAttribute("hidden", "");
+      if (_layoutEscBound) {
+        document.removeEventListener("keydown", _layoutEscBound);
+        _layoutEscBound = null;
+      }
+      window.removeEventListener("resize", _positionLayoutPopup);
+    }
+    if (_layoutGearBtn)
+      _layoutGearBtn.classList.toggle("active", open);
+  }
+  function toggleLiveLayoutPanel() {
+    if (!_layoutPopup) return false;
+    const open = _layoutPopup.hasAttribute("hidden");
+    setLiveLayoutPanelOpen(open);
+    return open;
+  }
+  function setLiveLayoutGearButton(btn) {
+    _layoutGearBtn = btn;
+  }
+  function _appendTile(board, id, prefs, pairedDone) {
+    if (id === "siren" || id === "mic") {
+      if (pairedDone.done) return;
+      const showSiren = isLiveTileOn(prefs, "siren");
+      const showMic = isLiveTileOn(prefs, "mic");
+      if (!showSiren && !showMic) return;
+      if (showSiren && showMic) {
+        pairedDone.done = true;
+        const grid2 = el("div", { id: "live-grid" });
+        const firstPair = prefs.order.indexOf("siren") <= prefs.order.indexOf("mic") ? "siren" : "mic";
+        if (firstPair === "siren") {
+          grid2.appendChild(buildSirenCard());
+          grid2.appendChild(buildMicInputsCard());
+        } else {
+          grid2.appendChild(buildMicInputsCard());
+          grid2.appendChild(buildSirenCard());
+        }
+        board.appendChild(grid2);
+        return;
+      }
+      pairedDone.done = true;
+      const grid = el("div", { id: "live-grid", className: "live-grid-single" });
+      if (showSiren) grid.appendChild(buildSirenCard());
+      if (showMic) grid.appendChild(buildMicInputsCard());
+      board.appendChild(grid);
+      return;
+    }
+    if (id === "meters") {
+      board.appendChild(buildMetersTile());
+      return;
+    }
+    if (id === "switches") {
+      board.appendChild(buildSwitchesCard());
+      return;
+    }
+    if (id === "console") {
+      board.appendChild(buildConsoleCard("live-console-list"));
+      return;
+    }
+    if (id === "masterEq") {
+      board.appendChild(buildMasterEqCard({
+        canvasId: "live-master-eq-canvas"
+      }));
+      drawMasterEqCurve();
+    }
   }
   function renderLiveBoard() {
     if (!_liveBoard) return;
@@ -3149,28 +3380,10 @@ border-radius:6px;background:transparent;
     }
     getContext().consoleLists = (getContext().consoleLists || []).filter((l) => l.isConnected);
     getContext().consoleFilterBtns = (getContext().consoleFilterBtns || []).filter((b) => b.isConnected);
-    const showSiren = isLiveTileOn(prefs, "siren");
-    const showMic = isLiveTileOn(prefs, "mic");
-    if (showSiren || showMic) {
-      const grid = el("div", { id: "live-grid" });
-      if (showSiren) grid.appendChild(buildSirenCard());
-      if (showMic) grid.appendChild(buildMicInputsCard());
-      if (showSiren !== showMic)
-        grid.classList.add("live-grid-single");
-      _liveBoard.appendChild(grid);
-    }
-    if (isLiveTileOn(prefs, "meters"))
-      _liveBoard.appendChild(buildMetersTile());
-    if (isLiveTileOn(prefs, "switches"))
-      _liveBoard.appendChild(buildSwitchesCard());
-    if (isLiveTileOn(prefs, "console"))
-      _liveBoard.appendChild(buildConsoleCard("live-console-list"));
-    if (isLiveTileOn(prefs, "masterEq")) {
-      _liveBoard.appendChild(buildMasterEqCard({
-        canvasId: "live-master-eq-canvas"
-      }));
-      drawMasterEqCurve();
-    }
+    const pairedDone = { done: false };
+    orderedLiveTiles(prefs).forEach((id) => {
+      _appendTile(_liveBoard, id, prefs, pairedDone);
+    });
     const hasMeters = isLiveTileOn(prefs, "meters");
     if (getContext().currentTab === TAB_LIVE) {
       if (hasMeters) {
@@ -3188,25 +3401,10 @@ border-radius:6px;background:transparent;
     const pane = el("div", { id: "pane-live", className: "tab-pane active" });
     const prefs = loadLiveLayout();
     getContext().liveLayoutPrefs = prefs;
-    const toolbar = el("div", { id: "live-toolbar" });
-    const layoutBtn = el("button", {
-      type: "button",
-      id: "live-layout-btn",
-      className: "live-layout-btn",
-      title: "Choose Live tiles"
-    });
-    layoutBtn.textContent = "Layout";
-    layoutBtn.addEventListener("click", () => {
-      if (!_layoutPanel) return;
-      const open = _layoutPanel.hasAttribute("hidden");
-      if (open) _layoutPanel.removeAttribute("hidden");
-      else _layoutPanel.setAttribute("hidden", "");
-      layoutBtn.classList.toggle("active", open);
-    });
-    toolbar.appendChild(layoutBtn);
-    pane.appendChild(toolbar);
-    _layoutPanel = buildLayoutPanel(prefs);
-    pane.appendChild(_layoutPanel);
+    if (_layoutPopup && _layoutPopup.parentNode)
+      _layoutPopup.parentNode.removeChild(_layoutPopup);
+    _layoutPopup = buildLayoutPopup();
+    document.body.appendChild(_layoutPopup);
     _liveBoard = el("div", { id: "live-board" });
     pane.appendChild(_liveBoard);
     renderLiveBoard();
@@ -3285,6 +3483,26 @@ border-radius:6px;background:transparent;
       btn.addEventListener("click", () => switchTab(i));
       tabBar.appendChild(btn);
     });
+    tabBar.appendChild(el("span", { className: "tab-bar-spacer" }));
+    const gear = el("button", {
+      type: "button",
+      id: "live-layout-gear",
+      className: "live-layout-gear",
+      title: "Live layout",
+      "aria-label": "Settings"
+    });
+    gear.textContent = "Settings";
+    gear.addEventListener("click", () => {
+      const ctx = getContext();
+      if (ctx.currentTab !== TAB_LIVE) {
+        switchTab(TAB_LIVE);
+        setLiveLayoutPanelOpen(true);
+        return;
+      }
+      toggleLiveLayoutPanel();
+    });
+    tabBar.appendChild(gear);
+    setLiveLayoutGearButton(gear);
     topChrome.appendChild(tabBar);
     root.appendChild(topChrome);
     const content = el("div", { id: "tab-content" });
@@ -3303,12 +3521,13 @@ border-radius:6px;background:transparent;
       ctx.meterVu.forEach((vu) => {
         if (vu) vu.resize();
       });
-      if (ctx.liveLayoutPrefs && ctx.liveLayoutPrefs.meters)
+      if (isLiveTileOn(ctx.liveLayoutPrefs, "meters"))
         startMeterAnim();
-      if (ctx.liveLayoutPrefs && ctx.liveLayoutPrefs.masterEq)
+      if (isLiveTileOn(ctx.liveLayoutPrefs, "masterEq"))
         drawMasterEqCurve();
     } else {
       stopMeterAnim();
+      setLiveLayoutPanelOpen(false);
     }
   }
 
@@ -3481,7 +3700,7 @@ border-radius:6px;background:transparent;
       updateSwitches();
       updateMasterEq();
       updateBadge();
-      if (ctx.currentTab === TAB_LIVE && ctx.liveLayoutPrefs && ctx.liveLayoutPrefs.meters && ctx.meterAnimId == null)
+      if (ctx.currentTab === TAB_LIVE && isLiveTileOn(ctx.liveLayoutPrefs, "meters") && ctx.meterAnimId == null)
         startMeterAnim();
       if (ctx.detectMode) updateDetectMode();
     };

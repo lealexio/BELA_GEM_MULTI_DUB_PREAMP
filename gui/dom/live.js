@@ -4,7 +4,10 @@ import {
     SIREN_PRESETS, CONFIG_META, MIC_HPF_HZ_MIN, MIC_HPF_HZ_MAX,
     LIVE_TILES, TAB_LIVE
 } from '../config.js';
-import { loadLiveLayout, saveLiveLayout, isLiveTileOn } from '../live-layout.js';
+import {
+    loadLiveLayout, saveLiveLayout, isLiveTileOn,
+    moveLiveTile, orderedLiveTiles
+} from '../live-layout.js';
 import { el, cardTitle } from './utils.js';
 import { buildMetersSection, startMeterAnim, stopMeterAnim } from './meters.js';
 import { buildConsoleCard, buildSwitchesCard } from './console.js';
@@ -21,7 +24,11 @@ const HPF_DEBOUNCE_MS = 150;
 const MIC_SYNC_HOLD_MS = 2500;
 
 let _liveBoard = null;
+let _layoutPopup = null;
 let _layoutPanel = null;
+let _layoutList = null;
+let _layoutGearBtn = null;
+let _layoutEscBound = null;
 
 /** Marks one AUX mic/hpf as locally authoritative for a short window. */
 function _holdMicSync(idx, kind) {
@@ -233,44 +240,214 @@ function buildMetersTile() {
     return wrap;
 }
 
-/** Builds the Layout settings panel (checkboxes). */
-function buildLayoutPanel(prefs) {
-    const panel = el('div', {
-        id: 'live-layout-panel',
-        className: 'live-layout-panel',
+/** Builds one layout row: checkbox + label + ▲▼. */
+function _buildLayoutRow(prefs, tileId, index) {
+    const tile = LIVE_TILES.find(t => t.id === tileId);
+    if (!tile) return null;
+
+    const row = el('div', {className: 'live-layout-row'});
+    const left = el('label', {className: 'live-layout-check'});
+    const cb = el('input', {type: 'checkbox'});
+    cb.checked = isLiveTileOn(prefs, tile.id);
+    cb.addEventListener('change', () => {
+        const p = getContext().liveLayoutPrefs;
+        p.enabled[tile.id] = cb.checked;
+        saveLiveLayout(p);
+        renderLiveBoard();
+    });
+    const lbl = el('span');
+    lbl.textContent = tile.label;
+    left.appendChild(cb);
+    left.appendChild(lbl);
+
+    const moves = el('div', {className: 'live-layout-moves'});
+    const up = el('button', {
+        type: 'button',
+        className: 'live-layout-move',
+        title: 'Move up',
+        'aria-label': 'Move up'
+    });
+    up.textContent = '▲';
+    up.disabled = index === 0;
+    up.addEventListener('click', () => {
+        const p = getContext().liveLayoutPrefs;
+        if (!moveLiveTile(p, tile.id, -1)) return;
+        saveLiveLayout(p);
+        rebuildLayoutPanelRows();
+        renderLiveBoard();
+    });
+
+    const down = el('button', {
+        type: 'button',
+        className: 'live-layout-move',
+        title: 'Move down',
+        'aria-label': 'Move down'
+    });
+    down.textContent = '▼';
+    down.disabled = index >= prefs.order.length - 1;
+    down.addEventListener('click', () => {
+        const p = getContext().liveLayoutPrefs;
+        if (!moveLiveTile(p, tile.id, 1)) return;
+        saveLiveLayout(p);
+        rebuildLayoutPanelRows();
+        renderLiveBoard();
+    });
+
+    moves.appendChild(up);
+    moves.appendChild(down);
+    row.appendChild(left);
+    row.appendChild(moves);
+    return row;
+}
+
+/** Rebuilds layout panel rows from current prefs.order. */
+function rebuildLayoutPanelRows() {
+    if (!_layoutList) return;
+    const prefs = getContext().liveLayoutPrefs;
+    _layoutList.innerHTML = '';
+    prefs.order.forEach((id, i) => {
+        const row = _buildLayoutRow(prefs, id, i);
+        if (row) _layoutList.appendChild(row);
+    });
+}
+
+/** Positions the layout popup under the gear button. */
+function _positionLayoutPopup() {
+    if (!_layoutPanel || !_layoutGearBtn) return;
+    const r = _layoutGearBtn.getBoundingClientRect();
+    const gap = 8;
+    const width = Math.min(300, window.innerWidth - 16);
+    let left = r.right - width;
+    left = Math.max(8, Math.min(left, window.innerWidth - width - 8));
+    _layoutPanel.style.top = Math.round(r.bottom + gap) + 'px';
+    _layoutPanel.style.left = Math.round(left) + 'px';
+    _layoutPanel.style.width = width + 'px';
+}
+
+/** Builds the floating Live layout popup (backdrop + panel). */
+function buildLayoutPopup() {
+    const popup = el('div', {
+        id: 'live-layout-popup',
         hidden: true
+    });
+
+    const backdrop = el('div', {className: 'live-layout-backdrop'});
+    backdrop.addEventListener('click', () => setLiveLayoutPanelOpen(false));
+
+    const panel = el('div', {
+        className: 'live-layout-panel',
+        role: 'dialog',
+        'aria-label': 'Live layout'
     });
     const title = el('div', {className: 'live-layout-title'});
     title.textContent = 'Live layout';
     panel.appendChild(title);
 
     const hint = el('p', {className: 'live-layout-hint'});
-    hint.textContent = 'Choose which tiles appear on Live. Saved in this browser.';
+    hint.textContent = 'Show/hide and reorder tiles. Saved in this browser.';
     panel.appendChild(hint);
 
-    const list = el('div', {className: 'live-layout-list'});
-    LIVE_TILES.forEach(tile => {
-        const row = el('label', {className: 'live-layout-row'});
-        const cb = el('input', {type: 'checkbox'});
-        cb.checked = isLiveTileOn(prefs, tile.id);
-        cb.dataset.tileId = tile.id;
-        cb.addEventListener('change', () => {
-            const p = getContext().liveLayoutPrefs;
-            p[tile.id] = cb.checked;
-            saveLiveLayout(p);
-            renderLiveBoard();
-        });
-        const lbl = el('span');
-        lbl.textContent = tile.label;
-        row.appendChild(cb);
-        row.appendChild(lbl);
-        list.appendChild(row);
-    });
-    panel.appendChild(list);
-    return panel;
+    _layoutList = el('div', {className: 'live-layout-list'});
+    panel.appendChild(_layoutList);
+    rebuildLayoutPanelRows();
+
+    popup.appendChild(backdrop);
+    popup.appendChild(panel);
+    _layoutPanel = panel;
+    return popup;
 }
 
-/** Rebuilds the Live board from current layout prefs. */
+/** Opens or closes the Live layout popup; syncs gear active state. */
+export function setLiveLayoutPanelOpen(open) {
+    if (!_layoutPopup) return;
+    if (open) {
+        rebuildLayoutPanelRows();
+        _layoutPopup.removeAttribute('hidden');
+        _positionLayoutPopup();
+        if (!_layoutEscBound) {
+            _layoutEscBound = (e) => {
+                if (e.key === 'Escape') setLiveLayoutPanelOpen(false);
+            };
+            document.addEventListener('keydown', _layoutEscBound);
+        }
+        window.addEventListener('resize', _positionLayoutPopup);
+    } else {
+        _layoutPopup.setAttribute('hidden', '');
+        if (_layoutEscBound) {
+            document.removeEventListener('keydown', _layoutEscBound);
+            _layoutEscBound = null;
+        }
+        window.removeEventListener('resize', _positionLayoutPopup);
+    }
+    if (_layoutGearBtn)
+        _layoutGearBtn.classList.toggle('active', open);
+}
+
+/** Toggles the Live layout popup. Returns whether it is now open. */
+export function toggleLiveLayoutPanel() {
+    if (!_layoutPopup) return false;
+    const open = _layoutPopup.hasAttribute('hidden');
+    setLiveLayoutPanelOpen(open);
+    return open;
+}
+
+/** Registers the tab-bar gear button that toggles the layout popup. */
+export function setLiveLayoutGearButton(btn) {
+    _layoutGearBtn = btn;
+}
+
+/** Mounts a single tile (or paired siren/mic grid) onto the board. */
+function _appendTile(board, id, prefs, pairedDone) {
+    if (id === 'siren' || id === 'mic') {
+        if (pairedDone.done) return;
+        const showSiren = isLiveTileOn(prefs, 'siren');
+        const showMic = isLiveTileOn(prefs, 'mic');
+        if (!showSiren && !showMic) return;
+        // Pair both into one grid at the first occurrence in order.
+        if (showSiren && showMic) {
+            pairedDone.done = true;
+            const grid = el('div', {id: 'live-grid'});
+            // Preserve relative order of siren vs mic within the pair.
+            const firstPair = prefs.order.indexOf('siren') <= prefs.order.indexOf('mic')
+                ? 'siren' : 'mic';
+            if (firstPair === 'siren') {
+                grid.appendChild(buildSirenCard());
+                grid.appendChild(buildMicInputsCard());
+            } else {
+                grid.appendChild(buildMicInputsCard());
+                grid.appendChild(buildSirenCard());
+            }
+            board.appendChild(grid);
+            return;
+        }
+        pairedDone.done = true;
+        const grid = el('div', {id: 'live-grid', className: 'live-grid-single'});
+        if (showSiren) grid.appendChild(buildSirenCard());
+        if (showMic) grid.appendChild(buildMicInputsCard());
+        board.appendChild(grid);
+        return;
+    }
+    if (id === 'meters') {
+        board.appendChild(buildMetersTile());
+        return;
+    }
+    if (id === 'switches') {
+        board.appendChild(buildSwitchesCard());
+        return;
+    }
+    if (id === 'console') {
+        board.appendChild(buildConsoleCard('live-console-list'));
+        return;
+    }
+    if (id === 'masterEq') {
+        board.appendChild(buildMasterEqCard({
+            canvasId: 'live-master-eq-canvas'
+        }));
+        drawMasterEqCurve();
+    }
+}
+
+/** Rebuilds the Live board from current layout prefs (order + enabled). */
 export function renderLiveBoard() {
     if (!_liveBoard) return;
     const prefs = getContext().liveLayoutPrefs;
@@ -289,30 +466,10 @@ export function renderLiveBoard() {
     getContext().consoleFilterBtns =
         (getContext().consoleFilterBtns || []).filter(b => b.isConnected);
 
-    const showSiren = isLiveTileOn(prefs, 'siren');
-    const showMic   = isLiveTileOn(prefs, 'mic');
-
-    if (showSiren || showMic) {
-        const grid = el('div', {id: 'live-grid'});
-        if (showSiren) grid.appendChild(buildSirenCard());
-        if (showMic)   grid.appendChild(buildMicInputsCard());
-        if (showSiren !== showMic)
-            grid.classList.add('live-grid-single');
-        _liveBoard.appendChild(grid);
-    }
-
-    if (isLiveTileOn(prefs, 'meters'))
-        _liveBoard.appendChild(buildMetersTile());
-    if (isLiveTileOn(prefs, 'switches'))
-        _liveBoard.appendChild(buildSwitchesCard());
-    if (isLiveTileOn(prefs, 'console'))
-        _liveBoard.appendChild(buildConsoleCard('live-console-list'));
-    if (isLiveTileOn(prefs, 'masterEq')) {
-        _liveBoard.appendChild(buildMasterEqCard({
-            canvasId: 'live-master-eq-canvas'
-        }));
-        drawMasterEqCurve();
-    }
+    const pairedDone = { done: false };
+    orderedLiveTiles(prefs).forEach(id => {
+        _appendTile(_liveBoard, id, prefs, pairedDone);
+    });
 
     const hasMeters = isLiveTileOn(prefs, 'meters');
     if (getContext().currentTab === TAB_LIVE) {
@@ -326,33 +483,17 @@ export function renderLiveBoard() {
     }
 }
 
-/** Builds the Live tab with layout toolbar + configurable tiles. */
+/** Builds the Live tab with configurable tiles (layout popup mounts on body). */
 export function buildLivePane() {
     const pane = el('div', {id: 'pane-live', className: 'tab-pane active'});
 
     const prefs = loadLiveLayout();
     getContext().liveLayoutPrefs = prefs;
 
-    const toolbar = el('div', {id: 'live-toolbar'});
-    const layoutBtn = el('button', {
-        type: 'button',
-        id: 'live-layout-btn',
-        className: 'live-layout-btn',
-        title: 'Choose Live tiles'
-    });
-    layoutBtn.textContent = 'Layout';
-    layoutBtn.addEventListener('click', () => {
-        if (!_layoutPanel) return;
-        const open = _layoutPanel.hasAttribute('hidden');
-        if (open) _layoutPanel.removeAttribute('hidden');
-        else _layoutPanel.setAttribute('hidden', '');
-        layoutBtn.classList.toggle('active', open);
-    });
-    toolbar.appendChild(layoutBtn);
-    pane.appendChild(toolbar);
-
-    _layoutPanel = buildLayoutPanel(prefs);
-    pane.appendChild(_layoutPanel);
+    if (_layoutPopup && _layoutPopup.parentNode)
+        _layoutPopup.parentNode.removeChild(_layoutPopup);
+    _layoutPopup = buildLayoutPopup();
+    document.body.appendChild(_layoutPopup);
 
     _liveBoard = el('div', {id: 'live-board'});
     pane.appendChild(_liveBoard);

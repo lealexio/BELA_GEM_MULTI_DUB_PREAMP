@@ -19,8 +19,9 @@ export const LIVE_TILES = [
     { id: 'masterEq', label: 'Master EQ',     pair: false, defaultOn: false },
 ];
 
-/** localStorage key for Live tile visibility. */
-export const LIVE_LAYOUT_STORAGE_KEY = 'belaDubPreamp.liveLayout.v1';
+/** localStorage keys for Live layout prefs (v2 = enabled + order). */
+export const LIVE_LAYOUT_STORAGE_KEY_V1 = 'belaDubPreamp.liveLayout.v1';
+export const LIVE_LAYOUT_STORAGE_KEY = 'belaDubPreamp.liveLayout.v2';
 
 /** Minimum pot travel (0–1) required to accept a detect hit. */
 export const DETECT_POT_MIN_DELTA = 0.25;

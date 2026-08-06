@@ -1,6 +1,7 @@
 /** Master EQ theoretical frequency-response curve. */
 import { getContext } from '../context.js';
 import { MASTER_EQ_CONFIG, masterEqFreqs, MASTER_EQ_FREQ_TICKS, TAB_LIVE } from '../config.js';
+import { isLiveTileOn } from '../live-layout.js';
 import { el, cardTitle } from './utils.js';
 
 export function masterEqPotToGainDb(pot, rangeDb) {
@@ -414,7 +415,7 @@ export function drawMasterEqCurve() {
 /** Recomputes and redraws the master EQ curve when inputs change. */
 export function updateMasterEq() {
     computeMasterCurve(getContext().potValues, getContext().switchStates);
-    const liveHasEq = !!(getContext().liveLayoutPrefs && getContext().liveLayoutPrefs.masterEq);
+    const liveHasEq = isLiveTileOn(getContext().liveLayoutPrefs, 'masterEq');
     if (liveHasEq && getContext().currentTab === TAB_LIVE)
         drawMasterEqCurve();
 }

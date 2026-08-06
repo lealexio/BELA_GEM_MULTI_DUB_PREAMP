@@ -10,6 +10,7 @@ import { updateSiren, syncMicInputs } from './dom/live.js';
 import { updateConsole, updateSwitches } from './dom/console.js';
 import { startMeterAnim, syncCodecGains } from './dom/meters.js';
 import { TAB_LIVE } from './config.js';
+import { isLiveTileOn } from './live-layout.js';
 import { updateMasterEq, resizeMasterEqCanvas } from './dom/masterEq.js';
 import { tryBuildMappingTable, updateDetectMode, fillRoutingFromConfigMeta } from './dom/mapping.js';
 import {
@@ -122,8 +123,8 @@ export default function sketch(p) {
         updateMasterEq();
         updateBadge();
 
-        if(ctx.currentTab === TAB_LIVE && ctx.liveLayoutPrefs &&
-           ctx.liveLayoutPrefs.meters && ctx.meterAnimId == null)
+        if(ctx.currentTab === TAB_LIVE &&
+           isLiveTileOn(ctx.liveLayoutPrefs, 'meters') && ctx.meterAnimId == null)
             startMeterAnim();
         if(ctx.detectMode) updateDetectMode();
     };
