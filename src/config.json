@@ -110,10 +110,10 @@
   ],
 
   "switches": [
-    { "name": "KILL_SUB",        "pin": 0, "reversed": false, "port": "A" },
-    { "name": "KILL_KICK",       "pin": 1, "reversed": false, "port": "A" },
-    { "name": "KILL_MID",        "pin": 2, "reversed": true,  "port": "A" },
-    { "name": "KILL_TOP",        "pin": 3, "reversed": false, "port": "A" },
+    { "name": "KILL_SUB",        "pin": 0, "reversed": true, "port": "A" },
+    { "name": "KILL_KICK",       "pin": 1, "reversed": true, "port": "A" },
+    { "name": "KILL_MID",        "pin": 2, "reversed": false,  "port": "A" },
+    { "name": "KILL_TOP",        "pin": 3, "reversed": true, "port": "A" },
     { "name": "FX2_FILTER_TOPS", "pin": 4, "reversed": false, "port": "A" },
     { "name": "FX_FILTER_MIDS",  "pin": 5, "reversed": false, "port": "A" },
     { "name": "FX_FILTER_TOPS",  "pin": 6, "reversed": false, "port": "A" },

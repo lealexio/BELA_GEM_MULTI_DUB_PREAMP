@@ -434,8 +434,16 @@ function _appendTile(board, id, prefs, pairedDone) {
         board.appendChild(buildMasterEqCard({
             canvasId: 'live-master-eq-canvas'
         }));
-        drawMasterEqCurve();
     }
+}
+
+/** Schedules a Master EQ redraw after layout (CSS size known). */
+function _scheduleMasterEqDraw() {
+    if (!isLiveTileOn(getContext().liveLayoutPrefs, 'masterEq')) return;
+    requestAnimationFrame(() => {
+        if (!isLiveTileOn(getContext().liveLayoutPrefs, 'masterEq')) return;
+        drawMasterEqCurve();
+    });
 }
 
 /** Rebuilds the Live board from current layout prefs (order + enabled). */
@@ -470,6 +478,9 @@ export function renderLiveBoard() {
             getContext().meterVu = [];
         }
     }
+
+    // Defer until the board is in the document and has a laid-out size.
+    _scheduleMasterEqDraw();
 }
 
 /** Builds the Live tab with configurable tiles (layout popup mounts on body). */

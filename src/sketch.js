@@ -3022,9 +3022,10 @@ border-radius:6px;background:transparent;
     ctx2d.globalAlpha = 1;
   }
   function drawMasterEqCurve() {
-    const targets = (getContext().masterEqTargets || []).filter((t) => t.canvas && t.canvas.isConnected);
-    getContext().masterEqTargets = targets;
-    targets.forEach((t) => drawMasterEqOnCanvas(t.canvas, t.ctx));
+    const targets = getContext().masterEqTargets || [];
+    targets.forEach((t) => {
+      if (t.canvas && t.ctx) drawMasterEqOnCanvas(t.canvas, t.ctx);
+    });
   }
   function updateMasterEq() {
     computeMasterCurve(getContext().potValues, getContext().switchStates);
@@ -3414,8 +3415,14 @@ border-radius:6px;background:transparent;
       board.appendChild(buildMasterEqCard({
         canvasId: "live-master-eq-canvas"
       }));
-      drawMasterEqCurve();
     }
+  }
+  function _scheduleMasterEqDraw() {
+    if (!isLiveTileOn(getContext().liveLayoutPrefs, "masterEq")) return;
+    requestAnimationFrame(() => {
+      if (!isLiveTileOn(getContext().liveLayoutPrefs, "masterEq")) return;
+      drawMasterEqCurve();
+    });
   }
   function renderLiveBoard() {
     if (!_liveBoard) return;
@@ -3444,6 +3451,7 @@ border-radius:6px;background:transparent;
         getContext().meterVu = [];
       }
     }
+    _scheduleMasterEqDraw();
   }
   function buildLivePane() {
     const pane = el("div", { id: "pane-live", className: "tab-pane active" });

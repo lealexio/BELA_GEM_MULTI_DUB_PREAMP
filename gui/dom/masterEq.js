@@ -385,10 +385,12 @@ function drawMasterEqOnCanvas(canvas, ctx2d) {
 
 /** Redraws the master EQ plot on every registered canvas. */
 export function drawMasterEqCurve() {
-    const targets = (getContext().masterEqTargets || [])
-        .filter(t => t.canvas && t.canvas.isConnected);
-    getContext().masterEqTargets = targets;
-    targets.forEach(t => drawMasterEqOnCanvas(t.canvas, t.ctx));
+    // Do not prune targets here: during first mount the pane may not be in the
+    // document yet (isConnected === false). Cleanup lives in renderLiveBoard().
+    const targets = getContext().masterEqTargets || [];
+    targets.forEach(t => {
+        if (t.canvas && t.ctx) drawMasterEqOnCanvas(t.canvas, t.ctx);
+    });
 }
 
 /** Recomputes and redraws the master EQ curve when inputs change. */
