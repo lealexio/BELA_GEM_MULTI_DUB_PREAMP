@@ -46,6 +46,7 @@ export function createState() {
         switchPills: [],
         downloadStatusEl: null,
         detectStatusEl: null,
+        micLiveStatusEl: null,
         lastBelaRxMs: 0,
         belaRxFingerprint: ''
     };

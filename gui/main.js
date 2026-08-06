@@ -6,7 +6,7 @@ import { initContext, getContext } from './context.js';
 import { injectCSS } from './css.js';
 import { buildUI } from './dom/shell.js';
 import { layoutTopChrome, hideP5Dom } from './dom/utils.js';
-import { updateSiren, updateSwitches, updateConsole } from './dom/live.js';
+import { updateSiren, updateSwitches, updateConsole, syncMicInputs } from './dom/live.js';
 import { startMeterAnim, syncCodecGains, applyRoutingConfig } from './dom/meters.js';
 import { updateMasterEq, resizeMasterEqCanvas } from './dom/masterEq.js';
 import { tryBuildMappingTable, updateDetectMode, fillRoutingFromConfigMeta } from './dom/mapping.js';
@@ -103,6 +103,11 @@ export default function sketch(p) {
             // and rebuild codec gain pickers with correct physical ADC channels.
             applyRoutingConfig(ctx.configMeta);
             fillRoutingFromConfigMeta();
+        }
+        // Buffer 6 also carries live mic/hpf flags — sync Live tab (no send back).
+        if(b[6]) {
+            ctx.configMeta = b[6];
+            syncMicInputs(b[6]);
         }
 
         // Buffer 8: codec gain state — sync all connected clients (no send back to Bela).

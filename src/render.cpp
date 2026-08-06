@@ -15,6 +15,8 @@ https://bela.io
 #include <cstdio>
 #include <cstring>
 #include <vector>
+#include <atomic>
+#include <algorithm>
 #include "HardwareManager.h"
 #include "ChannelStrip.h"
 #include "MasterFx.h"
@@ -52,9 +54,11 @@ BiquadFilter    gVuMidHpf;  // MID  : HPF  @ kKillFc1 (200 Hz)
 BiquadFilter    gVuMidLpf;  // MID  : LPF  @ kKillFc2 (1200 Hz)
 BiquadFilter    gVuTopHpf;  // TOP  : HPF  @ kKillFc2 (1200 Hz)
 
-// Mic-mode dry HPF: 24 dB/oct (kMicHpfStages × Butterworth) per AUX, config-time cutoff.
+// Mic-mode dry HPF: 24 dB/oct (kMicHpfStages × Butterworth) per AUX.
 BiquadFilter    gMicHpf[4][kMicHpfStages];
 bool            gMicHpfActive[4] = { false, false, false, false };
+/// Bits 0–3 set by gui_control callback; consumed at start of render() to rebuild coeffs.
+static std::atomic<uint8_t> gMicHpfPendingMask{0};
 
 Scope scope;
 
@@ -221,8 +225,9 @@ static inline float readChannelInput(BelaContext* ctx, unsigned int frame,
 }
 
 /**
- * Configures one AUX mic HPF from ChannelConfig (config-time only).
+ * Configures one AUX mic HPF from ChannelConfig.
  * hpfHz <= 0 or !micMode → inactive bypass.
+ * Safe to call from the audio thread (start of render block).
  */
 static void setupMicHpf(int idx, const ChannelConfig& cfg, float sampleRate) {
     gMicHpfActive[idx] = false;
@@ -236,6 +241,30 @@ static void setupMicHpf(int idx, const ChannelConfig& cfg, float sampleRate) {
         gMicHpf[idx][s].setHighPass(fc, kMicHpfQ, sampleRate);
     }
     gMicHpfActive[idx] = true;
+}
+
+/** Returns AUX1–4 config by 0-based index, or nullptr. */
+static ChannelConfig* auxConfigByIndex(int idx) {
+    switch(idx) {
+        case 0: return &AUX1_CONFIG;
+        case 1: return &AUX2_CONFIG;
+        case 2: return &AUX3_CONFIG;
+        case 3: return &AUX4_CONFIG;
+        default: return nullptr;
+    }
+}
+
+/** Updates buffer-6 mic/hpf slots from current AUX*_CONFIG (multi-client sync). */
+static void refreshMicMetaSlots() {
+    if(gConfigMetaBuf.size() < 28) return;
+    gConfigMetaBuf[20] = AUX1_CONFIG.micMode ? 1.f : 0.f;
+    gConfigMetaBuf[21] = AUX2_CONFIG.micMode ? 1.f : 0.f;
+    gConfigMetaBuf[22] = AUX3_CONFIG.micMode ? 1.f : 0.f;
+    gConfigMetaBuf[23] = AUX4_CONFIG.micMode ? 1.f : 0.f;
+    gConfigMetaBuf[24] = AUX1_CONFIG.hpfHz;
+    gConfigMetaBuf[25] = AUX2_CONFIG.hpfHz;
+    gConfigMetaBuf[26] = AUX3_CONFIG.hpfHz;
+    gConfigMetaBuf[27] = AUX4_CONFIG.hpfHz;
 }
 
 /** Applies the mic-path HPF cascade when active; otherwise returns x unchanged. */
@@ -485,13 +514,17 @@ bool setup(BelaContext* context, void* userData) {
 
     gGui.setup(context->projectName);
 
-    // Real-time codec gain control from the GUI.
+    // Real-time codec gain + mic-mode control from the GUI.
     // Receives JSON sent by Bela.control.send() on the gui_control WebSocket.
     // Runs on the seasocks thread (non-RT) — safe to call Bela_set*() codec APIs.
+    // Mic/HPF mutations only touch ChannelConfig + a pending mask; biquad coeffs
+    // are rebuilt at the start of the next render() block (audio thread).
     //
     // Supported messages (all require { event: 'custom' }):
-    //   { hpGain: N, channel: C }    — HP output level for physical ch C, range [-63, 0] dB
-    //   { inputGain: N, channel: C } — ADC PGA gain for physical ch C, range [-12, 10] dB
+    //   { hpGain: N, channel: C }     — HP output level for physical ch C, range [-63, 0] dB
+    //   { inputGain: N, channel: C }  — ADC PGA gain for physical ch C, range [-12, 10] dB
+    //   { auxMic: N, mic: bool }      — AUX N (1–4) mic-mode flag (live, not persisted)
+    //   { auxHpf: N, hpf: Hz }        — AUX N (1–4) mic HPF cutoff (0 = off)
     gGui.setControlDataCallback([](JSONObject& root, void*) -> bool {
         if (root.find(L"event") == root.end() ||
             !root[L"event"]->IsString() ||
@@ -528,6 +561,49 @@ bool setup(BelaContext* context, void* userData) {
             }
         }
 
+        // Live mic-mode toggle for AUX1–4 (1-based index in JSON).
+        if (root.find(L"auxMic") != root.end() &&
+            root[L"auxMic"]->IsNumber() &&
+            root.find(L"mic") != root.end())
+        {
+            int idx = (int)root[L"auxMic"]->AsNumber() - 1;
+            ChannelConfig* cfg = auxConfigByIndex(idx);
+            if(cfg) {
+                bool mic = false;
+                if(root[L"mic"]->IsBool())
+                    mic = root[L"mic"]->AsBool();
+                else if(root[L"mic"]->IsNumber())
+                    mic = root[L"mic"]->AsNumber() > 0.5;
+                cfg->micMode = mic;
+                gMicHpfPendingMask.fetch_or((uint8_t)(1u << idx));
+                refreshMicMetaSlots();
+                rt_printf("[GUI] AUX%d mic → %s\n", idx + 1, mic ? "on" : "off");
+            }
+        }
+
+        // Live mic HPF cutoff (Hz) for AUX1–4 (1-based index in JSON).
+        if (root.find(L"auxHpf") != root.end() &&
+            root[L"auxHpf"]->IsNumber() &&
+            root.find(L"hpf") != root.end() &&
+            root[L"hpf"]->IsNumber())
+        {
+            int idx = (int)root[L"auxHpf"]->AsNumber() - 1;
+            ChannelConfig* cfg = auxConfigByIndex(idx);
+            if(cfg) {
+                float hz = (float)root[L"hpf"]->AsNumber();
+                if(hz <= 0.f)
+                    hz = 0.f;
+                else {
+                    if(hz < kMicHpfFMin) hz = kMicHpfFMin;
+                    if(hz > kMicHpfFMax) hz = kMicHpfFMax;
+                }
+                cfg->hpfHz = hz;
+                gMicHpfPendingMask.fetch_or((uint8_t)(1u << idx));
+                refreshMicMetaSlots();
+                rt_printf("[GUI] AUX%d hpf → %.0f Hz\n", idx + 1, hz);
+            }
+        }
+
         return true; // let the default handler process connection-reply etc.
     }, nullptr);
     // -----------------------------------------------------------------------
@@ -536,6 +612,20 @@ bool setup(BelaContext* context, void* userData) {
 }
 
 void render(BelaContext* context, void* userData) {
+    // Apply live mic/HPF changes queued by the gui_control callback (non-RT).
+    {
+        uint8_t pending = gMicHpfPendingMask.exchange(0);
+        if(pending) {
+            const float sr = context->audioSampleRate;
+            for(int i = 0; i < 4; ++i) {
+                if(pending & (uint8_t)(1u << i)) {
+                    ChannelConfig* cfg = auxConfigByIndex(i);
+                    if(cfg) setupMicHpf(i, *cfg, sr);
+                }
+            }
+        }
+    }
+
     gHardwareManager.scanStep(context);
 
     // --- Channel Strip 1 controls ---

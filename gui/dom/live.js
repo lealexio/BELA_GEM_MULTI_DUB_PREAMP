@@ -1,14 +1,62 @@
-/** Live tab: siren, console, switches. */
+/** Live tab: siren, console, mic inputs, switches. */
 import { getContext } from '../context.js';
 import {
     SIREN_PRESETS, SWITCH_GROUPS, SWITCH_NAMES, POT_NAMES,
     CONSOLE_POT_MIN_DELTA_NORMAL, CONSOLE_POT_MIN_DELTA_DETAILED, MAX_CONSOLE,
-    MUX_POTS_PER_MUX
+    MUX_POTS_PER_MUX, CONFIG_META, MIC_HPF_HZ_MIN, MIC_HPF_HZ_MAX
 } from '../config.js';
 import { el, cardTitle } from './utils.js';
 import {
     muxRawIndex, getActiveMuxCount, isPotIgnored, isPotMapped, formatUnmappedPotLabel
 } from './mapping.js';
+
+/** AUX1–4 live controls — handles for sync from configMeta (buffer 6). */
+const _micRows = [null, null, null, null];
+const _hpfDebounceTimers = [null, null, null, null];
+/** After a local edit, ignore buffer-6 sync until Bela meta catches up (or timeout). */
+const _micSyncHoldUntil = [0, 0, 0, 0];
+const _hpfSyncHoldUntil = [0, 0, 0, 0];
+const HPF_DEBOUNCE_MS = 150;
+/** Must exceed Bela static buffer resend (~2 s @ 20 fps / divisor 40). */
+const MIC_SYNC_HOLD_MS = 2500;
+
+/** Marks one AUX mic/hpf as locally authoritative for a short window. */
+function _holdMicSync(idx, kind) {
+    const until = Date.now() + MIC_SYNC_HOLD_MS;
+    if(kind === 'mic' || kind === 'both') _micSyncHoldUntil[idx] = until;
+    if(kind === 'hpf' || kind === 'both') _hpfSyncHoldUntil[idx] = until;
+}
+
+/** Returns true when Bela.control WebSocket is open. */
+function _belaControlReady() {
+    /* global Bela */
+    return typeof Bela !== 'undefined' &&
+           Bela.control &&
+           Bela.control.ws &&
+           Bela.control.ws.readyState === 1;
+}
+
+/**
+ * Sends a custom control payload to render.cpp via Bela.control.
+ * @param {object} payload
+ * @param {string} desc
+ * @param {Element|null} statusEl
+ */
+function _sendMicControl(payload, desc, statusEl) {
+    if(!_belaControlReady()) {
+        if(statusEl) {
+            statusEl.textContent = 'Bela not connected — project must be running';
+            statusEl.className = 'mic-live-status err';
+        }
+        return;
+    }
+    /* global Bela */
+    Bela.control.send(payload);
+    if(statusEl) {
+        statusEl.textContent = `Live: ${desc} (lost on Bela restart)`;
+        statusEl.className = 'mic-live-status ok';
+    }
+}
 
 export function buildLivePane() {
     const pane = el('div', {id:'pane-live', className:'tab-pane active'});
@@ -82,6 +130,7 @@ export function buildLivePane() {
 
     grid.appendChild(sirenCard);
     grid.appendChild(consoleCard);
+    grid.appendChild(buildMicInputsCard());
     pane.appendChild(grid);
 
     // Switches card (full width below grid)
@@ -108,6 +157,157 @@ export function buildLivePane() {
     pane.appendChild(swCard);
 
     return pane;
+}
+
+/**
+ * Builds the Live "Mic inputs" card: Mic toggle + HPF Hz per AUX1–4.
+ * Changes are sent via Bela.control (immediate DSP, lost on Bela restart).
+ */
+function buildMicInputsCard() {
+    const card = el('div', {className: 'card', id: 'mic-inputs-card'});
+    card.appendChild(cardTitle('Mic inputs'));
+
+    const note = el('div', {className: 'mic-live-note'});
+    note.textContent =
+        'Mic bypasses ParamEQ / filters / kills. HPF Hz cuts subs (0 = off). Live — lost on restart.';
+    card.appendChild(note);
+
+    const statusEl = el('div', {className: 'mic-live-status'});
+    statusEl.textContent = 'Waiting for Bela.control…';
+    card.appendChild(statusEl);
+    getContext().micLiveStatusEl = statusEl;
+
+    const list = el('div', {className: 'mic-live-list'});
+    for(let i = 0; i < 4; ++i) {
+        const auxN = i + 1;
+        const row = el('div', {className: 'mic-live-row'});
+
+        const label = el('span', {className: 'mic-live-label'});
+        label.textContent = 'AUX' + auxN;
+
+        // Custom switch toggle (checkbox visually hidden)
+        const micWrap = el('label', {className: 'mic-toggle'});
+        const micCb = el('input', {type: 'checkbox', className: 'mic-toggle-input'});
+        micCb.title = 'Mic mode';
+        const track = el('span', {className: 'mic-toggle-track', 'aria-hidden': 'true'});
+        track.appendChild(el('span', {className: 'mic-toggle-thumb'}));
+        const micLbl = el('span', {className: 'mic-toggle-text'});
+        micLbl.textContent = 'Mic';
+        micWrap.appendChild(micCb);
+        micWrap.appendChild(track);
+        micWrap.appendChild(micLbl);
+
+        const hpfWrap = el('label', {className: 'mic-live-hpf'});
+        const hpfLbl = el('span');
+        hpfLbl.textContent = 'HPF';
+        const hpfInp = el('input', {
+            type: 'number',
+            min: String(MIC_HPF_HZ_MIN),
+            max: String(MIC_HPF_HZ_MAX),
+            step: '1',
+            value: '0'
+        });
+        hpfInp.title = 'Mic HPF Hz (0 = off)';
+        const hpfUnit = el('span', {className: 'mic-live-hpf-unit'});
+        hpfUnit.textContent = 'Hz';
+        hpfWrap.appendChild(hpfLbl);
+        hpfWrap.appendChild(hpfInp);
+        hpfWrap.appendChild(hpfUnit);
+
+        micCb.addEventListener('change', () => {
+            _holdMicSync(i, 'mic');
+            _sendMicControl(
+                { event: 'custom', auxMic: auxN, mic: !!micCb.checked },
+                `AUX${auxN} mic ${micCb.checked ? 'on' : 'off'}`,
+                statusEl
+            );
+        });
+
+        const sendHpf = () => {
+            let hz = parseFloat(hpfInp.value);
+            if(isNaN(hz) || hz < 0) hz = 0;
+            hz = Math.min(MIC_HPF_HZ_MAX, Math.max(MIC_HPF_HZ_MIN, Math.round(hz)));
+            hpfInp.value = String(hz);
+            _holdMicSync(i, 'hpf');
+            _sendMicControl(
+                { event: 'custom', auxHpf: auxN, hpf: hz },
+                `AUX${auxN} HPF ${hz} Hz`,
+                statusEl
+            );
+        };
+
+        hpfInp.addEventListener('change', sendHpf);
+        hpfInp.addEventListener('input', () => {
+            if(_hpfDebounceTimers[i]) clearTimeout(_hpfDebounceTimers[i]);
+            _hpfDebounceTimers[i] = setTimeout(sendHpf, HPF_DEBOUNCE_MS);
+        });
+
+        row.appendChild(label);
+        row.appendChild(micWrap);
+        row.appendChild(hpfWrap);
+        list.appendChild(row);
+
+        _micRows[i] = {
+            micCb,
+            hpfInp,
+            /** Silent UI update from Bela buffer 6 (no control send). */
+            setMic(on) {
+                if(micCb.checked === !!on) return;
+                micCb.checked = !!on;
+            },
+            setHpf(hz) {
+                const n = Math.round(hz);
+                if(String(hpfInp.value) === String(n)) return;
+                if(document.activeElement === hpfInp) return;
+                hpfInp.value = String(n);
+            }
+        };
+    }
+    card.appendChild(list);
+
+    const poll = setInterval(() => {
+        if(_belaControlReady()) {
+            statusEl.textContent = 'Live — lost on Bela restart';
+            statusEl.className = 'mic-live-status ok';
+            clearInterval(poll);
+        }
+    }, 500);
+
+    return card;
+}
+
+/**
+ * Syncs Live mic/HPF controls from configMeta buffer 6 (no send back to Bela).
+ * Skips fields recently edited locally so stale meta cannot flicker the UI.
+ * @param {Float32Array|ArrayLike<number>} meta
+ */
+export function syncMicInputs(meta) {
+    if(!meta || meta.length <= CONFIG_META.HPF_AUX4) return;
+    const M = CONFIG_META;
+    const now = Date.now();
+    const micKeys = [M.MIC_AUX1, M.MIC_AUX2, M.MIC_AUX3, M.MIC_AUX4];
+    const hpfKeys = [M.HPF_AUX1, M.HPF_AUX2, M.HPF_AUX3, M.HPF_AUX4];
+    for(let i = 0; i < 4; ++i) {
+        const row = _micRows[i];
+        if(!row) continue;
+
+        const remoteMic = meta[micKeys[i]] > 0.5;
+        const remoteHpf = meta[hpfKeys[i]] != null ? meta[hpfKeys[i]] : 0;
+
+        if(now < _micSyncHoldUntil[i]) {
+            if(row.micCb.checked === remoteMic)
+                _micSyncHoldUntil[i] = 0;
+        } else {
+            row.setMic(remoteMic);
+        }
+
+        if(now < _hpfSyncHoldUntil[i]) {
+            if(Math.round(Number(row.hpfInp.value)) === Math.round(remoteHpf))
+                _hpfSyncHoldUntil[i] = 0;
+        } else {
+            row.setHpf(remoteHpf);
+        }
+    }
 }
 
 /** Returns a short display label for a switch name. */

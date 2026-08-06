@@ -353,6 +353,7 @@ var __belaPreampSketch = (() => {
       switchPills: [],
       downloadStatusEl: null,
       detectStatusEl: null,
+      micLiveStatusEl: null,
       lastBelaRxMs: 0,
       belaRxFingerprint: ""
     };
@@ -851,6 +852,66 @@ white-space:nowrap;text-overflow:ellipsis;overflow:hidden;
 #tab-content{padding:18px}
 #live-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
 }
+
+/* --- Live mic inputs --- */
+#mic-inputs-card{
+margin:0;
+max-width:100%;
+}
+.mic-live-note{
+font-size:11px;color:#666;line-height:1.35;margin-bottom:6px;
+}
+.mic-live-status{
+font-size:11px;font-weight:600;margin-bottom:8px;color:#666;
+}
+.mic-live-status.ok{color:#1a7a3a}
+.mic-live-status.err{color:#a33}
+.mic-live-list{display:flex;flex-direction:column;gap:6px}
+.mic-live-row{
+display:flex;align-items:center;gap:10px;flex-wrap:nowrap;
+padding:7px 8px;background:#f7f7f8;border:1px solid #e6e6e8;border-radius:8px;
+}
+.mic-live-label{
+font-weight:700;font-size:12px;min-width:42px;letter-spacing:.04em;color:#2a2a32;
+}
+
+/* Mic toggle switch */
+.mic-toggle{
+display:inline-flex;align-items:center;gap:8px;cursor:pointer;user-select:none;
+}
+.mic-toggle-input{
+position:absolute;opacity:0;width:0;height:0;pointer-events:none;
+}
+.mic-toggle-track{
+position:relative;display:inline-block;width:36px;height:20px;
+background:#c8c8ce;border-radius:999px;transition:background .15s ease;
+flex-shrink:0;
+}
+.mic-toggle-thumb{
+position:absolute;top:2px;left:2px;width:16px;height:16px;
+background:#fff;border-radius:50%;
+box-shadow:0 1px 3px rgba(0,0,0,.25);
+transition:transform .15s ease;
+}
+.mic-toggle-input:checked + .mic-toggle-track{background:#1a7a3a}
+.mic-toggle-input:checked + .mic-toggle-track .mic-toggle-thumb{transform:translateX(16px)}
+.mic-toggle-input:focus-visible + .mic-toggle-track{
+outline:2px solid #1a5276;outline-offset:2px;
+}
+.mic-toggle-text{
+font-size:12px;font-weight:600;color:#444;min-width:1.8em;
+}
+.mic-toggle-input:checked ~ .mic-toggle-text{color:#1a7a3a}
+
+.mic-live-hpf{
+display:flex;align-items:center;gap:5px;font-size:12px;margin-left:auto;
+color:#555;font-weight:600;
+}
+.mic-live-hpf input[type=number]{
+width:58px;padding:3px 5px;border:1px solid #ccc;border-radius:5px;
+font-size:12px;background:#fff;
+}
+.mic-live-hpf-unit{color:#999;font-size:11px;font-weight:500}
 @media(max-width:720px){
 .sw-grid{grid-template-columns:1fr}
 .mtable col.col-name{width:26%}
@@ -1793,6 +1854,34 @@ font-size:11px;color:#999;margin-top:10px;line-height:1.4;
   }
 
   // gui/dom/live.js
+  var _micRows = [null, null, null, null];
+  var _hpfDebounceTimers = [null, null, null, null];
+  var _micSyncHoldUntil = [0, 0, 0, 0];
+  var _hpfSyncHoldUntil = [0, 0, 0, 0];
+  var HPF_DEBOUNCE_MS = 150;
+  var MIC_SYNC_HOLD_MS = 2500;
+  function _holdMicSync(idx, kind) {
+    const until = Date.now() + MIC_SYNC_HOLD_MS;
+    if (kind === "mic" || kind === "both") _micSyncHoldUntil[idx] = until;
+    if (kind === "hpf" || kind === "both") _hpfSyncHoldUntil[idx] = until;
+  }
+  function _belaControlReady() {
+    return typeof Bela !== "undefined" && Bela.control && Bela.control.ws && Bela.control.ws.readyState === 1;
+  }
+  function _sendMicControl(payload, desc, statusEl) {
+    if (!_belaControlReady()) {
+      if (statusEl) {
+        statusEl.textContent = "Bela not connected \u2014 project must be running";
+        statusEl.className = "mic-live-status err";
+      }
+      return;
+    }
+    Bela.control.send(payload);
+    if (statusEl) {
+      statusEl.textContent = `Live: ${desc} (lost on Bela restart)`;
+      statusEl.className = "mic-live-status ok";
+    }
+  }
   function buildLivePane() {
     const pane = el("div", { id: "pane-live", className: "tab-pane active" });
     const grid = el("div", { id: "live-grid" });
@@ -1856,6 +1945,7 @@ font-size:11px;color:#999;margin-top:10px;line-height:1.4;
     renderConsole();
     grid.appendChild(sirenCard);
     grid.appendChild(consoleCard);
+    grid.appendChild(buildMicInputsCard());
     pane.appendChild(grid);
     const swCard = el("div", { className: "card" });
     swCard.appendChild(cardTitle("Switches"));
@@ -1876,6 +1966,128 @@ font-size:11px;color:#999;margin-top:10px;line-height:1.4;
     swCard.appendChild(swGrid);
     pane.appendChild(swCard);
     return pane;
+  }
+  function buildMicInputsCard() {
+    const card = el("div", { className: "card", id: "mic-inputs-card" });
+    card.appendChild(cardTitle("Mic inputs"));
+    const note = el("div", { className: "mic-live-note" });
+    note.textContent = "Mic bypasses ParamEQ / filters / kills. HPF Hz cuts subs (0 = off). Live \u2014 lost on restart.";
+    card.appendChild(note);
+    const statusEl = el("div", { className: "mic-live-status" });
+    statusEl.textContent = "Waiting for Bela.control\u2026";
+    card.appendChild(statusEl);
+    getContext().micLiveStatusEl = statusEl;
+    const list = el("div", { className: "mic-live-list" });
+    for (let i = 0; i < 4; ++i) {
+      const auxN = i + 1;
+      const row = el("div", { className: "mic-live-row" });
+      const label = el("span", { className: "mic-live-label" });
+      label.textContent = "AUX" + auxN;
+      const micWrap = el("label", { className: "mic-toggle" });
+      const micCb = el("input", { type: "checkbox", className: "mic-toggle-input" });
+      micCb.title = "Mic mode";
+      const track = el("span", { className: "mic-toggle-track", "aria-hidden": "true" });
+      track.appendChild(el("span", { className: "mic-toggle-thumb" }));
+      const micLbl = el("span", { className: "mic-toggle-text" });
+      micLbl.textContent = "Mic";
+      micWrap.appendChild(micCb);
+      micWrap.appendChild(track);
+      micWrap.appendChild(micLbl);
+      const hpfWrap = el("label", { className: "mic-live-hpf" });
+      const hpfLbl = el("span");
+      hpfLbl.textContent = "HPF";
+      const hpfInp = el("input", {
+        type: "number",
+        min: String(MIC_HPF_HZ_MIN),
+        max: String(MIC_HPF_HZ_MAX),
+        step: "1",
+        value: "0"
+      });
+      hpfInp.title = "Mic HPF Hz (0 = off)";
+      const hpfUnit = el("span", { className: "mic-live-hpf-unit" });
+      hpfUnit.textContent = "Hz";
+      hpfWrap.appendChild(hpfLbl);
+      hpfWrap.appendChild(hpfInp);
+      hpfWrap.appendChild(hpfUnit);
+      micCb.addEventListener("change", () => {
+        _holdMicSync(i, "mic");
+        _sendMicControl(
+          { event: "custom", auxMic: auxN, mic: !!micCb.checked },
+          `AUX${auxN} mic ${micCb.checked ? "on" : "off"}`,
+          statusEl
+        );
+      });
+      const sendHpf = () => {
+        let hz = parseFloat(hpfInp.value);
+        if (isNaN(hz) || hz < 0) hz = 0;
+        hz = Math.min(MIC_HPF_HZ_MAX, Math.max(MIC_HPF_HZ_MIN, Math.round(hz)));
+        hpfInp.value = String(hz);
+        _holdMicSync(i, "hpf");
+        _sendMicControl(
+          { event: "custom", auxHpf: auxN, hpf: hz },
+          `AUX${auxN} HPF ${hz} Hz`,
+          statusEl
+        );
+      };
+      hpfInp.addEventListener("change", sendHpf);
+      hpfInp.addEventListener("input", () => {
+        if (_hpfDebounceTimers[i]) clearTimeout(_hpfDebounceTimers[i]);
+        _hpfDebounceTimers[i] = setTimeout(sendHpf, HPF_DEBOUNCE_MS);
+      });
+      row.appendChild(label);
+      row.appendChild(micWrap);
+      row.appendChild(hpfWrap);
+      list.appendChild(row);
+      _micRows[i] = {
+        micCb,
+        hpfInp,
+        /** Silent UI update from Bela buffer 6 (no control send). */
+        setMic(on) {
+          if (micCb.checked === !!on) return;
+          micCb.checked = !!on;
+        },
+        setHpf(hz) {
+          const n = Math.round(hz);
+          if (String(hpfInp.value) === String(n)) return;
+          if (document.activeElement === hpfInp) return;
+          hpfInp.value = String(n);
+        }
+      };
+    }
+    card.appendChild(list);
+    const poll = setInterval(() => {
+      if (_belaControlReady()) {
+        statusEl.textContent = "Live \u2014 lost on Bela restart";
+        statusEl.className = "mic-live-status ok";
+        clearInterval(poll);
+      }
+    }, 500);
+    return card;
+  }
+  function syncMicInputs(meta) {
+    if (!meta || meta.length <= CONFIG_META.HPF_AUX4) return;
+    const M = CONFIG_META;
+    const now = Date.now();
+    const micKeys = [M.MIC_AUX1, M.MIC_AUX2, M.MIC_AUX3, M.MIC_AUX4];
+    const hpfKeys = [M.HPF_AUX1, M.HPF_AUX2, M.HPF_AUX3, M.HPF_AUX4];
+    for (let i = 0; i < 4; ++i) {
+      const row = _micRows[i];
+      if (!row) continue;
+      const remoteMic = meta[micKeys[i]] > 0.5;
+      const remoteHpf = meta[hpfKeys[i]] != null ? meta[hpfKeys[i]] : 0;
+      if (now < _micSyncHoldUntil[i]) {
+        if (row.micCb.checked === remoteMic)
+          _micSyncHoldUntil[i] = 0;
+      } else {
+        row.setMic(remoteMic);
+      }
+      if (now < _hpfSyncHoldUntil[i]) {
+        if (Math.round(Number(row.hpfInp.value)) === Math.round(remoteHpf))
+          _hpfSyncHoldUntil[i] = 0;
+      } else {
+        row.setHpf(remoteHpf);
+      }
+    }
   }
   function switchDisplayName(name) {
     if (name.indexOf("KILL_") === 0) return name.slice(5);
@@ -2016,11 +2228,11 @@ font-size:11px;color:#999;margin-top:10px;line-height:1.4;
   var HP_GAIN_MIN = -63;
   var HP_GAIN_MAX = 0;
   var HP_GAIN_STEP = 1;
-  function _belaControlReady() {
+  function _belaControlReady2() {
     return typeof Bela !== "undefined" && Bela.control && Bela.control.ws && Bela.control.ws.readyState === 1;
   }
   function _sendGain(payload, desc, statusEl) {
-    if (!_belaControlReady()) {
+    if (!_belaControlReady2()) {
       statusEl.textContent = "Bela not connected \u2014 make sure the project is running";
       statusEl.className = "codec-gain-status err";
       return;
@@ -2131,7 +2343,7 @@ font-size:11px;color:#999;margin-top:10px;line-height:1.4;
     });
     card.appendChild(statusEl);
     const _poll = setInterval(() => {
-      if (_belaControlReady()) {
+      if (_belaControlReady2()) {
         statusEl.textContent = "Bela connected";
         statusEl.className = "codec-gain-status ok";
         clearInterval(_poll);
@@ -3008,6 +3220,10 @@ font-size:11px;color:#999;margin-top:10px;line-height:1.4;
         ctx.configMeta = Float32Array.from(b[6]);
         applyRoutingConfig(ctx.configMeta);
         fillRoutingFromConfigMeta();
+      }
+      if (b[6]) {
+        ctx.configMeta = b[6];
+        syncMicInputs(b[6]);
       }
       if (b[8]) syncCodecGains(b[8]);
       if (b[9] && b[9].length) updateTempBadge(b[9][0]);

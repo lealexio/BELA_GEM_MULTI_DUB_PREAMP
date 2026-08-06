@@ -481,6 +481,66 @@ white-space:nowrap;text-overflow:ellipsis;overflow:hidden;
 #tab-content{padding:18px}
 #live-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
 }
+
+/* --- Live mic inputs --- */
+#mic-inputs-card{
+margin:0;
+max-width:100%;
+}
+.mic-live-note{
+font-size:11px;color:#666;line-height:1.35;margin-bottom:6px;
+}
+.mic-live-status{
+font-size:11px;font-weight:600;margin-bottom:8px;color:#666;
+}
+.mic-live-status.ok{color:#1a7a3a}
+.mic-live-status.err{color:#a33}
+.mic-live-list{display:flex;flex-direction:column;gap:6px}
+.mic-live-row{
+display:flex;align-items:center;gap:10px;flex-wrap:nowrap;
+padding:7px 8px;background:#f7f7f8;border:1px solid #e6e6e8;border-radius:8px;
+}
+.mic-live-label{
+font-weight:700;font-size:12px;min-width:42px;letter-spacing:.04em;color:#2a2a32;
+}
+
+/* Mic toggle switch */
+.mic-toggle{
+display:inline-flex;align-items:center;gap:8px;cursor:pointer;user-select:none;
+}
+.mic-toggle-input{
+position:absolute;opacity:0;width:0;height:0;pointer-events:none;
+}
+.mic-toggle-track{
+position:relative;display:inline-block;width:36px;height:20px;
+background:#c8c8ce;border-radius:999px;transition:background .15s ease;
+flex-shrink:0;
+}
+.mic-toggle-thumb{
+position:absolute;top:2px;left:2px;width:16px;height:16px;
+background:#fff;border-radius:50%;
+box-shadow:0 1px 3px rgba(0,0,0,.25);
+transition:transform .15s ease;
+}
+.mic-toggle-input:checked + .mic-toggle-track{background:#1a7a3a}
+.mic-toggle-input:checked + .mic-toggle-track .mic-toggle-thumb{transform:translateX(16px)}
+.mic-toggle-input:focus-visible + .mic-toggle-track{
+outline:2px solid #1a5276;outline-offset:2px;
+}
+.mic-toggle-text{
+font-size:12px;font-weight:600;color:#444;min-width:1.8em;
+}
+.mic-toggle-input:checked ~ .mic-toggle-text{color:#1a7a3a}
+
+.mic-live-hpf{
+display:flex;align-items:center;gap:5px;font-size:12px;margin-left:auto;
+color:#555;font-weight:600;
+}
+.mic-live-hpf input[type=number]{
+width:58px;padding:3px 5px;border:1px solid #ccc;border-radius:5px;
+font-size:12px;background:#fff;
+}
+.mic-live-hpf-unit{color:#999;font-size:11px;font-weight:500}
 @media(max-width:720px){
 .sw-grid{grid-template-columns:1fr}
 .mtable col.col-name{width:26%}
