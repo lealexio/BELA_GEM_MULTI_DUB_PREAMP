@@ -264,6 +264,29 @@ constexpr float kFxFilterQ = 0.707f;
 constexpr float kSirenGainScale = 0.1f;
 
 // ---------------------------------------------------------------------------
+// Sample player (UI-triggered one-shots, mixed at the Dub Siren bus point)
+// ---------------------------------------------------------------------------
+
+/// Master gain scale for loaded WAV playback (full-scale files sit hotter than
+/// the synthesised siren — keep below kSirenGainScale's relative loudness).
+constexpr float kSamplerGainScale = 0.35f;
+
+/// Maximum number of audio files (WAV/MP3) loaded from samples/ at boot.
+constexpr int kMaxSamples = 32;
+
+/// Fixed name width (including NUL) packed into GUI buffer 11 as ASCII floats.
+constexpr int kMaxSampleNameLen = 64;
+
+/// Fade-in / fade-out duration to avoid clicks on trigger and end-of-file.
+constexpr float kSamplerFadeMs = 5.f;
+
+/// GUI buffer 10: [folderOk, count, playingSlot, isPlaying, playhead].
+constexpr int kGuiSamplerStateSize = 5;
+
+/// GUI buffer 11: kMaxSamples × kMaxSampleNameLen packed ASCII code points.
+constexpr int kGuiSamplerNamesSize = kMaxSamples * kMaxSampleNameLen;
+
+// ---------------------------------------------------------------------------
 // Master output limiter
 // ---------------------------------------------------------------------------
 

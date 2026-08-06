@@ -21,6 +21,7 @@ https://bela.io
 #include "ChannelStrip.h"
 #include "MasterFx.h"
 #include "DubSiren.h"
+#include "SamplePlayer.h"
 #include "HardwareConfig.h"
 #include "SoftwareConfig.h"
 #include "ConfigLoader.h"
@@ -33,6 +34,7 @@ ChannelStrip    gChannelStrip4;  // IN3 → master (AUX4)
 
 MasterFx        gMasterFx;
 DubSiren        gDubSiren;
+SamplePlayer    gSamplePlayer;
 AuxiliaryTask   gI2cTask;
 AuxiliaryTask   gCpuTempTask;
 
@@ -72,6 +74,8 @@ Gui gGui;
 static std::vector<float> gPotValuesBuf;      // [kAllNamedPotsCount]
 static std::vector<float> gSwitchBuf;         // [9]
 static std::vector<float> gSirenBuf;          // [3] presetIdx / gate / mod
+static std::vector<float> gSamplerStateBuf;   // [5] folderOk / count / slot / playing / playhead
+static std::vector<float> gSamplerNamesBuf;   // [kGuiSamplerNamesSize] packed ASCII names
 static std::vector<float> gAudioLevelsBuf;    // [13] peak levels
 static std::vector<float> gPotMappingBuf;     // [kAllNamedPotsCount×4] pot mapping for GUI
 static std::vector<float> gSwitchMappingBuf;  // [9×3] switch mapping for GUI
@@ -133,6 +137,21 @@ static SwitchRef* const kGuiSwitchRefs[9] = {
     &FX_FILTER_MIDS, &FX_FILTER_TOPS, &FX2_FILTER_TOPS, &FX2_FILTER_MIDS,
     &SIREN_TRIGGER
 };
+
+/** Packs sample filenames into gSamplerNamesBuf as fixed-width ASCII floats (buffer 11). */
+static void fillSamplerNamesBuf() {
+    gSamplerNamesBuf.assign(kGuiSamplerNamesSize, 0.f);
+    const int count = gSamplePlayer.sampleCount();
+    for(int i = 0; i < count && i < kMaxSamples; ++i) {
+        const char* name = gSamplePlayer.sampleName(i);
+        const int base = i * kMaxSampleNameLen;
+        for(int c = 0; c < kMaxSampleNameLen; ++c) {
+            char ch = name[c];
+            gSamplerNamesBuf[base + c] = (float)(unsigned char)ch;
+            if(ch == '\0') break;
+        }
+    }
+}
 
 /** Fills gConfigMetaBuf with mux/calibration/routing/ignoredPots (buffer 6 layout). */
 static void fillConfigMetaBuf() {
@@ -475,6 +494,7 @@ bool setup(BelaContext* context, void* userData) {
     gChannelStrip4.setup(context->audioSampleRate);
     gMasterFx.setup(context->audioSampleRate);
     gDubSiren.setup(context->audioSampleRate);
+    gSamplePlayer.setup(context->audioSampleRate, context->projectName);
 
     float sr = context->audioSampleRate;
     gFxHpf4k .setHighPass(kFxMidHighFreq, kFxFilterQ, sr); // FX1 TOPS: HPF @ 4 kHz
@@ -518,6 +538,7 @@ bool setup(BelaContext* context, void* userData) {
     gPotValuesBuf.assign(kAllNamedPotsCount, 0.f);
     gSwitchBuf.assign(9, 0.f);
     gSirenBuf.assign(3, 0.f);
+    gSamplerStateBuf.assign(kGuiSamplerStateSize, 0.f);
     gAudioLevelsBuf.assign(13, 0.f);
     gMuxRawBuf.assign(kGuiMuxRawBufSize, 0.f);
     gCodecGainsBuf.assign(20, 0.f);
@@ -539,6 +560,7 @@ bool setup(BelaContext* context, void* userData) {
     }
 
     fillConfigMetaBuf();
+    fillSamplerNamesBuf();
 
     gGui.setup(context->projectName);
 
@@ -626,6 +648,15 @@ bool setup(BelaContext* context, void* userData) {
                 refreshMicMetaSlots();
                 rt_printf("[GUI] AUX%d hpf → %.0f Hz\n", idx + 1, hz);
             }
+        }
+
+        // Sampler one-shot trigger from the Live Sampler tile (zero-based slot).
+        if (root.find(L"samplerPlay") != root.end() &&
+            root[L"samplerPlay"]->IsNumber())
+        {
+            int slot = (int)root[L"samplerPlay"]->AsNumber();
+            gSamplePlayer.trigger(slot);
+            rt_printf("[GUI] Sampler play slot %d\n", slot);
         }
 
         return true; // let the default handler process connection-reply etc.
@@ -777,14 +808,20 @@ void render(BelaContext* context, void* userData) {
     }
 
     // --- Dub siren controls ---
+    const float sirenGain    = gHardwareManager.getPotValue(SIREN_GAIN);
+    const float sirenFxSend  = scaleFxSendPot(gHardwareManager.getPotValue(SIREN_FX_SEND));
+    const float sirenFxSend2 = scaleFxSendPot(gHardwareManager.getPotValue(SIREN_FX2_SEND));
+
     gDubSiren.setControls(
         gHardwareManager.getPotValue(SIREN_TYPE),
         gHardwareManager.getPotValue(SIREN_MOD),
-        gHardwareManager.getPotValue(SIREN_GAIN),
-        scaleFxSendPot(gHardwareManager.getPotValue(SIREN_FX_SEND)),
-        scaleFxSendPot(gHardwareManager.getPotValue(SIREN_FX2_SEND)),
+        sirenGain,
+        sirenFxSend,
+        sirenFxSend2,
         gHardwareManager.getSwitchState(SIREN_TRIGGER)
     );
+    // Sampler shares siren gain / FX sends; trigger comes from the GUI only.
+    gSamplePlayer.setControls(sirenGain, sirenFxSend, sirenFxSend2);
 
     // --- FX return input gains (0 = mute, 1 = unity) ---
     const float fx1ReturnGain = gHardwareManager.getPotValue(FX1_RETURN_GAIN);
@@ -812,13 +849,14 @@ void render(BelaContext* context, void* userData) {
         float dry3 = applyMicHpf(2, gChannelStrip3.process(in2));
         float dry4 = applyMicHpf(3, gChannelStrip4.process(in3));
 
-        // Siren: process before FX send to include its FX output
-        float sirenOut = gDubSiren.process();
+        // Siren + sampler: process before FX send to include their FX outputs
+        float sirenOut   = gDubSiren.process();
+        float samplerOut = gSamplePlayer.process();
 
-       // FX send 1: all channel strips + siren → filtered by mode → OUT2
+       // FX send 1: all channel strips + siren + sampler → filtered by mode → OUT2
        float fxSend = gChannelStrip.fxOut()  + gChannelStrip2.fxOut()
                     + gChannelStrip3.fxOut() + gChannelStrip4.fxOut()
-                    + gDubSiren.fxOut();
+                    + gDubSiren.fxOut() + gSamplePlayer.fxOut();
         if(fxModeTops)
             fxSend = gFxHpf4k.process(fxSend);                           // > 4 kHz only
         else if(fxModeMids)
@@ -826,10 +864,10 @@ void render(BelaContext* context, void* userData) {
         else
             fxSend = gFxMidHpf.process(fxSend);                          // > 250 Hz (MID+TOP)
 
-        // FX send 2: all channel strips + siren fx2 → filtered by mode → OUT3
+        // FX send 2: all channel strips + siren/sampler fx2 → filtered by mode → OUT3
         float fxSend2 = gChannelStrip.fxOut2()  + gChannelStrip2.fxOut2()
                       + gChannelStrip3.fxOut2() + gChannelStrip4.fxOut2()
-                      + gDubSiren.fxOut2();
+                      + gDubSiren.fxOut2() + gSamplePlayer.fxOut2();
         if(fx2ModeTops)
             fxSend2 = gFx2Hpf4k.process(fxSend2);                        // > 4 kHz only
         else if(fx2ModeMids)
@@ -852,7 +890,7 @@ void render(BelaContext* context, void* userData) {
         if(AUX2_CONFIG.micMode) dryMic    += dry2; else dryNormal += dry2;
         if(AUX3_CONFIG.micMode) dryMic    += dry3; else dryNormal += dry3;
         if(AUX4_CONFIG.micMode) dryMic    += dry4; else dryNormal += dry4;
-        dryNormal += sirenOut;
+        dryNormal += sirenOut + samplerOut;
 
         float out;
         if(kFxReturnPostMaster) {
@@ -951,6 +989,14 @@ void render(BelaContext* context, void* userData) {
         gSirenBuf[2] = gHardwareManager.getPotValue(SIREN_MOD);
         gGui.sendBuffer(2, gSirenBuf);
 
+        // Buffer 10: sampler state [folderOk, count, playingSlot, isPlaying, playhead]
+        gSamplerStateBuf[0] = gSamplePlayer.folderOk() ? 1.f : 0.f;
+        gSamplerStateBuf[1] = (float)gSamplePlayer.sampleCount();
+        gSamplerStateBuf[2] = (float)gSamplePlayer.playingSlot();
+        gSamplerStateBuf[3] = gSamplePlayer.isPlaying() ? 1.f : 0.f;
+        gSamplerStateBuf[4] = gSamplePlayer.playhead();
+        gGui.sendBuffer(10, gSamplerStateBuf);
+
         // Buffer 3: audio peak levels — copy accumulators, then reset
         for(int i = 0; i < 13; ++i) {
             gAudioLevelsBuf[i] = gAudioPeaks[i];
@@ -973,12 +1019,14 @@ void render(BelaContext* context, void* userData) {
         gCpuTempBuf[0] = gCpuTempC;
         gGui.sendBuffer(9, gCpuTempBuf);
 
-        // Buffers 4+5+6: mapping + config metadata — resend periodically for (re)connects.
+        // Buffers 4+5+6+11: mapping + config + sample names — resend for (re)connects.
+        // First tick is forced (gGuiStaticSendCount starts at the divisor).
         if(++gGuiStaticSendCount >= kGuiStaticBufSendDivisor) {
             gGuiStaticSendCount = 0;
             gGui.sendBuffer(4, gPotMappingBuf);
             gGui.sendBuffer(5, gSwitchMappingBuf);
             gGui.sendBuffer(6, gConfigMetaBuf);
+            gGui.sendBuffer(11, gSamplerNamesBuf);
         }
     }
 

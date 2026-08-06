@@ -12,6 +12,7 @@ import { el, cardTitle } from './utils.js';
 import { buildMetersSection, startMeterAnim, stopMeterAnim } from './meters.js';
 import { buildConsoleCard, buildSwitchesCard } from './console.js';
 import { buildMasterEqCard, drawMasterEqCurve } from './masterEq.js';
+import { buildSamplerCard } from './sampler.js';
 
 /** AUX1–4 live controls — handles for sync from configMeta (buffer 6). */
 const _micRows = [null, null, null, null];
@@ -383,6 +384,10 @@ function _appendTile(board, id, prefs, pairedDone) {
         if (showSiren) grid.appendChild(buildSirenCard());
         if (showMic) grid.appendChild(buildMicInputsCard());
         board.appendChild(grid);
+        return;
+    }
+    if (id === 'sampler') {
+        board.appendChild(buildSamplerCard());
         return;
     }
     if (id === 'meters') {

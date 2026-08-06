@@ -21,9 +21,6 @@ export function buildUI() {
     const topChrome = el('div', {id: 'top-chrome'});
 
     const hdr = el('div', {id: 'gui-header'});
-    const belaLogo = el('img', { id: 'gui-bela-logo', alt: 'Bela' });
-    belaLogo.src = projectFileUrl('BELA.png');
-    hdr.appendChild(belaLogo);
     const connBadge = el('span', { className: 'badge', id: 'conn-badge' });
     connBadge.textContent = 'OFFLINE';
     hdr.appendChild(connBadge);

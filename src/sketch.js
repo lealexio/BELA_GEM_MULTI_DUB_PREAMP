@@ -13,7 +13,7 @@
  *   [5] Float32[9×3]     — switch mapping [pin,portB,rev]×9
  *   [6] Float32[N]       — config metadata (mux, routing, ignoredPots)
  *   [7] Float32[64]      — raw MUX grid [mux×16+pot], normalised 0–1 (unmapped discovery)
- *   [8] Float32[20]      — codec gains: [0..9]=ADC input by physical ch, [10..19]=DAC out by physical ch
+ *   [8] Float32[20]      — codec gains: [0..9]=ADC input by physical ch, [10..19]=HP out by physical ch
  *   [9] Float32[1]       — CPU temperature °C (sysfs thermal_zone0, ~2 s poll)
  */
 
@@ -62,11 +62,14 @@ var __belaPreampSketch = (() => {
   var LIVE_TILES = [
     { id: "siren", label: "Siren", pair: true, defaultOn: true },
     { id: "mic", label: "Mic inputs", pair: true, defaultOn: true },
+    { id: "sampler", label: "Sampler", pair: false, defaultOn: true },
     { id: "meters", label: "VU meters", pair: false, defaultOn: true },
     { id: "switches", label: "Switches", pair: false, defaultOn: false },
     { id: "console", label: "Console", pair: false, defaultOn: false },
     { id: "masterEq", label: "Master EQ", pair: false, defaultOn: false }
   ];
+  var MAX_SAMPLES = 32;
+  var MAX_SAMPLE_NAME_LEN = 64;
   var LIVE_LAYOUT_STORAGE_KEY_V1 = "belaDubPreamp.liveLayout.v1";
   var LIVE_LAYOUT_STORAGE_KEY = "belaDubPreamp.liveLayout.v2";
   var DETECT_POT_MIN_DELTA = 0.25;
@@ -353,6 +356,15 @@ var __belaPreampSketch = (() => {
       potValues: new Float32Array(60),
       switchStates: new Float32Array(9),
       sirenState: new Float32Array(3),
+      samplerState: new Float32Array(5),
+      samplerStateLive: false,
+      samplerNamesBuf: null,
+      samplerNames: [],
+      samplerNamesBuilt: false,
+      samplerButtons: [],
+      samplerHighlight: -1,
+      samplerListEl: null,
+      samplerEmptyEl: null,
       audioLevels: new Float32Array(13),
       potMapping: null,
       switchMapping: null,
@@ -463,11 +475,6 @@ padding:8px 18px;display:flex;align-items:center;gap:10px;
 width:100%;
 }
 #gui-header .spacer{flex:1}
-#gui-bela-logo{
-height:28px;width:auto;
-mix-blend-mode:screen;
-opacity:.92;
-}
 #gui-logo{
 height:42px;width:auto;
 mix-blend-mode:screen; /* blacks become transparent on the dark header */
@@ -614,6 +621,40 @@ background:var(--ink);border-color:var(--ink);color:#fff;
 .spreset.active.gate{
 border-color:var(--accent);
 box-shadow:0 0 10px rgba(231,76,60,.55);
+}
+
+/* --- Sampler --- */
+#sampler-body{display:flex;flex-direction:column;gap:10px}
+.sampler-hint{
+font-size:11px;font-weight:600;color:var(--muted);letter-spacing:.02em;
+}
+.sampler-empty{
+padding:14px 12px;border:1px dashed var(--line);border-radius:8px;
+font-size:12px;line-height:1.45;color:var(--muted);background:var(--surface);
+}
+.sampler-grid{
+display:grid;
+grid-template-columns:repeat(auto-fill,minmax(72px,1fr));
+gap:8px;
+}
+.sampler-pad{
+aspect-ratio:1;
+display:flex;flex-direction:column;align-items:center;justify-content:center;
+gap:1px;padding:6px;border-radius:10px;cursor:pointer;
+background:var(--surface);border:1px solid var(--line);
+font-family:var(--mono);font-size:10px;font-weight:700;color:var(--ink);
+letter-spacing:.02em;text-align:center;line-height:1.15;
+transition:background .12s,border-color .12s,box-shadow .12s,transform .08s;
+}
+.sampler-pad-line{
+display:block;width:100%;
+white-space:pre;overflow:hidden;text-overflow:clip;
+}
+.sampler-pad:hover{border-color:#c8c8d0;background:#fafafa}
+.sampler-pad:active{transform:scale(.96)}
+.sampler-pad.playing{
+border-color:var(--accent);background:#fff7f5;color:var(--accent);
+box-shadow:0 0 0 1px rgba(231,76,60,.28);
 }
 
 /* --- Console --- */
@@ -1328,7 +1369,7 @@ border-radius:6px;background:transparent;
         "channels": [
           1
         ],
-        "gain": -3
+        "gain": 0
       },
       "fx1Send": {
         "channel": 2,
@@ -3263,6 +3304,148 @@ border-radius:6px;background:transparent;
     return card;
   }
 
+  // gui/dom/sampler.js
+  var EMPTY_MSG = "Create a samples folder in the project and add WAV or MP3 files.";
+  var WAIT_MSG = "Waiting for sampler data from Bela\u2026";
+  var NONE_MSG = "No WAV/MP3 files found in samples/.";
+  function decodeSampleNames(namesBuf, count) {
+    const names = [];
+    if (!namesBuf || count <= 0) return names;
+    const n = Math.min(count, MAX_SAMPLES);
+    for (let i = 0; i < n; ++i) {
+      const base = i * MAX_SAMPLE_NAME_LEN;
+      let s = "";
+      for (let c = 0; c < MAX_SAMPLE_NAME_LEN; ++c) {
+        const code = Math.round(namesBuf[base + c] || 0);
+        if (code <= 0) break;
+        s += String.fromCharCode(code);
+      }
+      names.push(s || `Sample ${i + 1}`);
+    }
+    return names;
+  }
+  function _sendPlay(slot) {
+    if (!belaControlReady()) return;
+    Bela.control.send({ event: "custom", samplerPlay: slot });
+  }
+  function _padLines(filename) {
+    const base = String(filename || "").replace(/\.(wav|mp3)$/i, "");
+    const words = base.split(/\s+/).filter(Boolean);
+    const lines = [];
+    for (let i = 0; i < words.length && lines.length < 3; ++i)
+      lines.push(words[i].slice(0, 6));
+    return lines.length ? lines : ["?"];
+  }
+  function _rebuildList(names) {
+    const ctx = getContext();
+    const list = ctx.samplerListEl;
+    const empty = ctx.samplerEmptyEl;
+    if (!list || !empty) return;
+    list.innerHTML = "";
+    ctx.samplerButtons = [];
+    ctx.samplerHighlight = -1;
+    if (!names.length) {
+      empty.style.display = "";
+      list.style.display = "none";
+      return;
+    }
+    empty.style.display = "none";
+    list.style.display = "";
+    names.forEach((name, i) => {
+      const btn = el("button", { className: "sampler-pad", type: "button" });
+      btn.title = name;
+      _padLines(name).forEach((line) => {
+        const row = el("span", { className: "sampler-pad-line" });
+        row.textContent = line;
+        btn.appendChild(row);
+      });
+      btn.addEventListener("click", () => _sendPlay(i));
+      list.appendChild(btn);
+      ctx.samplerButtons.push(btn);
+    });
+  }
+  function buildSamplerCard() {
+    const card = el("div", { className: "card live-tile" });
+    card.dataset.tile = "sampler";
+    card.appendChild(cardTitle("Sampler"));
+    const body = el("div", { id: "sampler-body" });
+    const hint = el("div", { className: "sampler-hint" });
+    hint.textContent = "Uses Siren gain & FX send";
+    body.appendChild(hint);
+    const empty = el("div", { id: "sampler-empty", className: "sampler-empty" });
+    empty.textContent = EMPTY_MSG;
+    body.appendChild(empty);
+    const list = el("div", { id: "sampler-grid", className: "sampler-grid" });
+    list.style.display = "none";
+    body.appendChild(list);
+    card.appendChild(body);
+    const ctx = getContext();
+    ctx.samplerEmptyEl = empty;
+    ctx.samplerListEl = list;
+    ctx.samplerButtons = [];
+    ctx.samplerHighlight = -1;
+    ctx.samplerNamesBuilt = false;
+    if (ctx.samplerNames && ctx.samplerNames.length) {
+      _rebuildList(ctx.samplerNames);
+      ctx.samplerNamesBuilt = true;
+    } else if (ctx.samplerState && (ctx.samplerState[0] < 0.5 || Math.round(ctx.samplerState[1] || 0) === 0)) {
+      empty.style.display = "";
+    }
+    return card;
+  }
+  function updateSampler() {
+    const ctx = getContext();
+    if (!ctx.samplerListEl) return;
+    if (!ctx.samplerStateLive) {
+      if (ctx.samplerEmptyEl) {
+        ctx.samplerEmptyEl.textContent = WAIT_MSG;
+        ctx.samplerEmptyEl.style.display = "";
+      }
+      if (ctx.samplerListEl) ctx.samplerListEl.style.display = "none";
+      return;
+    }
+    const st = ctx.samplerState;
+    const folderOk = st[0] > 0.5;
+    const count = Math.max(0, Math.round(st[1] || 0));
+    if (!folderOk) {
+      if (ctx.samplerEmptyEl) {
+        ctx.samplerEmptyEl.textContent = EMPTY_MSG;
+        ctx.samplerEmptyEl.style.display = "";
+      }
+      if (ctx.samplerListEl) ctx.samplerListEl.style.display = "none";
+      ctx.samplerButtons = [];
+      return;
+    }
+    if (count === 0) {
+      if (ctx.samplerEmptyEl) {
+        ctx.samplerEmptyEl.textContent = NONE_MSG;
+        ctx.samplerEmptyEl.style.display = "";
+      }
+      if (ctx.samplerListEl) ctx.samplerListEl.style.display = "none";
+      ctx.samplerButtons = [];
+      return;
+    }
+    if (!ctx.samplerNamesBuilt && ctx.samplerNamesBuf) {
+      ctx.samplerNames = decodeSampleNames(ctx.samplerNamesBuf, count);
+      _rebuildList(ctx.samplerNames);
+      ctx.samplerNamesBuilt = true;
+    } else if (!ctx.samplerNamesBuilt) {
+      if (!ctx.samplerButtons || ctx.samplerButtons.length !== count) {
+        const placeholders = [];
+        for (let i = 0; i < count; ++i) placeholders.push(`Sample ${i + 1}`);
+        _rebuildList(placeholders);
+      }
+    }
+    const playingSlot = Math.round(st[2]);
+    const isPlaying = st[3] > 0.5;
+    const highlight = isPlaying ? playingSlot : -1;
+    if (ctx.samplerHighlight === highlight) return;
+    ctx.samplerHighlight = highlight;
+    (ctx.samplerButtons || []).forEach((btn, i) => {
+      btn.classList.toggle("playing", i === highlight);
+    });
+  }
+
   // gui/dom/live.js
   var _micRows = [null, null, null, null];
   var _hpfDebounceTimers = [null, null, null, null];
@@ -3570,6 +3753,10 @@ border-radius:6px;background:transparent;
       board.appendChild(grid);
       return;
     }
+    if (id === "sampler") {
+      board.appendChild(buildSamplerCard());
+      return;
+    }
     if (id === "meters") {
       board.appendChild(buildMetersTile());
       return;
@@ -3684,9 +3871,6 @@ border-radius:6px;background:transparent;
     const root = el("div", { id: "bela-gui" });
     const topChrome = el("div", { id: "top-chrome" });
     const hdr = el("div", { id: "gui-header" });
-    const belaLogo = el("img", { id: "gui-bela-logo", alt: "Bela" });
-    belaLogo.src = projectFileUrl("BELA.png");
-    hdr.appendChild(belaLogo);
     const connBadge = el("span", { className: "badge", id: "conn-badge" });
     connBadge.textContent = "OFFLINE";
     hdr.appendChild(connBadge);
@@ -3819,6 +4003,13 @@ border-radius:6px;background:transparent;
       if (b[1]) ctx.switchStates = b[1];
       if (b[2]) ctx.sirenState = b[2];
       if (b[3]) ctx.audioLevels = b[3];
+      if (b[10] && b[10].length >= 5) {
+        ctx.samplerState = b[10];
+        ctx.samplerStateLive = true;
+      }
+      if (b[11] && b[11].length && !ctx.samplerNamesBuilt) {
+        ctx.samplerNamesBuf = Float32Array.from(b[11]);
+      }
       if (b[7]) {
         if (!ctx.prevMuxRawValues) {
           ctx.prevMuxRawValues = new Float32Array(b[7]);
@@ -3847,6 +4038,7 @@ border-radius:6px;background:transparent;
       else updateTempBadge(void 0);
       if (ctx.consoleReady) updateConsole();
       updateSiren();
+      updateSampler();
       updateSwitches();
       updateMasterEq();
       updateClipIndicators();

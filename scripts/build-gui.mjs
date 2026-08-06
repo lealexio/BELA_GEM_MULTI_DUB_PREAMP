@@ -28,6 +28,8 @@ const banner = `/* AUTO-GENERATED — edit gui/, run: npm run build:gui */
  *   [7] Float32[64]      — raw MUX grid [mux×16+pot], normalised 0–1 (unmapped discovery)
  *   [8] Float32[20]      — codec gains: [0..9]=ADC input by physical ch, [10..19]=DAC out by physical ch
  *   [9] Float32[1]       — CPU temperature °C (sysfs thermal_zone0, ~2 s poll)
+ *   [10] Float32[5]      — sampler: [folderOk, count, playingSlot, isPlaying, playhead]
+ *   [11] Float32[32×64]  — sampler filenames packed as ASCII floats (fixed width)
  */
 `;
 

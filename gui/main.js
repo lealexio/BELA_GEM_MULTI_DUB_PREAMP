@@ -7,6 +7,7 @@ import { injectCSS } from './css.js';
 import { buildUI } from './dom/shell.js';
 import { layoutTopChrome, hideP5Dom } from './dom/utils.js';
 import { updateSiren, syncMicInputs } from './dom/live.js';
+import { updateSampler } from './dom/sampler.js';
 import { updateConsole, updateSwitches } from './dom/console.js';
 import { startMeterAnim, syncCodecGains, updateClipIndicators, clearClipBadges } from './dom/meters.js';
 import { TAB_LIVE } from './config.js';
@@ -77,6 +78,15 @@ export default function sketch(p) {
         if(b[1]) ctx.switchStates = b[1];
         if(b[2]) ctx.sirenState   = b[2];
         if(b[3]) ctx.audioLevels  = b[3];
+        // Buffer 10: sampler state [folderOk, count, playingSlot, isPlaying, playhead]
+        if(b[10] && b[10].length >= 5) {
+            ctx.samplerState = b[10];
+            ctx.samplerStateLive = true;
+        }
+        // Buffer 11: packed sample names (static, resent periodically)
+        if(b[11] && b[11].length && !ctx.samplerNamesBuilt) {
+            ctx.samplerNamesBuf = Float32Array.from(b[11]);
+        }
         if(b[7]) {
             if(!ctx.prevMuxRawValues) {
                 ctx.prevMuxRawValues       = new Float32Array(b[7]);
@@ -111,6 +121,7 @@ export default function sketch(p) {
 
         if(ctx.consoleReady) updateConsole();
         updateSiren();
+        updateSampler();
         updateSwitches();
         updateMasterEq();
         updateClipIndicators();

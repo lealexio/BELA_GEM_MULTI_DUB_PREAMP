@@ -13,11 +13,16 @@ export const TAB_MAPPING = 1;
 export const LIVE_TILES = [
     { id: 'siren',    label: 'Siren',         pair: true,  defaultOn: true  },
     { id: 'mic',      label: 'Mic inputs',    pair: true,  defaultOn: true  },
+    { id: 'sampler',  label: 'Sampler',       pair: false, defaultOn: true  },
     { id: 'meters',   label: 'VU meters',     pair: false, defaultOn: true  },
     { id: 'switches', label: 'Switches',      pair: false, defaultOn: false },
     { id: 'console',  label: 'Console',       pair: false, defaultOn: false },
     { id: 'masterEq', label: 'Master EQ',     pair: false, defaultOn: false },
 ];
+
+/** Must match kMaxSamples / kMaxSampleNameLen in SoftwareConfig.h. */
+export const MAX_SAMPLES = 32;
+export const MAX_SAMPLE_NAME_LEN = 64;
 
 /** localStorage keys for Live layout prefs (v2 = enabled + order). */
 export const LIVE_LAYOUT_STORAGE_KEY_V1 = 'belaDubPreamp.liveLayout.v1';

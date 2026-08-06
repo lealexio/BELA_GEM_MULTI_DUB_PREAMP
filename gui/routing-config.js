@@ -5,7 +5,7 @@ export const ROUTING_CONFIG = {
       "channels": [
         1
       ],
-      "gain": -3
+      "gain": 0
     },
     "fx1Send": {
       "channel": 2,

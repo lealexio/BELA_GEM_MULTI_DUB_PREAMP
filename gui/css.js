@@ -57,11 +57,6 @@ padding:8px 18px;display:flex;align-items:center;gap:10px;
 width:100%;
 }
 #gui-header .spacer{flex:1}
-#gui-bela-logo{
-height:28px;width:auto;
-mix-blend-mode:screen;
-opacity:.92;
-}
 #gui-logo{
 height:42px;width:auto;
 mix-blend-mode:screen; /* blacks become transparent on the dark header */
@@ -208,6 +203,40 @@ background:var(--ink);border-color:var(--ink);color:#fff;
 .spreset.active.gate{
 border-color:var(--accent);
 box-shadow:0 0 10px rgba(231,76,60,.55);
+}
+
+/* --- Sampler --- */
+#sampler-body{display:flex;flex-direction:column;gap:10px}
+.sampler-hint{
+font-size:11px;font-weight:600;color:var(--muted);letter-spacing:.02em;
+}
+.sampler-empty{
+padding:14px 12px;border:1px dashed var(--line);border-radius:8px;
+font-size:12px;line-height:1.45;color:var(--muted);background:var(--surface);
+}
+.sampler-grid{
+display:grid;
+grid-template-columns:repeat(auto-fill,minmax(72px,1fr));
+gap:8px;
+}
+.sampler-pad{
+aspect-ratio:1;
+display:flex;flex-direction:column;align-items:center;justify-content:center;
+gap:1px;padding:6px;border-radius:10px;cursor:pointer;
+background:var(--surface);border:1px solid var(--line);
+font-family:var(--mono);font-size:10px;font-weight:700;color:var(--ink);
+letter-spacing:.02em;text-align:center;line-height:1.15;
+transition:background .12s,border-color .12s,box-shadow .12s,transform .08s;
+}
+.sampler-pad-line{
+display:block;width:100%;
+white-space:pre;overflow:hidden;text-overflow:clip;
+}
+.sampler-pad:hover{border-color:#c8c8d0;background:#fafafa}
+.sampler-pad:active{transform:scale(.96)}
+.sampler-pad.playing{
+border-color:var(--accent);background:#fff7f5;color:var(--accent);
+box-shadow:0 0 0 1px rgba(231,76,60,.28);
 }
 
 /* --- Console --- */

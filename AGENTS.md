@@ -22,6 +22,7 @@ HardwareManager.h/cpp   Scan MUX + lecture MCP23017 I2C
 ChannelStrip.h/cpp      Tranche de canal : gain → gate → EQ → FX send
 MasterFx.h/cpp          Bus master : orchestre tous les modules DSP du bus
 DubSiren.h/cpp          Sirène dub monophonique : OSC phase + LFO + enveloppe pitch
+SamplePlayer.h/cpp      One-shots WAV/MP3 (samples/), mixés au même point que la Dub Siren
 ParametricEq.h/cpp      EQ paramétrique 4 bandes (SUB/KICK/MID/TOP, freq sweepable)
 GraphicEq.h/cpp         EQ graphique 12 bandes fixes (40 Hz … 16 kHz)
 FilterSection.h/cpp     HPF + LPF master avec fréquence et résonance réglables
@@ -33,6 +34,7 @@ HardwareConfig.h        Constantes PHYSIQUES : mapping pots/switches, routing I/
 SoftwareConfig.h        Constantes DSP/COMPORTEMENT : EQ, gate, kills, siren, debug
 gui/                    Sources GUI Bela (ES modules) — éditer ici, pas sketch.js directement
 src/sketch.js           Bundle GUI généré (esbuild) — déployé sur Bela, ne pas éditer à la main
+src/samples/            Fichiers WAV/MP3 one-shot (chargés au boot via AudioFileUtilities)
 ```
 
 **Règle de séparation des configs :**
@@ -65,7 +67,8 @@ IN0 ──► ChannelStrip 1 ──► dry1 ──┐
 IN1 ──► ChannelStrip 2 ──► dry2 ──┤ fxSend (sum)
 IN2 ──► ChannelStrip 3 ──► dry3 ──┤ ──► filtré par mode FX switch ──► OUT2
 IN3 ──► ChannelStrip 4 ──► dry4 ──┤
-         DubSiren ─────► sirenOut ─┘
+         DubSiren ─────► sirenOut ─┤
+         SamplePlayer ► samplerOut─┘  (même gain / FX send que la sirène ; trigger UI only)
                                    │
                                dry mix
                                    │
@@ -165,6 +168,7 @@ IN → × inputGain_ → NoiseGate → EQ (low shelf / mid peak / high shelf) �
 | `kSirenGateAttackMs` | 5 ms | Attaque gate sirène |
 | `kSirenGateReleaseMs` | 80 ms | Release gate sirène |
 | `kSirenGainScale` | 0.1 | Niveau sirène relatif aux canaux |
+| `kSamplerGainScale` | 0.35 | Niveau WAV sampler (mixé au point sirène) |
 | `kFxMidLowFreq` | 250 Hz | Borne basse mode MIDS (FX send) |
 | `kFxMidHighFreq` | 4000 Hz | Borne haute mode MIDS / seuil TOPS |
 | `kDebug` | true | Active le log des pots/switches dans render() |
@@ -226,7 +230,10 @@ L'IDE Bela ne charge que `src/sketch.js`. Les sources vivent dans `gui/` à la r
 **Structure GUI :**
 - `config.js` — constantes (must match `render.cpp` / `SoftwareConfig.h`)
 - `state.js` + `context.js` — état mutable partagé
-- `dom/` — onglets Live, Meters, Master EQ, Mapping, shell
+- `dom/` — onglets Live (tuiles Siren, Mic, Sampler, Meters…), Master EQ, Mapping, shell
+- `dom/sampler.js` — tuile Sampler (liste WAV + trigger via `Bela.control`)
 - `bela/connection.js` — badge LIVE/LAG/OFFLINE
+
+**Sampler :** charge `src/samples/*.{wav,mp3}` au boot via `AudioFileUtilities::load` (`SamplePlayer`). La tuile Live liste les fichiers (buffers GUI 10/11) ; un clic envoie `{ event:'custom', samplerPlay: i }`. Sortie mixée avec la Dub Siren (pots `SIREN_GAIN` / FX send, pas le trigger hardware).
 
 `npm run watch:gui` pour rebuild automatique en dev local.
