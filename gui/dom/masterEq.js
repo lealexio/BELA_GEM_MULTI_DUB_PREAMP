@@ -1,6 +1,6 @@
 /** Master EQ theoretical frequency-response curve. */
 import { getContext } from '../context.js';
-import { MASTER_EQ_CONFIG, masterEqFreqs, MASTER_EQ_FREQ_TICKS, TAB_MASTER_EQ } from '../config.js';
+import { MASTER_EQ_CONFIG, masterEqFreqs, MASTER_EQ_FREQ_TICKS, TAB_LIVE } from '../config.js';
 import { el, cardTitle } from './utils.js';
 
 export function masterEqPotToGainDb(pot, rangeDb) {
@@ -292,24 +292,23 @@ export function masterEqDbToY(db, plotY, plotH) {
     return plotY + t * plotH;
 }
 
-/** Redraws the master EQ magnitude plot on the canvas. */
-export function drawMasterEqCurve() {
-    if(!getContext().masterEqCtx || !getContext().masterEqCanvas) return;
+/** Redraws the master EQ magnitude plot on one canvas. */
+function drawMasterEqOnCanvas(canvas, ctx2d) {
+    if (!canvas || !ctx2d) return;
 
     const cfg = MASTER_EQ_CONFIG;
     const dpr = window.devicePixelRatio || 1;
-    const cssW = getContext().masterEqCanvas.clientWidth || 800;
-    const cssH = getContext().masterEqCanvas.clientHeight || 240;
+    const cssW = canvas.clientWidth || 800;
+    const cssH = canvas.clientHeight || 240;
     const pixW = Math.round(cssW * dpr);
     const pixH = Math.round(cssH * dpr);
-    if(getContext().masterEqCanvas.width !== pixW || getContext().masterEqCanvas.height !== pixH) {
-        getContext().masterEqCanvas.width = pixW;
-        getContext().masterEqCanvas.height = pixH;
+    if (canvas.width !== pixW || canvas.height !== pixH) {
+        canvas.width = pixW;
+        canvas.height = pixH;
     }
 
-    const ctx = getContext().masterEqCtx;
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.clearRect(0, 0, cssW, cssH);
+    ctx2d.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx2d.clearRect(0, 0, cssW, cssH);
 
     const padL = 44;
     const padR = 14;
@@ -320,123 +319,148 @@ export function drawMasterEqCurve() {
     const plotW = cssW - padL - padR;
     const plotH = cssH - padT - padB;
 
-    ctx.fillStyle = '#fafafa';
-    ctx.fillRect(plotX, plotY, plotW, plotH);
-
-    ctx.strokeStyle = '#e8e8ec';
-    ctx.lineWidth = 1;
-    for(let db = cfg.Y_MIN_DB; db <= cfg.Y_MAX_DB; db += 6) {
+    ctx2d.strokeStyle = '#e8e8ec';
+    ctx2d.lineWidth = 1;
+    for (let db = cfg.Y_MIN_DB; db <= cfg.Y_MAX_DB; db += 6) {
         const y = masterEqDbToY(db, plotY, plotH);
-        ctx.beginPath();
-        ctx.moveTo(plotX, y);
-        ctx.lineTo(plotX + plotW, y);
-        ctx.stroke();
+        ctx2d.beginPath();
+        ctx2d.moveTo(plotX, y);
+        ctx2d.lineTo(plotX + plotW, y);
+        ctx2d.stroke();
     }
 
     MASTER_EQ_FREQ_TICKS.forEach(hz => {
         const x = masterEqFreqToX(hz, plotX, plotW);
-        ctx.beginPath();
-        ctx.moveTo(x, plotY);
-        ctx.lineTo(x, plotY + plotH);
-        ctx.stroke();
+        ctx2d.beginPath();
+        ctx2d.moveTo(x, plotY);
+        ctx2d.lineTo(x, plotY + plotH);
+        ctx2d.stroke();
     });
 
-    ctx.strokeStyle = '#bbb';
-    ctx.setLineDash([4, 4]);
+    ctx2d.strokeStyle = '#bbb';
+    ctx2d.setLineDash([4, 4]);
     const y0 = masterEqDbToY(0, plotY, plotH);
-    ctx.beginPath();
-    ctx.moveTo(plotX, y0);
-    ctx.lineTo(plotX + plotW, y0);
-    ctx.stroke();
-    ctx.setLineDash([]);
+    ctx2d.beginPath();
+    ctx2d.moveTo(plotX, y0);
+    ctx2d.lineTo(plotX + plotW, y0);
+    ctx2d.stroke();
+    ctx2d.setLineDash([]);
 
-    ctx.strokeStyle = '#ccc';
-    ctx.strokeRect(plotX, plotY, plotW, plotH);
+    ctx2d.strokeStyle = '#ccc';
+    ctx2d.strokeRect(plotX, plotY, plotW, plotH);
 
-    ctx.fillStyle = '#888';
-    ctx.font = '10px monospace';
-    ctx.textAlign = 'right';
-    ctx.textBaseline = 'middle';
-    for(let db = cfg.Y_MIN_DB; db <= cfg.Y_MAX_DB; db += 6) {
+    ctx2d.fillStyle = '#888';
+    ctx2d.font = '10px monospace';
+    ctx2d.textAlign = 'right';
+    ctx2d.textBaseline = 'middle';
+    for (let db = cfg.Y_MIN_DB; db <= cfg.Y_MAX_DB; db += 6) {
         const y = masterEqDbToY(db, plotY, plotH);
-        ctx.fillText((db > 0 ? '+' : '') + db + ' dB', padL - 6, y);
+        ctx2d.fillText((db > 0 ? '+' : '') + db + ' dB', padL - 6, y);
     }
 
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'top';
+    ctx2d.textAlign = 'center';
+    ctx2d.textBaseline = 'top';
     MASTER_EQ_FREQ_TICKS.forEach((hz, i) => {
         const x = masterEqFreqToX(hz, plotX, plotW);
         const labelY = plotY + plotH + 6 + (i % 2) * 12;
-        ctx.fillText(formatMasterEqFreqLabel(hz), x, labelY);
+        ctx2d.fillText(formatMasterEqFreqLabel(hz), x, labelY);
     });
 
-    ctx.strokeStyle = '#e74c3c';
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    for(let i = 0; i < cfg.CURVE_POINTS; i++) {
+    const curve = getContext().masterEqCurveDb;
+    ctx2d.strokeStyle = '#e74c3c';
+    ctx2d.lineWidth = 2;
+    ctx2d.beginPath();
+    for (let i = 0; i < cfg.CURVE_POINTS; i++) {
         const x = masterEqFreqToX(masterEqFreqs[i], plotX, plotW);
-        const y = masterEqDbToY(getContext().masterEqCurveDb[i], plotY, plotH);
-        if(i === 0) ctx.moveTo(x, y);
-        else ctx.lineTo(x, y);
+        const y = masterEqDbToY(curve[i], plotY, plotH);
+        if (i === 0) ctx2d.moveTo(x, y);
+        else ctx2d.lineTo(x, y);
     }
-    ctx.stroke();
+    ctx2d.stroke();
 
-    ctx.fillStyle = '#e74c3c';
-    ctx.beginPath();
-    for(let i = 0; i < cfg.CURVE_POINTS; i++) {
+    ctx2d.fillStyle = '#e74c3c';
+    ctx2d.beginPath();
+    for (let i = 0; i < cfg.CURVE_POINTS; i++) {
         const x = masterEqFreqToX(masterEqFreqs[i], plotX, plotW);
-        const y = masterEqDbToY(getContext().masterEqCurveDb[i], plotY, plotH);
-        if(i === 0) ctx.moveTo(x, y);
-        else ctx.lineTo(x, y);
+        const y = masterEqDbToY(curve[i], plotY, plotH);
+        if (i === 0) ctx2d.moveTo(x, y);
+        else ctx2d.lineTo(x, y);
     }
-    ctx.lineTo(masterEqFreqToX(masterEqFreqs[cfg.CURVE_POINTS - 1], plotX, plotW),
+    ctx2d.lineTo(masterEqFreqToX(masterEqFreqs[cfg.CURVE_POINTS - 1], plotX, plotW),
                masterEqDbToY(cfg.Y_MIN_DB, plotY, plotH));
-    ctx.lineTo(masterEqFreqToX(masterEqFreqs[0], plotX, plotW),
+    ctx2d.lineTo(masterEqFreqToX(masterEqFreqs[0], plotX, plotW),
                masterEqDbToY(cfg.Y_MIN_DB, plotY, plotH));
-    ctx.closePath();
-    ctx.globalAlpha = 0.08;
-    ctx.fill();
-    ctx.globalAlpha = 1;
+    ctx2d.closePath();
+    ctx2d.globalAlpha = 0.08;
+    ctx2d.fill();
+    ctx2d.globalAlpha = 1;
+}
+
+/** Redraws the master EQ plot on every registered canvas. */
+export function drawMasterEqCurve() {
+    const targets = getContext().masterEqTargets || [];
+    if (getContext().masterEqCanvas && getContext().masterEqCtx) {
+        const has = targets.some(t => t.canvas === getContext().masterEqCanvas);
+        if (!has)
+            targets.push({
+                canvas: getContext().masterEqCanvas,
+                ctx: getContext().masterEqCtx
+            });
+    }
+    getContext().masterEqTargets = targets.filter(t => t.canvas && t.canvas.isConnected);
+    getContext().masterEqTargets.forEach(t => drawMasterEqOnCanvas(t.canvas, t.ctx));
 }
 
 /** Recomputes and redraws the master EQ curve when inputs change. */
 export function updateMasterEq() {
     computeMasterCurve(getContext().potValues, getContext().switchStates);
-    if(getContext().currentTab === TAB_MASTER_EQ)
+    const liveHasEq = !!(getContext().liveLayoutPrefs && getContext().liveLayoutPrefs.masterEq);
+    if (liveHasEq && getContext().currentTab === TAB_LIVE)
         drawMasterEqCurve();
 }
 
 /** Resizes the master EQ canvas to its CSS layout box. */
 export function resizeMasterEqCanvas() {
-    if(getContext().masterEqCanvas && getContext().currentTab === TAB_MASTER_EQ)
-        drawMasterEqCurve();
+    drawMasterEqCurve();
 }
 
-export function buildMasterEqPane() {
-    const pane = el('div', {id:'pane-master-eq', className:'tab-pane'});
-    const card = el('div', {id:'master-eq-card', className:'card'});
+/**
+ * Builds a Master EQ card for the Live dashboard.
+ * @param {{ canvasId?: string }} [opts]
+ */
+export function buildMasterEqCard(opts) {
+    const canvasId = (opts && opts.canvasId) || 'live-master-eq-canvas';
+
+    const card = el('div', {
+        id: 'live-master-eq-card',
+        className: 'card live-tile'
+    });
+    card.dataset.tile = 'masterEq';
     card.appendChild(cardTitle('Master EQ — frequency response'));
 
-    const notice = el('div', {id:'master-eq-notice'});
+    const notice = el('div', {className: 'master-eq-notice'});
     notice.textContent =
         'Theoretical representation — the curve is recalculated from pot values, not a measurement of the actual audio signal.';
     card.appendChild(notice);
 
-    const caption = el('div', {id:'master-eq-caption'});
+    const caption = el('div', {className: 'master-eq-caption'});
     caption.textContent =
         'Dry master chain: Parametric EQ → Graphic EQ → HPF/LPF → Band Trim → Kill switches. Excludes master gain and FX returns.';
     card.appendChild(caption);
 
-    const wrap = el('div', {id:'master-eq-wrap'});
-    getContext().masterEqCanvas = el('canvas', {id:'master-eq-canvas'});
-    getContext().masterEqCanvas.width = 800;
-    getContext().masterEqCanvas.height = 320;
-    getContext().masterEqCtx = getContext().masterEqCanvas.getContext('2d');
-    wrap.appendChild(getContext().masterEqCanvas);
+    const wrap = el('div', {className: 'master-eq-wrap'});
+    const canvas = el('canvas', {id: canvasId, className: 'master-eq-canvas'});
+    canvas.width = 800;
+    canvas.height = 320;
+    const ctx2d = canvas.getContext('2d');
+    wrap.appendChild(canvas);
     card.appendChild(wrap);
-    pane.appendChild(card);
 
-    computeMasterCurve(getContext().potValues, getContext().switchStates);
+    if (!getContext().masterEqTargets)
+        getContext().masterEqTargets = [];
+    getContext().masterEqTargets.push({ canvas, ctx: ctx2d });
+    getContext().masterEqCanvas = canvas;
+    getContext().masterEqCtx = ctx2d;
 
-    return pane;
+    return card;
 }

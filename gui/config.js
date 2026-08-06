@@ -3,10 +3,24 @@
  */
 
 /** Tab indices — must match shell.js tab bar order. */
-export const TAB_LIVE      = 0;
-export const TAB_CONSOLE   = 1;
-export const TAB_MASTER_EQ = 2;
-export const TAB_MAPPING   = 3;
+export const TAB_LIVE    = 0;
+export const TAB_MAPPING = 1;
+
+/**
+ * Selectable Live dashboard tiles (Mapping excluded).
+ * `pair` tiles share the top 2-column grid when both are enabled.
+ */
+export const LIVE_TILES = [
+    { id: 'siren',    label: 'Siren',         pair: true,  defaultOn: true  },
+    { id: 'mic',      label: 'Mic inputs',    pair: true,  defaultOn: true  },
+    { id: 'meters',   label: 'VU meters',     pair: false, defaultOn: true  },
+    { id: 'switches', label: 'Switches',      pair: false, defaultOn: false },
+    { id: 'console',  label: 'Console',       pair: false, defaultOn: false },
+    { id: 'masterEq', label: 'Master EQ',     pair: false, defaultOn: false },
+];
+
+/** localStorage key for Live tile visibility. */
+export const LIVE_LAYOUT_STORAGE_KEY = 'belaDubPreamp.liveLayout.v1';
 
 /** Minimum pot travel (0–1) required to accept a detect hit. */
 export const DETECT_POT_MIN_DELTA = 0.25;

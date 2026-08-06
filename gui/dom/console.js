@@ -10,15 +10,15 @@ import {
     muxRawIndex, getActiveMuxCount, isPotIgnored, isPotMapped, formatUnmappedPotLabel
 } from './mapping.js';
 
-/** Builds the Console tab pane (console log + switches). */
-export function buildConsolePane() {
-    const pane = el('div', {id: 'pane-console', className: 'tab-pane'});
-
-    const consoleCard = el('div', {className: 'card'});
+/** Builds the console "last change" card.
+ * @param {string} [listId='console-list']
+ */
+export function buildConsoleCard(listId) {
+    const card = el('div', {className: 'card live-tile'});
+    card.dataset.tile = 'console';
     const consoleHdr = el('div', {className: 'console-header'});
     consoleHdr.appendChild(cardTitle('Console — last change'));
     const filterBar = el('div', {className: 'console-filter'});
-    getContext().consoleFilterBtns = [];
     [
         { mode: 'normal',   label: 'Normal'   },
         { mode: 'detailed', label: 'Détaillé' }
@@ -32,19 +32,28 @@ export function buildConsolePane() {
         btn.dataset.mode = mode;
         btn.addEventListener('click', () => setConsoleFilterMode(mode));
         filterBar.appendChild(btn);
+        if (!getContext().consoleFilterBtns)
+            getContext().consoleFilterBtns = [];
         getContext().consoleFilterBtns.push(btn);
     });
     consoleHdr.appendChild(filterBar);
-    consoleCard.appendChild(consoleHdr);
-    getContext().consoleList = el('ul', {id: 'console-list'});
-    consoleCard.appendChild(getContext().consoleList);
+    card.appendChild(consoleHdr);
+    const list = el('ul', {id: listId || 'console-list', className: 'console-list'});
+    card.appendChild(list);
+    if (!getContext().consoleLists)
+        getContext().consoleLists = [];
+    getContext().consoleLists.push(list);
+    getContext().consoleList = list;
     renderConsole();
-    pane.appendChild(consoleCard);
+    return card;
+}
 
-    const swCard = el('div', {className: 'card'});
+/** Builds the switches status card. */
+export function buildSwitchesCard() {
+    const swCard = el('div', {className: 'card live-tile'});
+    swCard.dataset.tile = 'switches';
     swCard.appendChild(cardTitle('Switches'));
     const swGrid = el('div', {className: 'sw-grid'});
-    getContext().switchPills = [];
 
     SWITCH_GROUPS.forEach(group => {
         const grp = el('div', {className: 'sw-group sw-group-' + group.type});
@@ -61,9 +70,7 @@ export function buildConsolePane() {
     });
 
     swCard.appendChild(swGrid);
-    pane.appendChild(swCard);
-
-    return pane;
+    return swCard;
 }
 
 /** Returns a short display label for a switch name. */
@@ -80,6 +87,7 @@ function switchDisplayName(name) {
 /** Builds one switch status tile with LED indicator. */
 function buildSwitchTile(index, name, type) {
     const tile = el('div', {className: 'sw-tile sw-tile-' + type});
+    tile.dataset.swIndex = String(index);
     const led  = el('div', {className: 'sw-led'});
     const lbl  = el('span', {className: 'sw-tile-name'});
     lbl.textContent = switchDisplayName(name);
@@ -104,7 +112,7 @@ export function setConsoleFilterMode(mode) {
     if (mode !== 'normal' && mode !== 'detailed') return;
     if (mode === getContext().consoleFilterMode) return;
     getContext().consoleFilterMode = mode;
-    getContext().consoleFilterBtns.forEach(btn => {
+    document.querySelectorAll('.console-filter-btn').forEach(btn => {
         btn.classList.toggle('active', btn.dataset.mode === mode);
     });
     getContext().recentChanges = [];
@@ -191,21 +199,31 @@ function pushConsoleEntry(entry) {
         getContext().recentChanges.length = MAX_CONSOLE;
 }
 
-/** Renders the console list (fixed MAX_CONSOLE slots). */
+/** Renders all console lists (fixed MAX_CONSOLE slots). */
 function renderConsole() {
-    if (!getContext().consoleList) return;
-    getContext().consoleList.innerHTML = '';
-    for (let i = 0; i < MAX_CONSOLE; i++) {
-        getContext().consoleList.appendChild(
-            buildConsoleRow(getContext().recentChanges[i] || null, i)
-        );
-    }
+    const lists = getContext().consoleLists || [];
+    if (getContext().consoleList && lists.indexOf(getContext().consoleList) < 0)
+        lists.push(getContext().consoleList);
+    getContext().consoleLists = lists;
+    if (!lists.length) return;
+
+    // Fill even if not yet connected (Live mounts the card right after build).
+    lists.forEach(list => {
+        if (!list) return;
+        list.innerHTML = '';
+        for (let i = 0; i < MAX_CONSOLE; i++) {
+            list.appendChild(
+                buildConsoleRow(getContext().recentChanges[i] || null, i)
+            );
+        }
+    });
 }
 
-/** Updates switch tile states from current switchStates. */
+/** Updates all switch tiles in the document from switchStates. */
 export function updateSwitches() {
-    for (let i = 0; i < SWITCH_NAMES.length; i++) {
-        const tile = getContext().switchPills[i];
-        if (tile) tile.classList.toggle('on', getContext().switchStates[i] > 0.5);
-    }
+    document.querySelectorAll('.sw-tile[data-sw-index]').forEach(tile => {
+        const i = parseInt(tile.getAttribute('data-sw-index'), 10);
+        if (!isNaN(i))
+            tile.classList.toggle('on', getContext().switchStates[i] > 0.5);
+    });
 }

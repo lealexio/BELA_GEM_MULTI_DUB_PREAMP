@@ -1,10 +1,14 @@
-/** Live tab: meters, siren, mic inputs. */
+/** Live tab: configurable dashboard tiles (siren, mic, meters, …). */
 import { getContext } from '../context.js';
 import {
-    SIREN_PRESETS, CONFIG_META, MIC_HPF_HZ_MIN, MIC_HPF_HZ_MAX
+    SIREN_PRESETS, CONFIG_META, MIC_HPF_HZ_MIN, MIC_HPF_HZ_MAX,
+    LIVE_TILES, TAB_LIVE
 } from '../config.js';
+import { loadLiveLayout, saveLiveLayout, isLiveTileOn } from '../live-layout.js';
 import { el, cardTitle } from './utils.js';
-import { buildMetersSection } from './meters.js';
+import { buildMetersSection, startMeterAnim, stopMeterAnim } from './meters.js';
+import { buildConsoleCard, buildSwitchesCard } from './console.js';
+import { buildMasterEqCard, drawMasterEqCurve } from './masterEq.js';
 
 /** AUX1–4 live controls — handles for sync from configMeta (buffer 6). */
 const _micRows = [null, null, null, null];
@@ -15,6 +19,9 @@ const _hpfSyncHoldUntil = [0, 0, 0, 0];
 const HPF_DEBOUNCE_MS = 150;
 /** Must exceed Bela static buffer resend (~2 s @ 20 fps / divisor 40). */
 const MIC_SYNC_HOLD_MS = 2500;
+
+let _liveBoard = null;
+let _layoutPanel = null;
 
 /** Marks one AUX mic/hpf as locally authoritative for a short window. */
 function _holdMicSync(idx, kind) {
@@ -54,13 +61,10 @@ function _sendMicControl(payload, desc, statusEl) {
     }
 }
 
-/** Builds the Live tab: Siren + Mic first, then meters. */
-export function buildLivePane() {
-    const pane = el('div', {id: 'pane-live', className: 'tab-pane active'});
-
-    const grid = el('div', {id: 'live-grid'});
-
-    const sirenCard = el('div', {className: 'card'});
+/** Builds the Siren status card. */
+export function buildSirenCard() {
+    const sirenCard = el('div', {className: 'card live-tile'});
+    sirenCard.dataset.tile = 'siren';
     sirenCard.appendChild(cardTitle('Siren'));
 
     const sirenBody = el('div', {id: 'siren-body'});
@@ -99,20 +103,19 @@ export function buildLivePane() {
     getContext().sirenModFill = hero.querySelector('#siren-mod-fill');
     getContext().sirenModLbl  = hero.querySelector('#siren-mod-lbl');
 
-    grid.appendChild(sirenCard);
-    grid.appendChild(buildMicInputsCard());
-    pane.appendChild(grid);
-    pane.appendChild(buildMetersSection());
-
-    return pane;
+    return sirenCard;
 }
 
 /**
  * Builds the Live "Mic inputs" card: Mic toggle + HPF Hz per AUX1–4.
  * Changes are sent via Bela.control (immediate DSP, lost on Bela restart).
  */
-function buildMicInputsCard() {
-    const card = el('div', {className: 'card', id: 'mic-inputs-card'});
+export function buildMicInputsCard() {
+    const card = el('div', {
+        className: 'card live-tile',
+        id: 'mic-inputs-card'
+    });
+    card.dataset.tile = 'mic';
     card.appendChild(cardTitle('Mic inputs'));
 
     const note = el('div', {className: 'mic-live-note'});
@@ -197,7 +200,6 @@ function buildMicInputsCard() {
         _micRows[i] = {
             micCb,
             hpfInp,
-            /** Silent UI update from Bela buffer 6 (no control send). */
             setMic(on) {
                 if (micCb.checked === !!on) return;
                 micCb.checked = !!on;
@@ -223,9 +225,144 @@ function buildMicInputsCard() {
     return card;
 }
 
+/** Builds meters section wrapped as a live tile. */
+function buildMetersTile() {
+    const wrap = buildMetersSection();
+    wrap.classList.add('live-tile');
+    wrap.dataset.tile = 'meters';
+    return wrap;
+}
+
+/** Builds the Layout settings panel (checkboxes). */
+function buildLayoutPanel(prefs) {
+    const panel = el('div', {
+        id: 'live-layout-panel',
+        className: 'live-layout-panel',
+        hidden: true
+    });
+    const title = el('div', {className: 'live-layout-title'});
+    title.textContent = 'Live layout';
+    panel.appendChild(title);
+
+    const hint = el('p', {className: 'live-layout-hint'});
+    hint.textContent = 'Choose which tiles appear on Live. Saved in this browser.';
+    panel.appendChild(hint);
+
+    const list = el('div', {className: 'live-layout-list'});
+    LIVE_TILES.forEach(tile => {
+        const row = el('label', {className: 'live-layout-row'});
+        const cb = el('input', {type: 'checkbox'});
+        cb.checked = isLiveTileOn(prefs, tile.id);
+        cb.dataset.tileId = tile.id;
+        cb.addEventListener('change', () => {
+            const p = getContext().liveLayoutPrefs;
+            p[tile.id] = cb.checked;
+            saveLiveLayout(p);
+            renderLiveBoard();
+        });
+        const lbl = el('span');
+        lbl.textContent = tile.label;
+        row.appendChild(cb);
+        row.appendChild(lbl);
+        list.appendChild(row);
+    });
+    panel.appendChild(list);
+    return panel;
+}
+
+/** Rebuilds the Live board from current layout prefs. */
+export function renderLiveBoard() {
+    if (!_liveBoard) return;
+    const prefs = getContext().liveLayoutPrefs;
+    const hadMeters = (getContext().meterVu || []).some(Boolean);
+
+    _liveBoard.innerHTML = '';
+
+    // Drop disconnected master-eq / console nodes from a previous Live mount.
+    if (getContext().masterEqTargets) {
+        getContext().masterEqTargets = getContext().masterEqTargets.filter(
+            t => t.canvas && t.canvas.isConnected
+        );
+    }
+    getContext().consoleLists =
+        (getContext().consoleLists || []).filter(l => l.isConnected);
+    getContext().consoleFilterBtns =
+        (getContext().consoleFilterBtns || []).filter(b => b.isConnected);
+
+    const showSiren = isLiveTileOn(prefs, 'siren');
+    const showMic   = isLiveTileOn(prefs, 'mic');
+
+    if (showSiren || showMic) {
+        const grid = el('div', {id: 'live-grid'});
+        if (showSiren) grid.appendChild(buildSirenCard());
+        if (showMic)   grid.appendChild(buildMicInputsCard());
+        if (showSiren !== showMic)
+            grid.classList.add('live-grid-single');
+        _liveBoard.appendChild(grid);
+    }
+
+    if (isLiveTileOn(prefs, 'meters'))
+        _liveBoard.appendChild(buildMetersTile());
+    if (isLiveTileOn(prefs, 'switches'))
+        _liveBoard.appendChild(buildSwitchesCard());
+    if (isLiveTileOn(prefs, 'console'))
+        _liveBoard.appendChild(buildConsoleCard('live-console-list'));
+    if (isLiveTileOn(prefs, 'masterEq')) {
+        _liveBoard.appendChild(buildMasterEqCard({
+            canvasId: 'live-master-eq-canvas'
+        }));
+        drawMasterEqCurve();
+    }
+
+    const hasMeters = isLiveTileOn(prefs, 'meters');
+    if (getContext().currentTab === TAB_LIVE) {
+        if (hasMeters) {
+            getContext().meterVu.forEach(vu => { if (vu) vu.resize(); });
+            startMeterAnim();
+        } else if (hadMeters) {
+            stopMeterAnim();
+            getContext().meterVu = [];
+        }
+    }
+}
+
+/** Builds the Live tab with layout toolbar + configurable tiles. */
+export function buildLivePane() {
+    const pane = el('div', {id: 'pane-live', className: 'tab-pane active'});
+
+    const prefs = loadLiveLayout();
+    getContext().liveLayoutPrefs = prefs;
+
+    const toolbar = el('div', {id: 'live-toolbar'});
+    const layoutBtn = el('button', {
+        type: 'button',
+        id: 'live-layout-btn',
+        className: 'live-layout-btn',
+        title: 'Choose Live tiles'
+    });
+    layoutBtn.textContent = 'Layout';
+    layoutBtn.addEventListener('click', () => {
+        if (!_layoutPanel) return;
+        const open = _layoutPanel.hasAttribute('hidden');
+        if (open) _layoutPanel.removeAttribute('hidden');
+        else _layoutPanel.setAttribute('hidden', '');
+        layoutBtn.classList.toggle('active', open);
+    });
+    toolbar.appendChild(layoutBtn);
+    pane.appendChild(toolbar);
+
+    _layoutPanel = buildLayoutPanel(prefs);
+    pane.appendChild(_layoutPanel);
+
+    _liveBoard = el('div', {id: 'live-board'});
+    pane.appendChild(_liveBoard);
+    renderLiveBoard();
+
+    return pane;
+}
+
 /**
  * Syncs Live mic/HPF controls from configMeta buffer 6 (no send back to Bela).
- * Skips fields recently edited locally so stale meta cannot flicker the UI.
  * @param {Float32Array|ArrayLike<number>} meta
  */
 export function syncMicInputs(meta) {
@@ -259,6 +396,8 @@ export function syncMicInputs(meta) {
 
 /** Updates siren hero / presets from sirenState buffer. */
 export function updateSiren() {
+    if (!getContext().sirenPresetPills || !getContext().sirenPresetPills.length)
+        return;
     const idx  = Math.max(0, Math.min(Math.round(getContext().sirenState[0]), SIREN_PRESETS.length - 1));
     const gate = getContext().sirenState[1] > 0.5;
     const mod  = getContext().sirenState[2];

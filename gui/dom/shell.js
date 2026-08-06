@@ -1,13 +1,10 @@
 /** Top-level UI shell: header, tabs, tab switching. */
 import { getContext } from '../context.js';
-import {
-    TAB_LIVE, TAB_MASTER_EQ, TAB_MAPPING
-} from '../config.js';
+import { TAB_LIVE, TAB_MAPPING } from '../config.js';
 import { el, projectFileUrl } from './utils.js';
 import { buildLivePane } from './live.js';
-import { buildConsolePane } from './console.js';
 import { startMeterAnim, stopMeterAnim } from './meters.js';
-import { buildMasterEqPane, drawMasterEqCurve } from './masterEq.js';
+import { drawMasterEqCurve } from './masterEq.js';
 import { buildMappingPane, cancelDetect } from './mapping.js';
 
 /** Builds the full DOM tree (header, tabs, all panes). */
@@ -38,7 +35,7 @@ export function buildUI() {
     topChrome.appendChild(hdr);
 
     const tabBar = el('div', {id: 'tab-bar'});
-    ['Live', 'Console', 'Master EQ', 'Mapping'].forEach((lbl, i) => {
+    ['Live', 'Mapping'].forEach((lbl, i) => {
         const btn = el('button', {className: 'tab-btn' + (i === TAB_LIVE ? ' active' : '')});
         btn.textContent = lbl;
         btn.dataset.tab = i;
@@ -50,8 +47,6 @@ export function buildUI() {
 
     const content = el('div', {id: 'tab-content'});
     content.appendChild(buildLivePane());
-    content.appendChild(buildConsolePane());
-    content.appendChild(buildMasterEqPane());
     content.appendChild(buildMappingPane());
     root.appendChild(content);
 
@@ -69,10 +64,11 @@ export function switchTab(idx) {
         p.classList.toggle('active', i === idx));
     if (idx === TAB_LIVE) {
         ctx.meterVu.forEach(vu => { if (vu) vu.resize(); });
-        startMeterAnim();
+        if (ctx.liveLayoutPrefs && ctx.liveLayoutPrefs.meters)
+            startMeterAnim();
+        if (ctx.liveLayoutPrefs && ctx.liveLayoutPrefs.masterEq)
+            drawMasterEqCurve();
     } else {
         stopMeterAnim();
     }
-    if (idx === TAB_MASTER_EQ)
-        drawMasterEqCurve();
 }

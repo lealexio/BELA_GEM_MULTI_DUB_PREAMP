@@ -46,6 +46,9 @@ export function createState() {
         downloadStatusEl: null,
         detectStatusEl: null,
         micLiveStatusEl: null,
+        liveLayoutPrefs: null,
+        masterEqTargets: [],
+        consoleLists: [],
         lastBelaRxMs: 0,
         belaRxFingerprint: ''
     };

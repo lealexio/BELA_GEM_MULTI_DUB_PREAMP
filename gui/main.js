@@ -122,7 +122,9 @@ export default function sketch(p) {
         updateMasterEq();
         updateBadge();
 
-        if(ctx.currentTab === TAB_LIVE && ctx.meterAnimId == null) startMeterAnim();
+        if(ctx.currentTab === TAB_LIVE && ctx.liveLayoutPrefs &&
+           ctx.liveLayoutPrefs.meters && ctx.meterAnimId == null)
+            startMeterAnim();
         if(ctx.detectMode) updateDetectMode();
     };
 }

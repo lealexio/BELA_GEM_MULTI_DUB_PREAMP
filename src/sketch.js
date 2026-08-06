@@ -44,8 +44,16 @@ var __belaPreampSketch = (() => {
 
   // gui/config.js
   var TAB_LIVE = 0;
-  var TAB_MASTER_EQ = 2;
-  var TAB_MAPPING = 3;
+  var TAB_MAPPING = 1;
+  var LIVE_TILES = [
+    { id: "siren", label: "Siren", pair: true, defaultOn: true },
+    { id: "mic", label: "Mic inputs", pair: true, defaultOn: true },
+    { id: "meters", label: "VU meters", pair: false, defaultOn: true },
+    { id: "switches", label: "Switches", pair: false, defaultOn: false },
+    { id: "console", label: "Console", pair: false, defaultOn: false },
+    { id: "masterEq", label: "Master EQ", pair: false, defaultOn: false }
+  ];
+  var LIVE_LAYOUT_STORAGE_KEY = "belaDubPreamp.liveLayout.v1";
   var DETECT_POT_MIN_DELTA = 0.25;
   var MUX_POTS_PER_MUX = 16;
   var MUX_RAW_SIZE = 64;
@@ -357,6 +365,9 @@ var __belaPreampSketch = (() => {
       downloadStatusEl: null,
       detectStatusEl: null,
       micLiveStatusEl: null,
+      liveLayoutPrefs: null,
+      masterEqTargets: [],
+      consoleLists: [],
       lastBelaRxMs: 0,
       belaRxFingerprint: ""
     };
@@ -656,7 +667,10 @@ letter-spacing:.04em;line-height:1.2;
 }
 
 /* --- Meters (canvas VU, horizontal) --- */
-#meters-wrap{display:flex;flex-direction:column;gap:10px;margin-top:4px}
+#meters-wrap{
+display:flex;flex-direction:column;gap:10px;
+margin:0;
+}
 .meters-columns{
 display:grid;
 grid-template-columns:repeat(2,minmax(0,1fr));
@@ -906,7 +920,7 @@ white-space:nowrap;text-overflow:ellipsis;overflow:hidden;
 #tab-content{padding:18px}
 #live-grid{
 display:grid;grid-template-columns:1fr 1fr;gap:12px;
-align-items:stretch;margin-bottom:12px;
+align-items:stretch;margin-bottom:0;
 }
 #live-grid > .card{
 height:100%;margin-bottom:0;
@@ -918,9 +932,50 @@ flex:1;
 }
 }
 
+#live-toolbar{
+display:flex;justify-content:flex-end;align-items:center;
+margin:0 0 10px;gap:8px;
+}
+.live-layout-btn{
+padding:6px 12px;font-size:11px;font-weight:700;letter-spacing:.04em;
+text-transform:uppercase;color:var(--muted);cursor:pointer;
+background:var(--bg-elev);border:1px solid var(--line);border-radius:7px;
+transition:background .12s,color .12s,border-color .12s;
+}
+.live-layout-btn:hover{color:var(--ink);border-color:#c8c8d0}
+.live-layout-btn.active{
+color:#fff;background:var(--ink);border-color:var(--ink);
+}
+.live-layout-panel{
+background:var(--bg-elev);border:1px solid var(--line);border-radius:var(--radius);
+box-shadow:var(--shadow);padding:12px 14px;margin-bottom:12px;
+}
+.live-layout-panel[hidden]{display:none!important}
+.live-layout-title{
+font-size:11px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;
+color:var(--ink-soft);margin-bottom:4px;
+}
+.live-layout-hint{
+font-size:11px;color:var(--muted);line-height:1.4;margin-bottom:10px;
+}
+.live-layout-list{
+display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:6px 12px;
+}
+.live-layout-row{
+display:flex;align-items:center;gap:8px;font-size:13px;font-weight:600;
+color:var(--ink);cursor:pointer;user-select:none;
+padding:6px 8px;border-radius:6px;background:var(--surface);border:1px solid var(--line-soft);
+}
+.live-layout-row input{width:15px;height:15px;accent-color:var(--ink);cursor:pointer}
+#live-board{display:flex;flex-direction:column;gap:12px}
+#live-board > .card,
+#live-board > #meters-wrap,
+#live-board > #live-grid{margin-bottom:0}
+#live-grid.live-grid-single{grid-template-columns:1fr}
+
 /* --- Live mic inputs --- */
 #mic-inputs-card{
-margin:0 0 12px;
+margin:0;
 max-width:100%;
 display:flex;flex-direction:column;
 }
@@ -992,24 +1047,24 @@ font-size:12px;background:#fff;
 }
 
 /* --- Master EQ curve --- */
-#master-eq-card{margin-bottom:12px}
-#master-eq-notice{
+#master-eq-card,.live-tile[data-tile="masterEq"]{margin-bottom:12px}
+#master-eq-notice,.master-eq-notice{
 font-size:12px;font-weight:700;color:#3a3a44;
 margin-bottom:6px;line-height:1.4;
 }
-#master-eq-caption{
+#master-eq-caption,.master-eq-caption{
 font-size:11px;color:#888;margin-bottom:10px;line-height:1.45;
 }
-#master-eq-wrap{
+#master-eq-wrap,.master-eq-wrap{
 width:100%;max-width:900px;margin:0 auto;
 }
-#master-eq-canvas{
+#master-eq-canvas,.master-eq-canvas{
 display:block;width:100%;
 height:240px;min-height:240px;
-border-radius:6px;background:#fafafa;
+border-radius:6px;background:transparent;
 }
 @media(min-width:720px){
-#master-eq-canvas{height:320px;min-height:320px}
+#master-eq-canvas,.master-eq-canvas{height:320px;min-height:320px}
 }
     `;
     document.head.appendChild(s);
@@ -1049,6 +1104,39 @@ border-radius:6px;background:#fafafa;
   }
   function hideP5Dom() {
     document.querySelectorAll("body > main").forEach((el2) => el2.remove());
+  }
+
+  // gui/live-layout.js
+  function defaultLiveLayout() {
+    const prefs = {};
+    LIVE_TILES.forEach((t) => {
+      prefs[t.id] = !!t.defaultOn;
+    });
+    return prefs;
+  }
+  function loadLiveLayout() {
+    const prefs = defaultLiveLayout();
+    try {
+      const raw = localStorage.getItem(LIVE_LAYOUT_STORAGE_KEY);
+      if (!raw) return prefs;
+      const parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed !== "object") return prefs;
+      LIVE_TILES.forEach((t) => {
+        if (typeof parsed[t.id] === "boolean")
+          prefs[t.id] = parsed[t.id];
+      });
+    } catch (_) {
+    }
+    return prefs;
+  }
+  function saveLiveLayout(prefs) {
+    try {
+      localStorage.setItem(LIVE_LAYOUT_STORAGE_KEY, JSON.stringify(prefs));
+    } catch (_) {
+    }
+  }
+  function isLiveTileOn(prefs, id) {
+    return !!(prefs && prefs[id]);
   }
 
   // gui/routing-config.js
@@ -1477,214 +1565,6 @@ border-radius:6px;background:#fafafa;
           peakDb.style.opacity = op;
       }
     }
-  }
-
-  // gui/dom/live.js
-  var _micRows = [null, null, null, null];
-  var _hpfDebounceTimers = [null, null, null, null];
-  var _micSyncHoldUntil = [0, 0, 0, 0];
-  var _hpfSyncHoldUntil = [0, 0, 0, 0];
-  var HPF_DEBOUNCE_MS = 150;
-  var MIC_SYNC_HOLD_MS = 2500;
-  function _holdMicSync(idx, kind) {
-    const until = Date.now() + MIC_SYNC_HOLD_MS;
-    if (kind === "mic" || kind === "both") _micSyncHoldUntil[idx] = until;
-    if (kind === "hpf" || kind === "both") _hpfSyncHoldUntil[idx] = until;
-  }
-  function _belaControlReady2() {
-    return typeof Bela !== "undefined" && Bela.control && Bela.control.ws && Bela.control.ws.readyState === 1;
-  }
-  function _sendMicControl(payload, desc, statusEl) {
-    if (!_belaControlReady2()) {
-      if (statusEl) {
-        statusEl.textContent = "Bela not connected \u2014 project must be running";
-        statusEl.className = "mic-live-status err";
-      }
-      return;
-    }
-    Bela.control.send(payload);
-    if (statusEl) {
-      statusEl.textContent = `Live: ${desc} (lost on Bela restart)`;
-      statusEl.className = "mic-live-status ok";
-    }
-  }
-  function buildLivePane() {
-    const pane = el("div", { id: "pane-live", className: "tab-pane active" });
-    const grid = el("div", { id: "live-grid" });
-    const sirenCard = el("div", { className: "card" });
-    sirenCard.appendChild(cardTitle("Siren"));
-    const sirenBody = el("div", { id: "siren-body" });
-    const hero = el("div", { id: "siren-hero" });
-    hero.innerHTML = `
-        <div id="siren-hero-top">
-            <div id="siren-name">\u2014</div>
-            <div id="siren-gate">
-                <span id="siren-gate-dot"></span>
-                <span class="gate-lbl">Gate</span>
-            </div>
-        </div>
-        <div id="siren-mod-row">
-            <span class="siren-mod-label">Mod</span>
-            <div id="siren-mod-track"><div id="siren-mod-fill"></div></div>
-            <span id="siren-mod-lbl">0%</span>
-        </div>
-    `;
-    sirenBody.appendChild(hero);
-    const presetsDiv = el("div", { id: "siren-presets" });
-    getContext().sirenPresetPills = [];
-    SIREN_PRESETS.forEach((name) => {
-      const pill = el("div", { className: "spreset" });
-      pill.textContent = name;
-      pill.title = name;
-      presetsDiv.appendChild(pill);
-      getContext().sirenPresetPills.push(pill);
-    });
-    sirenBody.appendChild(presetsDiv);
-    sirenCard.appendChild(sirenBody);
-    getContext().sirenNameEl = hero.querySelector("#siren-name");
-    getContext().sirenGateEl = hero.querySelector("#siren-gate-dot");
-    getContext().sirenModFill = hero.querySelector("#siren-mod-fill");
-    getContext().sirenModLbl = hero.querySelector("#siren-mod-lbl");
-    grid.appendChild(sirenCard);
-    grid.appendChild(buildMicInputsCard());
-    pane.appendChild(grid);
-    pane.appendChild(buildMetersSection());
-    return pane;
-  }
-  function buildMicInputsCard() {
-    const card = el("div", { className: "card", id: "mic-inputs-card" });
-    card.appendChild(cardTitle("Mic inputs"));
-    const note = el("div", { className: "mic-live-note" });
-    note.textContent = "Mic bypasses ParamEQ / filters / kills. HPF Hz cuts subs (0 = off). Live \u2014 lost on restart.";
-    card.appendChild(note);
-    const statusEl = el("div", { className: "mic-live-status" });
-    statusEl.textContent = "Waiting for Bela.control\u2026";
-    card.appendChild(statusEl);
-    getContext().micLiveStatusEl = statusEl;
-    const list = el("div", { className: "mic-live-list" });
-    for (let i = 0; i < 4; ++i) {
-      const auxN = i + 1;
-      const row = el("div", { className: "mic-live-row" });
-      const label = el("span", { className: "mic-live-label" });
-      label.textContent = "AUX" + auxN;
-      const micWrap = el("label", { className: "mic-toggle" });
-      const micCb = el("input", { type: "checkbox", className: "mic-toggle-input" });
-      micCb.title = "Mic mode";
-      const track = el("span", { className: "mic-toggle-track", "aria-hidden": "true" });
-      track.appendChild(el("span", { className: "mic-toggle-thumb" }));
-      const micLbl = el("span", { className: "mic-toggle-text" });
-      micLbl.textContent = "Mic";
-      micWrap.appendChild(micCb);
-      micWrap.appendChild(track);
-      micWrap.appendChild(micLbl);
-      const hpfWrap = el("label", { className: "mic-live-hpf" });
-      const hpfLbl = el("span");
-      hpfLbl.textContent = "HPF";
-      const hpfInp = el("input", {
-        type: "number",
-        min: String(MIC_HPF_HZ_MIN),
-        max: String(MIC_HPF_HZ_MAX),
-        step: "1",
-        value: "0"
-      });
-      hpfInp.title = "Mic HPF Hz (0 = off)";
-      const hpfUnit = el("span", { className: "mic-live-hpf-unit" });
-      hpfUnit.textContent = "Hz";
-      hpfWrap.appendChild(hpfLbl);
-      hpfWrap.appendChild(hpfInp);
-      hpfWrap.appendChild(hpfUnit);
-      micCb.addEventListener("change", () => {
-        _holdMicSync(i, "mic");
-        _sendMicControl(
-          { event: "custom", auxMic: auxN, mic: !!micCb.checked },
-          `AUX${auxN} mic ${micCb.checked ? "on" : "off"}`,
-          statusEl
-        );
-      });
-      const sendHpf = () => {
-        let hz = parseFloat(hpfInp.value);
-        if (isNaN(hz) || hz < 0) hz = 0;
-        hz = Math.min(MIC_HPF_HZ_MAX, Math.max(MIC_HPF_HZ_MIN, Math.round(hz)));
-        hpfInp.value = String(hz);
-        _holdMicSync(i, "hpf");
-        _sendMicControl(
-          { event: "custom", auxHpf: auxN, hpf: hz },
-          `AUX${auxN} HPF ${hz} Hz`,
-          statusEl
-        );
-      };
-      hpfInp.addEventListener("change", sendHpf);
-      hpfInp.addEventListener("input", () => {
-        if (_hpfDebounceTimers[i]) clearTimeout(_hpfDebounceTimers[i]);
-        _hpfDebounceTimers[i] = setTimeout(sendHpf, HPF_DEBOUNCE_MS);
-      });
-      row.appendChild(label);
-      row.appendChild(micWrap);
-      row.appendChild(hpfWrap);
-      list.appendChild(row);
-      _micRows[i] = {
-        micCb,
-        hpfInp,
-        /** Silent UI update from Bela buffer 6 (no control send). */
-        setMic(on) {
-          if (micCb.checked === !!on) return;
-          micCb.checked = !!on;
-        },
-        setHpf(hz) {
-          const n = Math.round(hz);
-          if (String(hpfInp.value) === String(n)) return;
-          if (document.activeElement === hpfInp) return;
-          hpfInp.value = String(n);
-        }
-      };
-    }
-    card.appendChild(list);
-    const poll = setInterval(() => {
-      if (_belaControlReady2()) {
-        statusEl.textContent = "Live \u2014 lost on Bela restart";
-        statusEl.className = "mic-live-status ok";
-        clearInterval(poll);
-      }
-    }, 500);
-    return card;
-  }
-  function syncMicInputs(meta) {
-    if (!meta || meta.length <= CONFIG_META.HPF_AUX4) return;
-    const M = CONFIG_META;
-    const now = Date.now();
-    const micKeys = [M.MIC_AUX1, M.MIC_AUX2, M.MIC_AUX3, M.MIC_AUX4];
-    const hpfKeys = [M.HPF_AUX1, M.HPF_AUX2, M.HPF_AUX3, M.HPF_AUX4];
-    for (let i = 0; i < 4; ++i) {
-      const row = _micRows[i];
-      if (!row) continue;
-      const remoteMic = meta[micKeys[i]] > 0.5;
-      const remoteHpf = meta[hpfKeys[i]] != null ? meta[hpfKeys[i]] : 0;
-      if (now < _micSyncHoldUntil[i]) {
-        if (row.micCb.checked === remoteMic)
-          _micSyncHoldUntil[i] = 0;
-      } else {
-        row.setMic(remoteMic);
-      }
-      if (now < _hpfSyncHoldUntil[i]) {
-        if (Math.round(Number(row.hpfInp.value)) === Math.round(remoteHpf))
-          _hpfSyncHoldUntil[i] = 0;
-      } else {
-        row.setHpf(remoteHpf);
-      }
-    }
-  }
-  function updateSiren() {
-    const idx = Math.max(0, Math.min(Math.round(getContext().sirenState[0]), SIREN_PRESETS.length - 1));
-    const gate = getContext().sirenState[1] > 0.5;
-    const mod = getContext().sirenState[2];
-    getContext().sirenPresetPills.forEach((pill, i) => {
-      const isActive = i === idx;
-      pill.className = "spreset" + (isActive ? " active" : "") + (isActive && gate ? " gate" : "");
-    });
-    if (getContext().sirenNameEl) getContext().sirenNameEl.textContent = SIREN_PRESETS[idx];
-    if (getContext().sirenGateEl) getContext().sirenGateEl.className = gate ? "on" : "";
-    if (getContext().sirenModFill) getContext().sirenModFill.style.width = (mod * 100).toFixed(1) + "%";
-    if (getContext().sirenModLbl) getContext().sirenModLbl.textContent = Math.round(mod * 100) + "%";
   }
 
   // gui/dom/mapping.js
@@ -2467,13 +2347,12 @@ border-radius:6px;background:#fafafa;
   }
 
   // gui/dom/console.js
-  function buildConsolePane() {
-    const pane = el("div", { id: "pane-console", className: "tab-pane" });
-    const consoleCard = el("div", { className: "card" });
+  function buildConsoleCard(listId) {
+    const card = el("div", { className: "card live-tile" });
+    card.dataset.tile = "console";
     const consoleHdr = el("div", { className: "console-header" });
     consoleHdr.appendChild(cardTitle("Console \u2014 last change"));
     const filterBar = el("div", { className: "console-filter" });
-    getContext().consoleFilterBtns = [];
     [
       { mode: "normal", label: "Normal" },
       { mode: "detailed", label: "D\xE9taill\xE9" }
@@ -2486,18 +2365,26 @@ border-radius:6px;background:#fafafa;
       btn.dataset.mode = mode;
       btn.addEventListener("click", () => setConsoleFilterMode(mode));
       filterBar.appendChild(btn);
+      if (!getContext().consoleFilterBtns)
+        getContext().consoleFilterBtns = [];
       getContext().consoleFilterBtns.push(btn);
     });
     consoleHdr.appendChild(filterBar);
-    consoleCard.appendChild(consoleHdr);
-    getContext().consoleList = el("ul", { id: "console-list" });
-    consoleCard.appendChild(getContext().consoleList);
+    card.appendChild(consoleHdr);
+    const list = el("ul", { id: listId || "console-list", className: "console-list" });
+    card.appendChild(list);
+    if (!getContext().consoleLists)
+      getContext().consoleLists = [];
+    getContext().consoleLists.push(list);
+    getContext().consoleList = list;
     renderConsole();
-    pane.appendChild(consoleCard);
-    const swCard = el("div", { className: "card" });
+    return card;
+  }
+  function buildSwitchesCard() {
+    const swCard = el("div", { className: "card live-tile" });
+    swCard.dataset.tile = "switches";
     swCard.appendChild(cardTitle("Switches"));
     const swGrid = el("div", { className: "sw-grid" });
-    getContext().switchPills = [];
     SWITCH_GROUPS.forEach((group) => {
       const grp = el("div", { className: "sw-group sw-group-" + group.type });
       const gtitle = el("div", { className: "sw-group-title" });
@@ -2511,8 +2398,7 @@ border-radius:6px;background:#fafafa;
       swGrid.appendChild(grp);
     });
     swCard.appendChild(swGrid);
-    pane.appendChild(swCard);
-    return pane;
+    return swCard;
   }
   function switchDisplayName(name) {
     if (name.indexOf("KILL_") === 0) return name.slice(5);
@@ -2525,6 +2411,7 @@ border-radius:6px;background:#fafafa;
   }
   function buildSwitchTile(index, name, type) {
     const tile = el("div", { className: "sw-tile sw-tile-" + type });
+    tile.dataset.swIndex = String(index);
     const led = el("div", { className: "sw-led" });
     const lbl = el("span", { className: "sw-tile-name" });
     lbl.textContent = switchDisplayName(name);
@@ -2545,7 +2432,7 @@ border-radius:6px;background:#fafafa;
     if (mode !== "normal" && mode !== "detailed") return;
     if (mode === getContext().consoleFilterMode) return;
     getContext().consoleFilterMode = mode;
-    getContext().consoleFilterBtns.forEach((btn) => {
+    document.querySelectorAll(".console-filter-btn").forEach((btn) => {
       btn.classList.toggle("active", btn.dataset.mode === mode);
     });
     getContext().recentChanges = [];
@@ -2617,19 +2504,27 @@ border-radius:6px;background:#fafafa;
       getContext().recentChanges.length = MAX_CONSOLE;
   }
   function renderConsole() {
-    if (!getContext().consoleList) return;
-    getContext().consoleList.innerHTML = "";
-    for (let i = 0; i < MAX_CONSOLE; i++) {
-      getContext().consoleList.appendChild(
-        buildConsoleRow(getContext().recentChanges[i] || null, i)
-      );
-    }
+    const lists = getContext().consoleLists || [];
+    if (getContext().consoleList && lists.indexOf(getContext().consoleList) < 0)
+      lists.push(getContext().consoleList);
+    getContext().consoleLists = lists;
+    if (!lists.length) return;
+    lists.forEach((list) => {
+      if (!list) return;
+      list.innerHTML = "";
+      for (let i = 0; i < MAX_CONSOLE; i++) {
+        list.appendChild(
+          buildConsoleRow(getContext().recentChanges[i] || null, i)
+        );
+      }
+    });
   }
   function updateSwitches() {
-    for (let i = 0; i < SWITCH_NAMES.length; i++) {
-      const tile = getContext().switchPills[i];
-      if (tile) tile.classList.toggle("on", getContext().switchStates[i] > 0.5);
-    }
+    document.querySelectorAll(".sw-tile[data-sw-index]").forEach((tile) => {
+      const i = parseInt(tile.getAttribute("data-sw-index"), 10);
+      if (!isNaN(i))
+        tile.classList.toggle("on", getContext().switchStates[i] > 0.5);
+    });
   }
 
   // gui/dom/masterEq.js
@@ -2888,21 +2783,20 @@ border-radius:6px;background:#fafafa;
     const t = (cfg.Y_MAX_DB - db) / (cfg.Y_MAX_DB - cfg.Y_MIN_DB);
     return plotY + t * plotH;
   }
-  function drawMasterEqCurve() {
-    if (!getContext().masterEqCtx || !getContext().masterEqCanvas) return;
+  function drawMasterEqOnCanvas(canvas, ctx2d) {
+    if (!canvas || !ctx2d) return;
     const cfg = MASTER_EQ_CONFIG;
     const dpr = window.devicePixelRatio || 1;
-    const cssW = getContext().masterEqCanvas.clientWidth || 800;
-    const cssH = getContext().masterEqCanvas.clientHeight || 240;
+    const cssW = canvas.clientWidth || 800;
+    const cssH = canvas.clientHeight || 240;
     const pixW = Math.round(cssW * dpr);
     const pixH = Math.round(cssH * dpr);
-    if (getContext().masterEqCanvas.width !== pixW || getContext().masterEqCanvas.height !== pixH) {
-      getContext().masterEqCanvas.width = pixW;
-      getContext().masterEqCanvas.height = pixH;
+    if (canvas.width !== pixW || canvas.height !== pixH) {
+      canvas.width = pixW;
+      canvas.height = pixH;
     }
-    const ctx = getContext().masterEqCtx;
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.clearRect(0, 0, cssW, cssH);
+    ctx2d.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx2d.clearRect(0, 0, cssW, cssH);
     const padL = 44;
     const padR = 14;
     const padT = 14;
@@ -2911,109 +2805,452 @@ border-radius:6px;background:#fafafa;
     const plotY = padT;
     const plotW = cssW - padL - padR;
     const plotH = cssH - padT - padB;
-    ctx.fillStyle = "#fafafa";
-    ctx.fillRect(plotX, plotY, plotW, plotH);
-    ctx.strokeStyle = "#e8e8ec";
-    ctx.lineWidth = 1;
+    ctx2d.strokeStyle = "#e8e8ec";
+    ctx2d.lineWidth = 1;
     for (let db = cfg.Y_MIN_DB; db <= cfg.Y_MAX_DB; db += 6) {
       const y = masterEqDbToY(db, plotY, plotH);
-      ctx.beginPath();
-      ctx.moveTo(plotX, y);
-      ctx.lineTo(plotX + plotW, y);
-      ctx.stroke();
+      ctx2d.beginPath();
+      ctx2d.moveTo(plotX, y);
+      ctx2d.lineTo(plotX + plotW, y);
+      ctx2d.stroke();
     }
     MASTER_EQ_FREQ_TICKS.forEach((hz) => {
       const x = masterEqFreqToX(hz, plotX, plotW);
-      ctx.beginPath();
-      ctx.moveTo(x, plotY);
-      ctx.lineTo(x, plotY + plotH);
-      ctx.stroke();
+      ctx2d.beginPath();
+      ctx2d.moveTo(x, plotY);
+      ctx2d.lineTo(x, plotY + plotH);
+      ctx2d.stroke();
     });
-    ctx.strokeStyle = "#bbb";
-    ctx.setLineDash([4, 4]);
+    ctx2d.strokeStyle = "#bbb";
+    ctx2d.setLineDash([4, 4]);
     const y0 = masterEqDbToY(0, plotY, plotH);
-    ctx.beginPath();
-    ctx.moveTo(plotX, y0);
-    ctx.lineTo(plotX + plotW, y0);
-    ctx.stroke();
-    ctx.setLineDash([]);
-    ctx.strokeStyle = "#ccc";
-    ctx.strokeRect(plotX, plotY, plotW, plotH);
-    ctx.fillStyle = "#888";
-    ctx.font = "10px monospace";
-    ctx.textAlign = "right";
-    ctx.textBaseline = "middle";
+    ctx2d.beginPath();
+    ctx2d.moveTo(plotX, y0);
+    ctx2d.lineTo(plotX + plotW, y0);
+    ctx2d.stroke();
+    ctx2d.setLineDash([]);
+    ctx2d.strokeStyle = "#ccc";
+    ctx2d.strokeRect(plotX, plotY, plotW, plotH);
+    ctx2d.fillStyle = "#888";
+    ctx2d.font = "10px monospace";
+    ctx2d.textAlign = "right";
+    ctx2d.textBaseline = "middle";
     for (let db = cfg.Y_MIN_DB; db <= cfg.Y_MAX_DB; db += 6) {
       const y = masterEqDbToY(db, plotY, plotH);
-      ctx.fillText((db > 0 ? "+" : "") + db + " dB", padL - 6, y);
+      ctx2d.fillText((db > 0 ? "+" : "") + db + " dB", padL - 6, y);
     }
-    ctx.textAlign = "center";
-    ctx.textBaseline = "top";
+    ctx2d.textAlign = "center";
+    ctx2d.textBaseline = "top";
     MASTER_EQ_FREQ_TICKS.forEach((hz, i) => {
       const x = masterEqFreqToX(hz, plotX, plotW);
       const labelY = plotY + plotH + 6 + i % 2 * 12;
-      ctx.fillText(formatMasterEqFreqLabel(hz), x, labelY);
+      ctx2d.fillText(formatMasterEqFreqLabel(hz), x, labelY);
     });
-    ctx.strokeStyle = "#e74c3c";
-    ctx.lineWidth = 2;
-    ctx.beginPath();
+    const curve = getContext().masterEqCurveDb;
+    ctx2d.strokeStyle = "#e74c3c";
+    ctx2d.lineWidth = 2;
+    ctx2d.beginPath();
     for (let i = 0; i < cfg.CURVE_POINTS; i++) {
       const x = masterEqFreqToX(masterEqFreqs[i], plotX, plotW);
-      const y = masterEqDbToY(getContext().masterEqCurveDb[i], plotY, plotH);
-      if (i === 0) ctx.moveTo(x, y);
-      else ctx.lineTo(x, y);
+      const y = masterEqDbToY(curve[i], plotY, plotH);
+      if (i === 0) ctx2d.moveTo(x, y);
+      else ctx2d.lineTo(x, y);
     }
-    ctx.stroke();
-    ctx.fillStyle = "#e74c3c";
-    ctx.beginPath();
+    ctx2d.stroke();
+    ctx2d.fillStyle = "#e74c3c";
+    ctx2d.beginPath();
     for (let i = 0; i < cfg.CURVE_POINTS; i++) {
       const x = masterEqFreqToX(masterEqFreqs[i], plotX, plotW);
-      const y = masterEqDbToY(getContext().masterEqCurveDb[i], plotY, plotH);
-      if (i === 0) ctx.moveTo(x, y);
-      else ctx.lineTo(x, y);
+      const y = masterEqDbToY(curve[i], plotY, plotH);
+      if (i === 0) ctx2d.moveTo(x, y);
+      else ctx2d.lineTo(x, y);
     }
-    ctx.lineTo(
+    ctx2d.lineTo(
       masterEqFreqToX(masterEqFreqs[cfg.CURVE_POINTS - 1], plotX, plotW),
       masterEqDbToY(cfg.Y_MIN_DB, plotY, plotH)
     );
-    ctx.lineTo(
+    ctx2d.lineTo(
       masterEqFreqToX(masterEqFreqs[0], plotX, plotW),
       masterEqDbToY(cfg.Y_MIN_DB, plotY, plotH)
     );
-    ctx.closePath();
-    ctx.globalAlpha = 0.08;
-    ctx.fill();
-    ctx.globalAlpha = 1;
+    ctx2d.closePath();
+    ctx2d.globalAlpha = 0.08;
+    ctx2d.fill();
+    ctx2d.globalAlpha = 1;
+  }
+  function drawMasterEqCurve() {
+    const targets = getContext().masterEqTargets || [];
+    if (getContext().masterEqCanvas && getContext().masterEqCtx) {
+      const has = targets.some((t) => t.canvas === getContext().masterEqCanvas);
+      if (!has)
+        targets.push({
+          canvas: getContext().masterEqCanvas,
+          ctx: getContext().masterEqCtx
+        });
+    }
+    getContext().masterEqTargets = targets.filter((t) => t.canvas && t.canvas.isConnected);
+    getContext().masterEqTargets.forEach((t) => drawMasterEqOnCanvas(t.canvas, t.ctx));
   }
   function updateMasterEq() {
     computeMasterCurve(getContext().potValues, getContext().switchStates);
-    if (getContext().currentTab === TAB_MASTER_EQ)
+    const liveHasEq = !!(getContext().liveLayoutPrefs && getContext().liveLayoutPrefs.masterEq);
+    if (liveHasEq && getContext().currentTab === TAB_LIVE)
       drawMasterEqCurve();
   }
   function resizeMasterEqCanvas() {
-    if (getContext().masterEqCanvas && getContext().currentTab === TAB_MASTER_EQ)
-      drawMasterEqCurve();
+    drawMasterEqCurve();
   }
-  function buildMasterEqPane() {
-    const pane = el("div", { id: "pane-master-eq", className: "tab-pane" });
-    const card = el("div", { id: "master-eq-card", className: "card" });
+  function buildMasterEqCard(opts) {
+    const canvasId = opts && opts.canvasId || "live-master-eq-canvas";
+    const card = el("div", {
+      id: "live-master-eq-card",
+      className: "card live-tile"
+    });
+    card.dataset.tile = "masterEq";
     card.appendChild(cardTitle("Master EQ \u2014 frequency response"));
-    const notice = el("div", { id: "master-eq-notice" });
+    const notice = el("div", { className: "master-eq-notice" });
     notice.textContent = "Theoretical representation \u2014 the curve is recalculated from pot values, not a measurement of the actual audio signal.";
     card.appendChild(notice);
-    const caption = el("div", { id: "master-eq-caption" });
+    const caption = el("div", { className: "master-eq-caption" });
     caption.textContent = "Dry master chain: Parametric EQ \u2192 Graphic EQ \u2192 HPF/LPF \u2192 Band Trim \u2192 Kill switches. Excludes master gain and FX returns.";
     card.appendChild(caption);
-    const wrap = el("div", { id: "master-eq-wrap" });
-    getContext().masterEqCanvas = el("canvas", { id: "master-eq-canvas" });
-    getContext().masterEqCanvas.width = 800;
-    getContext().masterEqCanvas.height = 320;
-    getContext().masterEqCtx = getContext().masterEqCanvas.getContext("2d");
-    wrap.appendChild(getContext().masterEqCanvas);
+    const wrap = el("div", { className: "master-eq-wrap" });
+    const canvas = el("canvas", { id: canvasId, className: "master-eq-canvas" });
+    canvas.width = 800;
+    canvas.height = 320;
+    const ctx2d = canvas.getContext("2d");
+    wrap.appendChild(canvas);
     card.appendChild(wrap);
-    pane.appendChild(card);
-    computeMasterCurve(getContext().potValues, getContext().switchStates);
+    if (!getContext().masterEqTargets)
+      getContext().masterEqTargets = [];
+    getContext().masterEqTargets.push({ canvas, ctx: ctx2d });
+    getContext().masterEqCanvas = canvas;
+    getContext().masterEqCtx = ctx2d;
+    return card;
+  }
+
+  // gui/dom/live.js
+  var _micRows = [null, null, null, null];
+  var _hpfDebounceTimers = [null, null, null, null];
+  var _micSyncHoldUntil = [0, 0, 0, 0];
+  var _hpfSyncHoldUntil = [0, 0, 0, 0];
+  var HPF_DEBOUNCE_MS = 150;
+  var MIC_SYNC_HOLD_MS = 2500;
+  var _liveBoard = null;
+  var _layoutPanel = null;
+  function _holdMicSync(idx, kind) {
+    const until = Date.now() + MIC_SYNC_HOLD_MS;
+    if (kind === "mic" || kind === "both") _micSyncHoldUntil[idx] = until;
+    if (kind === "hpf" || kind === "both") _hpfSyncHoldUntil[idx] = until;
+  }
+  function _belaControlReady2() {
+    return typeof Bela !== "undefined" && Bela.control && Bela.control.ws && Bela.control.ws.readyState === 1;
+  }
+  function _sendMicControl(payload, desc, statusEl) {
+    if (!_belaControlReady2()) {
+      if (statusEl) {
+        statusEl.textContent = "Bela not connected \u2014 project must be running";
+        statusEl.className = "mic-live-status err";
+      }
+      return;
+    }
+    Bela.control.send(payload);
+    if (statusEl) {
+      statusEl.textContent = `Live: ${desc} (lost on Bela restart)`;
+      statusEl.className = "mic-live-status ok";
+    }
+  }
+  function buildSirenCard() {
+    const sirenCard = el("div", { className: "card live-tile" });
+    sirenCard.dataset.tile = "siren";
+    sirenCard.appendChild(cardTitle("Siren"));
+    const sirenBody = el("div", { id: "siren-body" });
+    const hero = el("div", { id: "siren-hero" });
+    hero.innerHTML = `
+        <div id="siren-hero-top">
+            <div id="siren-name">\u2014</div>
+            <div id="siren-gate">
+                <span id="siren-gate-dot"></span>
+                <span class="gate-lbl">Gate</span>
+            </div>
+        </div>
+        <div id="siren-mod-row">
+            <span class="siren-mod-label">Mod</span>
+            <div id="siren-mod-track"><div id="siren-mod-fill"></div></div>
+            <span id="siren-mod-lbl">0%</span>
+        </div>
+    `;
+    sirenBody.appendChild(hero);
+    const presetsDiv = el("div", { id: "siren-presets" });
+    getContext().sirenPresetPills = [];
+    SIREN_PRESETS.forEach((name) => {
+      const pill = el("div", { className: "spreset" });
+      pill.textContent = name;
+      pill.title = name;
+      presetsDiv.appendChild(pill);
+      getContext().sirenPresetPills.push(pill);
+    });
+    sirenBody.appendChild(presetsDiv);
+    sirenCard.appendChild(sirenBody);
+    getContext().sirenNameEl = hero.querySelector("#siren-name");
+    getContext().sirenGateEl = hero.querySelector("#siren-gate-dot");
+    getContext().sirenModFill = hero.querySelector("#siren-mod-fill");
+    getContext().sirenModLbl = hero.querySelector("#siren-mod-lbl");
+    return sirenCard;
+  }
+  function buildMicInputsCard() {
+    const card = el("div", {
+      className: "card live-tile",
+      id: "mic-inputs-card"
+    });
+    card.dataset.tile = "mic";
+    card.appendChild(cardTitle("Mic inputs"));
+    const note = el("div", { className: "mic-live-note" });
+    note.textContent = "Mic bypasses ParamEQ / filters / kills. HPF Hz cuts subs (0 = off). Live \u2014 lost on restart.";
+    card.appendChild(note);
+    const statusEl = el("div", { className: "mic-live-status" });
+    statusEl.textContent = "Waiting for Bela.control\u2026";
+    card.appendChild(statusEl);
+    getContext().micLiveStatusEl = statusEl;
+    const list = el("div", { className: "mic-live-list" });
+    for (let i = 0; i < 4; ++i) {
+      const auxN = i + 1;
+      const row = el("div", { className: "mic-live-row" });
+      const label = el("span", { className: "mic-live-label" });
+      label.textContent = "AUX" + auxN;
+      const micWrap = el("label", { className: "mic-toggle" });
+      const micCb = el("input", { type: "checkbox", className: "mic-toggle-input" });
+      micCb.title = "Mic mode";
+      const track = el("span", { className: "mic-toggle-track", "aria-hidden": "true" });
+      track.appendChild(el("span", { className: "mic-toggle-thumb" }));
+      const micLbl = el("span", { className: "mic-toggle-text" });
+      micLbl.textContent = "Mic";
+      micWrap.appendChild(micCb);
+      micWrap.appendChild(track);
+      micWrap.appendChild(micLbl);
+      const hpfWrap = el("label", { className: "mic-live-hpf" });
+      const hpfLbl = el("span");
+      hpfLbl.textContent = "HPF";
+      const hpfInp = el("input", {
+        type: "number",
+        min: String(MIC_HPF_HZ_MIN),
+        max: String(MIC_HPF_HZ_MAX),
+        step: "1",
+        value: "0"
+      });
+      hpfInp.title = "Mic HPF Hz (0 = off)";
+      const hpfUnit = el("span", { className: "mic-live-hpf-unit" });
+      hpfUnit.textContent = "Hz";
+      hpfWrap.appendChild(hpfLbl);
+      hpfWrap.appendChild(hpfInp);
+      hpfWrap.appendChild(hpfUnit);
+      micCb.addEventListener("change", () => {
+        _holdMicSync(i, "mic");
+        _sendMicControl(
+          { event: "custom", auxMic: auxN, mic: !!micCb.checked },
+          `AUX${auxN} mic ${micCb.checked ? "on" : "off"}`,
+          statusEl
+        );
+      });
+      const sendHpf = () => {
+        let hz = parseFloat(hpfInp.value);
+        if (isNaN(hz) || hz < 0) hz = 0;
+        hz = Math.min(MIC_HPF_HZ_MAX, Math.max(MIC_HPF_HZ_MIN, Math.round(hz)));
+        hpfInp.value = String(hz);
+        _holdMicSync(i, "hpf");
+        _sendMicControl(
+          { event: "custom", auxHpf: auxN, hpf: hz },
+          `AUX${auxN} HPF ${hz} Hz`,
+          statusEl
+        );
+      };
+      hpfInp.addEventListener("change", sendHpf);
+      hpfInp.addEventListener("input", () => {
+        if (_hpfDebounceTimers[i]) clearTimeout(_hpfDebounceTimers[i]);
+        _hpfDebounceTimers[i] = setTimeout(sendHpf, HPF_DEBOUNCE_MS);
+      });
+      row.appendChild(label);
+      row.appendChild(micWrap);
+      row.appendChild(hpfWrap);
+      list.appendChild(row);
+      _micRows[i] = {
+        micCb,
+        hpfInp,
+        setMic(on) {
+          if (micCb.checked === !!on) return;
+          micCb.checked = !!on;
+        },
+        setHpf(hz) {
+          const n = Math.round(hz);
+          if (String(hpfInp.value) === String(n)) return;
+          if (document.activeElement === hpfInp) return;
+          hpfInp.value = String(n);
+        }
+      };
+    }
+    card.appendChild(list);
+    const poll = setInterval(() => {
+      if (_belaControlReady2()) {
+        statusEl.textContent = "Live \u2014 lost on Bela restart";
+        statusEl.className = "mic-live-status ok";
+        clearInterval(poll);
+      }
+    }, 500);
+    return card;
+  }
+  function buildMetersTile() {
+    const wrap = buildMetersSection();
+    wrap.classList.add("live-tile");
+    wrap.dataset.tile = "meters";
+    return wrap;
+  }
+  function buildLayoutPanel(prefs) {
+    const panel = el("div", {
+      id: "live-layout-panel",
+      className: "live-layout-panel",
+      hidden: true
+    });
+    const title = el("div", { className: "live-layout-title" });
+    title.textContent = "Live layout";
+    panel.appendChild(title);
+    const hint = el("p", { className: "live-layout-hint" });
+    hint.textContent = "Choose which tiles appear on Live. Saved in this browser.";
+    panel.appendChild(hint);
+    const list = el("div", { className: "live-layout-list" });
+    LIVE_TILES.forEach((tile) => {
+      const row = el("label", { className: "live-layout-row" });
+      const cb = el("input", { type: "checkbox" });
+      cb.checked = isLiveTileOn(prefs, tile.id);
+      cb.dataset.tileId = tile.id;
+      cb.addEventListener("change", () => {
+        const p = getContext().liveLayoutPrefs;
+        p[tile.id] = cb.checked;
+        saveLiveLayout(p);
+        renderLiveBoard();
+      });
+      const lbl = el("span");
+      lbl.textContent = tile.label;
+      row.appendChild(cb);
+      row.appendChild(lbl);
+      list.appendChild(row);
+    });
+    panel.appendChild(list);
+    return panel;
+  }
+  function renderLiveBoard() {
+    if (!_liveBoard) return;
+    const prefs = getContext().liveLayoutPrefs;
+    const hadMeters = (getContext().meterVu || []).some(Boolean);
+    _liveBoard.innerHTML = "";
+    if (getContext().masterEqTargets) {
+      getContext().masterEqTargets = getContext().masterEqTargets.filter(
+        (t) => t.canvas && t.canvas.isConnected
+      );
+    }
+    getContext().consoleLists = (getContext().consoleLists || []).filter((l) => l.isConnected);
+    getContext().consoleFilterBtns = (getContext().consoleFilterBtns || []).filter((b) => b.isConnected);
+    const showSiren = isLiveTileOn(prefs, "siren");
+    const showMic = isLiveTileOn(prefs, "mic");
+    if (showSiren || showMic) {
+      const grid = el("div", { id: "live-grid" });
+      if (showSiren) grid.appendChild(buildSirenCard());
+      if (showMic) grid.appendChild(buildMicInputsCard());
+      if (showSiren !== showMic)
+        grid.classList.add("live-grid-single");
+      _liveBoard.appendChild(grid);
+    }
+    if (isLiveTileOn(prefs, "meters"))
+      _liveBoard.appendChild(buildMetersTile());
+    if (isLiveTileOn(prefs, "switches"))
+      _liveBoard.appendChild(buildSwitchesCard());
+    if (isLiveTileOn(prefs, "console"))
+      _liveBoard.appendChild(buildConsoleCard("live-console-list"));
+    if (isLiveTileOn(prefs, "masterEq")) {
+      _liveBoard.appendChild(buildMasterEqCard({
+        canvasId: "live-master-eq-canvas"
+      }));
+      drawMasterEqCurve();
+    }
+    const hasMeters = isLiveTileOn(prefs, "meters");
+    if (getContext().currentTab === TAB_LIVE) {
+      if (hasMeters) {
+        getContext().meterVu.forEach((vu) => {
+          if (vu) vu.resize();
+        });
+        startMeterAnim();
+      } else if (hadMeters) {
+        stopMeterAnim();
+        getContext().meterVu = [];
+      }
+    }
+  }
+  function buildLivePane() {
+    const pane = el("div", { id: "pane-live", className: "tab-pane active" });
+    const prefs = loadLiveLayout();
+    getContext().liveLayoutPrefs = prefs;
+    const toolbar = el("div", { id: "live-toolbar" });
+    const layoutBtn = el("button", {
+      type: "button",
+      id: "live-layout-btn",
+      className: "live-layout-btn",
+      title: "Choose Live tiles"
+    });
+    layoutBtn.textContent = "Layout";
+    layoutBtn.addEventListener("click", () => {
+      if (!_layoutPanel) return;
+      const open = _layoutPanel.hasAttribute("hidden");
+      if (open) _layoutPanel.removeAttribute("hidden");
+      else _layoutPanel.setAttribute("hidden", "");
+      layoutBtn.classList.toggle("active", open);
+    });
+    toolbar.appendChild(layoutBtn);
+    pane.appendChild(toolbar);
+    _layoutPanel = buildLayoutPanel(prefs);
+    pane.appendChild(_layoutPanel);
+    _liveBoard = el("div", { id: "live-board" });
+    pane.appendChild(_liveBoard);
+    renderLiveBoard();
     return pane;
+  }
+  function syncMicInputs(meta) {
+    if (!meta || meta.length <= CONFIG_META.HPF_AUX4) return;
+    const M = CONFIG_META;
+    const now = Date.now();
+    const micKeys = [M.MIC_AUX1, M.MIC_AUX2, M.MIC_AUX3, M.MIC_AUX4];
+    const hpfKeys = [M.HPF_AUX1, M.HPF_AUX2, M.HPF_AUX3, M.HPF_AUX4];
+    for (let i = 0; i < 4; ++i) {
+      const row = _micRows[i];
+      if (!row) continue;
+      const remoteMic = meta[micKeys[i]] > 0.5;
+      const remoteHpf = meta[hpfKeys[i]] != null ? meta[hpfKeys[i]] : 0;
+      if (now < _micSyncHoldUntil[i]) {
+        if (row.micCb.checked === remoteMic)
+          _micSyncHoldUntil[i] = 0;
+      } else {
+        row.setMic(remoteMic);
+      }
+      if (now < _hpfSyncHoldUntil[i]) {
+        if (Math.round(Number(row.hpfInp.value)) === Math.round(remoteHpf))
+          _hpfSyncHoldUntil[i] = 0;
+      } else {
+        row.setHpf(remoteHpf);
+      }
+    }
+  }
+  function updateSiren() {
+    if (!getContext().sirenPresetPills || !getContext().sirenPresetPills.length)
+      return;
+    const idx = Math.max(0, Math.min(Math.round(getContext().sirenState[0]), SIREN_PRESETS.length - 1));
+    const gate = getContext().sirenState[1] > 0.5;
+    const mod = getContext().sirenState[2];
+    getContext().sirenPresetPills.forEach((pill, i) => {
+      const isActive = i === idx;
+      pill.className = "spreset" + (isActive ? " active" : "") + (isActive && gate ? " gate" : "");
+    });
+    if (getContext().sirenNameEl) getContext().sirenNameEl.textContent = SIREN_PRESETS[idx];
+    if (getContext().sirenGateEl) getContext().sirenGateEl.className = gate ? "on" : "";
+    if (getContext().sirenModFill) getContext().sirenModFill.style.width = (mod * 100).toFixed(1) + "%";
+    if (getContext().sirenModLbl) getContext().sirenModLbl.textContent = Math.round(mod * 100) + "%";
   }
 
   // gui/dom/shell.js
@@ -3041,7 +3278,7 @@ border-radius:6px;background:#fafafa;
     hdr.appendChild(logo);
     topChrome.appendChild(hdr);
     const tabBar = el("div", { id: "tab-bar" });
-    ["Live", "Console", "Master EQ", "Mapping"].forEach((lbl, i) => {
+    ["Live", "Mapping"].forEach((lbl, i) => {
       const btn = el("button", { className: "tab-btn" + (i === TAB_LIVE ? " active" : "") });
       btn.textContent = lbl;
       btn.dataset.tab = i;
@@ -3052,8 +3289,6 @@ border-radius:6px;background:#fafafa;
     root.appendChild(topChrome);
     const content = el("div", { id: "tab-content" });
     content.appendChild(buildLivePane());
-    content.appendChild(buildConsolePane());
-    content.appendChild(buildMasterEqPane());
     content.appendChild(buildMappingPane());
     root.appendChild(content);
     document.body.appendChild(root);
@@ -3068,12 +3303,13 @@ border-radius:6px;background:#fafafa;
       ctx.meterVu.forEach((vu) => {
         if (vu) vu.resize();
       });
-      startMeterAnim();
+      if (ctx.liveLayoutPrefs && ctx.liveLayoutPrefs.meters)
+        startMeterAnim();
+      if (ctx.liveLayoutPrefs && ctx.liveLayoutPrefs.masterEq)
+        drawMasterEqCurve();
     } else {
       stopMeterAnim();
     }
-    if (idx === TAB_MASTER_EQ)
-      drawMasterEqCurve();
   }
 
   // gui/bela/connection.js
@@ -3245,7 +3481,8 @@ border-radius:6px;background:#fafafa;
       updateSwitches();
       updateMasterEq();
       updateBadge();
-      if (ctx.currentTab === TAB_LIVE && ctx.meterAnimId == null) startMeterAnim();
+      if (ctx.currentTab === TAB_LIVE && ctx.liveLayoutPrefs && ctx.liveLayoutPrefs.meters && ctx.meterAnimId == null)
+        startMeterAnim();
       if (ctx.detectMode) updateDetectMode();
     };
   }
