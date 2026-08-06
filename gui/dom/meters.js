@@ -16,14 +16,15 @@ import { belaControlReady } from '../bela/connection.js';
 // ---------------------------------------------------------------------------
 // Codec gains via Bela.control (non-RT seasocks → Bela_setHpLevel / InputGain).
 // Payloads: { event:'custom', hpGain|inputGain: N, channel: C }
+// (hpGain wire key = DAC output level; Bela SDK API name is setHpLevel.)
 // ---------------------------------------------------------------------------
 
-const INPUT_GAIN_MIN  = -12;
-const INPUT_GAIN_MAX  = 10;
-const INPUT_GAIN_STEP = 1;
-const HP_GAIN_MIN     = -63;
-const HP_GAIN_MAX     = 0;
-const HP_GAIN_STEP    = 1;
+const INPUT_GAIN_MIN   = -12;
+const INPUT_GAIN_MAX   = 10;
+const INPUT_GAIN_STEP  = 1;
+const OUTPUT_GAIN_MIN  = -63;
+const OUTPUT_GAIN_MAX  = 0;
+const OUTPUT_GAIN_STEP = 1;
 const METER_COUNT     = 13;
 
 /** Compact header labels for clip badges (routing key → text). */
@@ -129,33 +130,34 @@ function _buildMeterGainControls(initVal, min, max, step, onSend) {
 
 /**
  * Builds buf3-index → codec gain descriptor map from routing channels.
- * @returns {Object<number, {kind:'input'|'output', ch:number, label:string}>}
+ * @returns {Object<number, {kind:'input'|'output', ch:number, label:string, gain:number}>}
  */
 function _buildGainByBuf3(inputChannels, outputChannels) {
     const map = {};
-    inputChannels.forEach(({ch, label, buf3}) => {
+    inputChannels.forEach(({ch, label, buf3, gain}) => {
         if (buf3 !== undefined)
-            map[buf3] = { kind: 'input', ch, label };
+            map[buf3] = { kind: 'input', ch, label, gain: gain != null ? gain : 0 };
     });
-    outputChannels.forEach(({ch, label, buf3}) => {
+    outputChannels.forEach(({ch, label, buf3, gain}) => {
         if (buf3 !== undefined)
-            map[buf3] = { kind: 'output', ch, label };
+            map[buf3] = { kind: 'output', ch, label, gain: gain != null ? gain : 0 };
     });
     return map;
 }
 
 /**
  * Creates − / + / value controls for one meter and registers them for sync.
- * @param {{kind:'input'|'output', ch:number, label:string}} desc
+ * @param {{kind:'input'|'output', ch:number, label:string, gain?:number}} desc
  */
 function _createInlineGain(desc) {
     const { kind, ch, label } = desc;
     const isInput = kind === 'input';
-    const min  = isInput ? INPUT_GAIN_MIN  : HP_GAIN_MIN;
-    const max  = isInput ? INPUT_GAIN_MAX  : HP_GAIN_MAX;
-    const step = isInput ? INPUT_GAIN_STEP : HP_GAIN_STEP;
+    const min  = isInput ? INPUT_GAIN_MIN  : OUTPUT_GAIN_MIN;
+    const max  = isInput ? INPUT_GAIN_MAX  : OUTPUT_GAIN_MAX;
+    const step = isInput ? INPUT_GAIN_STEP : OUTPUT_GAIN_STEP;
+    const init = desc.gain != null ? desc.gain : 0;
 
-    const controls = _buildMeterGainControls(0, min, max, step, (val) => {
+    const controls = _buildMeterGainControls(init, min, max, step, (val) => {
         _holdCodecGainSync(ch, isInput);
         if (isInput) {
             _sendGain({ event: 'custom', inputGain: val, channel: ch });
@@ -168,7 +170,7 @@ function _createInlineGain(desc) {
     controls.btnInc.title = `${label}: +${step} dB`;
     controls.valEl.title  = isInput
         ? `${label} ADC gain (−12…10 dB)`
-        : `${label} HP gain (−63…0 dB)`;
+        : `${label} DAC gain (−63…0 dB)`;
 
     if (isInput)
         _inputPickers[ch] = controls;
@@ -180,7 +182,7 @@ function _createInlineGain(desc) {
 
 /**
  * Synchronises picker displays from buffer 8 (~20 fps).
- * buf[0..9] = ADC input gain, buf[10..19] = HP output gain (physical ch, dB).
+ * buf[0..9] = ADC input gain, buf[10..19] = DAC output gain (physical ch, dB).
  * Skips channels with a recent local edit until remote matches (or hold expires).
  * @param {Float32Array} buf
  */

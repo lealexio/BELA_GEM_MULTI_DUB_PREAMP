@@ -78,13 +78,38 @@ static std::vector<float> gSwitchMappingBuf;  // [9×3] switch mapping for GUI
 static std::vector<float> gConfigMetaBuf;     // [kGuiConfigMetaSize] mux/routing/ignoredPots
 static std::vector<float> gMuxRawBuf;         // [kGuiMuxRawBufSize] raw pot values per MUX channel
 
-// Codec gain state — written by the gui_control callback (seasocks thread),
-// broadcast to every connected GUI client via buffer 8 at ~20 fps.
+// Codec gain state — written at boot from config.json and by the gui_control
+// callback (seasocks thread). Broadcast to every connected GUI client via
+// buffer 8 at ~20 fps.
 // Layout: [0..9] = ADC input gain by physical channel (dB),
-//         [10..19] = HP output gain by physical channel (dB).
-// Initialised to 0 dB (unity); resets to this default on every Bela restart.
+//         [10..19] = DAC output gain by physical channel (dB).
 static float              gCodecGains[20]   = {};
 static std::vector<float> gCodecGainsBuf;   // [20]
+
+/** Applies ADC input PGA gain for one physical channel and mirrors into gCodecGains. */
+static void applyCodecInputGain(int ch, float gainDb) {
+    if(ch < 0 || ch >= kCodecChannels) return;
+    float gain = std::max(kCodecInputGainMinDb, std::min(kCodecInputGainMaxDb, gainDb));
+    Bela_setAudioInputGain(ch, gain);
+    gCodecGains[ch] = gain;
+}
+
+/** Applies DAC output level for one physical channel and mirrors into gCodecGains. */
+static void applyCodecOutputGain(int ch, float gainDb) {
+    if(ch < 0 || ch >= kCodecChannels) return;
+    float gain = std::max(kCodecOutputGainMinDb, std::min(kCodecOutputGainMaxDb, gainDb));
+    Bela_setHpLevel(ch, gain);
+    gCodecGains[10 + ch] = gain;
+}
+
+/** Loads config.json codec defaults into the hardware codec and gCodecGains[]. */
+static void applyCodecGainsFromConfig() {
+    for(int ch = 0; ch < kCodecChannels; ++ch) {
+        applyCodecInputGain(ch, CODEC_INPUT_GAIN_DB[ch]);
+        applyCodecOutputGain(ch, CODEC_OUTPUT_GAIN_DB[ch]);
+    }
+    rt_printf("[Config] Codec gains applied from config.json (ADC + DAC)\n");
+}
 
 // CPU temperature (°C) — written by the non-RT AuxTask, read in render for GUI.
 // Negative means "not yet read / unavailable".
@@ -416,6 +441,9 @@ bool setup(BelaContext* context, void* userData) {
     // Load hardware mappings from JSON before any other initialisation.
     ConfigLoader::load(kGuiConfigPath);
 
+    // Apply routing.*.gain defaults to the codec (same APIs as the Meters UI).
+    applyCodecGainsFromConfig();
+
     // Populate the named-switch table after JSON overrides are applied.
     kNamedSwitches[0] = { "KILL_KICK",       KILL_KICK,       "KILL",    "open"     };
     kNamedSwitches[1] = { "KILL_SUB",        KILL_SUB,        "KILL",    "open"     };
@@ -521,7 +549,7 @@ bool setup(BelaContext* context, void* userData) {
     // are rebuilt at the start of the next render() block (audio thread).
     //
     // Supported messages (all require { event: 'custom' }):
-    //   { hpGain: N, channel: C }     — HP output level for physical ch C, range [-63, 0] dB
+    //   { hpGain: N, channel: C }     — DAC output level for physical ch C, range [-63, 0] dB
     //   { inputGain: N, channel: C }  — ADC PGA gain for physical ch C, range [-12, 10] dB
     //   { auxMic: N, mic: bool }      — AUX N (1–4) mic-mode flag (live, not persisted)
     //   { auxHpf: N, hpf: Hz }        — AUX N (1–4) mic HPF cutoff (0 = off)
@@ -531,34 +559,30 @@ bool setup(BelaContext* context, void* userData) {
             root[L"event"]->AsString() != L"custom")
             return true;
 
-        // Headphone output gain — any physical output channel.
+        // DAC output gain — any physical output channel (wire key remains hpGain).
         if (root.find(L"hpGain") != root.end() &&
             root[L"hpGain"]->IsNumber() &&
             root.find(L"channel") != root.end() &&
             root[L"channel"]->IsNumber())
         {
             int   ch   = (int)root[L"channel"]->AsNumber();
-            float gain = std::max(-63.0f, std::min(0.0f, (float)root[L"hpGain"]->AsNumber()));
-            if (ch >= 0 && ch <= 9) {
-                Bela_setHpLevel(ch, gain);
-                gCodecGains[10 + ch] = gain;
-                rt_printf("[GUI] HP Out ch %d → %.1f dB\n", ch, gain);
-            }
+            float gain = (float)root[L"hpGain"]->AsNumber();
+            applyCodecOutputGain(ch, gain);
+            if (ch >= 0 && ch < kCodecChannels)
+                rt_printf("[GUI] DAC Out ch %d → %.1f dB\n", ch, gCodecGains[10 + ch]);
         }
 
-        // ADC input PGA gain — codec supports [-12, 10] dB.
+        // ADC input PGA gain — codec supports [kCodecInputGainMinDb, kCodecInputGainMaxDb].
         if (root.find(L"inputGain") != root.end() &&
             root[L"inputGain"]->IsNumber() &&
             root.find(L"channel") != root.end() &&
             root[L"channel"]->IsNumber())
         {
             int   ch   = (int)root[L"channel"]->AsNumber();
-            float gain = std::max(-12.0f, std::min(10.0f, (float)root[L"inputGain"]->AsNumber()));
-            if (ch >= 0 && ch <= 9) {
-                Bela_setAudioInputGain(ch, gain);
-                gCodecGains[ch] = gain;   // indexed by physical ADC channel
-                rt_printf("[GUI] Input ch %d → %.1f dB\n", ch, gain);
-            }
+            float gain = (float)root[L"inputGain"]->AsNumber();
+            applyCodecInputGain(ch, gain);
+            if (ch >= 0 && ch < kCodecChannels)
+                rt_printf("[GUI] Input ch %d → %.1f dB\n", ch, gCodecGains[ch]);
         }
 
         // Live mic-mode toggle for AUX1–4 (1-based index in JSON).
@@ -941,7 +965,7 @@ void render(BelaContext* context, void* userData) {
         gGui.sendBuffer(7, gMuxRawBuf);
 
         // Buffer 8: codec gain state — synchronises all connected GUI clients.
-        // Layout: [0..9] ADC input gain by physical ch, [10..19] HP output gain by physical ch.
+        // Layout: [0..9] ADC input gain by physical ch, [10..19] DAC output gain by physical ch.
         for(int i = 0; i < 20; ++i) gCodecGainsBuf[i] = gCodecGains[i];
         gGui.sendBuffer(8, gCodecGainsBuf);
 

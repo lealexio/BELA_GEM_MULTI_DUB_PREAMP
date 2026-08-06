@@ -211,25 +211,37 @@ export const ROUTING_KEY_TO_BUFFER3 = {
  * Builds the full dynamic routing descriptor from a ROUTING_CONFIG object
  * (auto-generated from src/config.json by build-gui.mjs).
  *
- * Channel numbers come from routing.in values — either a legacy number or
- * `{ channel, mic }` object (e.g. routing.in.aux1.channel = 0).
+ * Channel numbers come from routing values — legacy number/array or
+ * `{ channel|channels, mic?, hpf?, gain? }` objects.
  *
  * @param {object} routing - ROUTING_CONFIG.in / ROUTING_CONFIG.out structure
  * @returns {{
  *   levelGroups:    Array<{label:string, indices:number[]}>,
  *   levelLabels:    Object<number, string>,
- *   inputChannels:  Array<{key:string, ch:number, label:string, buf3:number}>,
- *   outputChannels: Array<{key:string, ch:number, label:string, buf3:number}>,
+ *   inputChannels:  Array<{key:string, ch:number, label:string, buf3:number, gain:number}>,
+ *   outputChannels: Array<{key:string, ch:number, label:string, buf3:number, gain:number}>,
  * }}
  */
 export function buildFullRouting(routing) {
     const toLabel = key => key.toUpperCase();
 
-    /** Resolves a physical channel from a routing value (number, array, or {channel}). */
+    /** Resolves a physical channel from a routing value (number, array, or object). */
     const toPhysical = val => {
-        if(val != null && typeof val === 'object' && !Array.isArray(val))
+        if(val != null && typeof val === 'object' && !Array.isArray(val)) {
+            if(Array.isArray(val.channels) && val.channels.length)
+                return val.channels[0];
             return val.channel;
+        }
         return Array.isArray(val) ? val[0] : val;
+    };
+
+    /** Reads default codec gain dB from a routing value (0 when absent). */
+    const toGain = val => {
+        if(val != null && typeof val === 'object' && !Array.isArray(val)) {
+            const g = Number(val.gain);
+            return isNaN(g) ? 0 : g;
+        }
+        return 0;
     };
 
     const inEntries  = Object.entries(routing.in  || {});
@@ -261,6 +273,7 @@ export function buildFullRouting(routing) {
         ch:    toPhysical(val),
         label: toLabel(key),
         buf3:  ROUTING_KEY_TO_BUFFER3[key],
+        gain:  toGain(val),
     }));
 
     const outputChannels = outEntries.map(([key, val]) => ({
@@ -268,6 +281,7 @@ export function buildFullRouting(routing) {
         ch:    toPhysical(val),
         label: toLabel(key),
         buf3:  ROUTING_KEY_TO_BUFFER3[key],
+        gain:  toGain(val),
     }));
 
     return { levelGroups, levelLabels, inputChannels, outputChannels };

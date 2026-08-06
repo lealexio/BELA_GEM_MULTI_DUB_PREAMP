@@ -477,8 +477,9 @@ margin-bottom:8px;
 font-size:11px;font-weight:700;text-transform:uppercase;
 letter-spacing:.06em;color:#666;margin:0 0 6px;
 }
-.routing-table col.col-name{width:62%}
-.routing-table col.col-num{width:38%}
+.routing-table col.col-name{width:40%}
+.routing-table col.col-num{width:20%}
+.routing-table col.col-check{width:12%}
 .routing-table input[type=text]{
 width:100%;min-width:0;max-width:100%;
 padding:3px 4px;border:1px solid #ddd;

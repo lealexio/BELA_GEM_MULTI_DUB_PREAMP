@@ -77,6 +77,15 @@ extern int VU_KICK_OUT;
 extern int VU_MID_OUT;
 extern int VU_TOP_OUT;
 
+/// Physical codec channel count (Bela Gem Multi ADC / DAC paths).
+constexpr int kCodecChannels = 10;
+
+/// Default ADC input PGA gains (dB) by physical channel — from routing.in.*.gain.
+extern float CODEC_INPUT_GAIN_DB[kCodecChannels];
+
+/// Default DAC output levels (dB) by physical channel — from routing.out.*.gain.
+extern float CODEC_OUTPUT_GAIN_DB[kCodecChannels];
+
 // ---------------------------------------------------------------------------
 // Audio routing — one entry per ChannelStrip instance
 // ---------------------------------------------------------------------------

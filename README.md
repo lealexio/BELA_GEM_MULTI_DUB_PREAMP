@@ -242,6 +242,29 @@ Bela OUT9 → VU SUB          (< 80 Hz)
 - Maximum input before ADC clipping: **±1 V**
 - Recommended source level: keep at 60–70% of maximum volume
 
+### Codec gains (`config.json` → `routing.*.gain`)
+
+Default ADC / DAC levels applied once at Bela boot (same APIs as the Meters UI). Live ± adjustments in the GUI are **not** written back to the file — edit `config.json` (or the Mapping tab) and restart to change boot defaults.
+
+```json
+"routing": {
+  "in": {
+    "aux1": { "channel": 0, "mic": false, "hpf": 0, "gain": 0 }
+  },
+  "out": {
+    "master":  { "channels": [1], "gain": 0 },
+    "fx1Send": { "channel": 2, "gain": 0 }
+  }
+}
+```
+
+| Direction | Field | Range | API |
+|---|---|---|---|
+| Inputs (ADC) | `gain` (dB) | −12 … +10 | `Bela_setAudioInputGain` |
+| Outputs (DAC) | `gain` (dB) | −63 … 0 | `Bela_setHpLevel` |
+
+Missing `gain` → **0 dB**. Legacy ints / arrays for `routing.out` still work (gain defaults to 0).
+
 ---
 
 ## Configuration

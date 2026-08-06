@@ -12,6 +12,12 @@ import { el } from './utils.js';
 const ROUTING_CH_MIN = 0;
 const ROUTING_CH_MAX = 9;
 
+/** Codec gain ranges — must match SoftwareConfig.h / meters.js. */
+const INPUT_GAIN_MIN  = -12;
+const INPUT_GAIN_MAX  = 10;
+const OUTPUT_GAIN_MIN = -63;
+const OUTPUT_GAIN_MAX = 0;
+
 /** Ordered routing.in keys — matches config.json layout. */
 const ROUTING_IN_KEYS = [
     'fx1Return', 'fx2Return', 'aux1', 'aux2', 'aux3', 'aux4'
@@ -23,7 +29,7 @@ const ROUTING_OUT_KEYS = [
 ];
 
 /**
- * Reads the channel number from a routing.in value (legacy number or {channel, mic, hpf}).
+ * Reads the channel number from a routing.in value (legacy number or {channel, mic, hpf, gain}).
  * @param {*} val
  * @returns {number}
  */
@@ -32,6 +38,19 @@ function routingInChannel(val) {
         return val.channel != null ? val.channel : 0;
     if(Array.isArray(val)) return val[0] != null ? val[0] : 0;
     return val != null ? val : 0;
+}
+
+/**
+ * Reads channel(s) from a routing.out value (legacy number/array or {channel|channels, gain}).
+ * @param {*} val
+ * @returns {number|number[]}
+ */
+function routingOutChannel(val) {
+    if(val != null && typeof val === 'object' && !Array.isArray(val)) {
+        if(Array.isArray(val.channels)) return val.channels;
+        return val.channel != null ? val.channel : 0;
+    }
+    return val;
 }
 
 /**
@@ -54,6 +73,19 @@ function routingInHpf(val) {
     if(val != null && typeof val === 'object' && !Array.isArray(val)) {
         const h = Number(val.hpf);
         return isNaN(h) ? 0 : h;
+    }
+    return 0;
+}
+
+/**
+ * Reads default codec gain dB from a routing value (0 when absent).
+ * @param {*} val
+ * @returns {number}
+ */
+function routingGain(val) {
+    if(val != null && typeof val === 'object' && !Array.isArray(val)) {
+        const g = Number(val.gain);
+        return isNaN(g) ? 0 : g;
     }
     return 0;
 }
@@ -157,6 +189,7 @@ function buildRoutingSection() {
     const hint = el('div', {className: 'routing-hint'});
     hint.textContent =
         'Physical Bela channel numbers (0–9). Master may list one or two outputs, e.g. 0 or 0,1. ' +
+        'Gain (dB): codec default at boot (ADC −12…10, DAC −63…0). ' +
         'Mic: bypass master ParamEQ / HPF-LPF / kills (Graphic EQ + Band Trim still apply). ' +
         'HPF (Hz): mic dry high-pass (0 = off, 20–300); DSP only when Mic is on.';
     section.appendChild(hint);
@@ -193,11 +226,17 @@ function buildRoutingTable(heading, dir, keys, values, withMic) {
     sub.textContent = heading;
     wrap.appendChild(sub);
 
+    const gainMin = withMic ? INPUT_GAIN_MIN : OUTPUT_GAIN_MIN;
+    const gainMax = withMic ? INPUT_GAIN_MAX : OUTPUT_GAIN_MAX;
+    const gainTitle = withMic
+        ? `ADC gain at boot (${INPUT_GAIN_MIN}…${INPUT_GAIN_MAX} dB)`
+        : `DAC gain at boot (${OUTPUT_GAIN_MIN}…${OUTPUT_GAIN_MAX} dB)`;
+
     const tbl = el('table', {className: 'mtable routing-table', id: `routing-${dir}-table`});
-    const extraCols = withMic
+    const micCols = withMic
         ? '<col class="col-check"><col class="col-num">'
         : '';
-    const extraHead = withMic
+    const micHead = withMic
         ? '<th class="col-check" title="Bypass ParamEQ / HPF-LPF / kills">Mic</th>' +
           '<th title="Mic dry HPF cutoff in Hz (0 = off)">HPF (Hz)</th>'
         : '';
@@ -205,10 +244,12 @@ function buildRoutingTable(heading, dir, keys, values, withMic) {
         <colgroup>
             <col class="col-name">
             <col class="col-num">
-            ${extraCols}
+            <col class="col-num">
+            ${micCols}
         </colgroup>
         <thead><tr>
-            <th>Signal</th><th>Channel</th>${extraHead}
+            <th>Signal</th><th>Channel</th>
+            <th title="${gainTitle}">Gain (dB)</th>${micHead}
         </tr></thead>
         <tbody id="routing-${dir}-tbody"></tbody>`;
     wrap.appendChild(tbl);
@@ -217,8 +258,9 @@ function buildRoutingTable(heading, dir, keys, values, withMic) {
     keys.forEach(key => {
         const raw = values[key];
         const isMaster = key === 'master';
-        const channelVal = withMic ? routingInChannel(raw) : raw;
+        const channelVal = withMic ? routingInChannel(raw) : routingOutChannel(raw);
         const display = formatRoutingValue(channelVal, isMaster);
+        const gainVal = routingGain(raw);
         const tr = document.createElement('tr');
         tr.dataset.routingDir = dir;
         tr.dataset.routingKey = key;
@@ -229,7 +271,10 @@ function buildRoutingTable(heading, dir, keys, values, withMic) {
         let cells =
             `<td class="pname" title="${key}">${key}</td>` +
             `<td><input type="${inputType}" value="${display}" ` +
-            `data-dir="${dir}" data-key="${key}" class="ri" ${extraAttrs}></td>`;
+            `data-dir="${dir}" data-key="${key}" class="ri" ${extraAttrs}></td>` +
+            `<td><input type="number" class="ri-gain" data-dir="${dir}" data-key="${key}" ` +
+            `value="${gainVal}" min="${gainMin}" max="${gainMax}" step="1" ` +
+            `title="${gainTitle}"></td>`;
         if(withMic) {
             const micChecked = routingInMic(raw) ? 'checked' : '';
             const hpfVal = routingInHpf(raw);
@@ -371,17 +416,38 @@ function collectRoutingFromForm() {
         return Math.min(MIC_HPF_HZ_MAX, Math.max(MIC_HPF_HZ_MIN, Math.round(n)));
     };
 
+    /** Reads codec gain dB for one routing row (clamped to input or HP range). */
+    const readGain = (dir, key) => {
+        const inp = document.querySelector(`.ri-gain[data-dir="${dir}"][data-key="${key}"]`);
+        if(!inp) return 0;
+        const n = parseFloat(inp.value);
+        if(isNaN(n)) return 0;
+        if(dir === 'in')
+            return Math.min(INPUT_GAIN_MAX, Math.max(INPUT_GAIN_MIN, Math.round(n)));
+        return Math.min(OUTPUT_GAIN_MAX, Math.max(OUTPUT_GAIN_MIN, Math.round(n)));
+    };
+
     const out = {};
     ROUTING_OUT_KEYS.forEach(key => {
         const val = readChannel('out', key);
-        if(val !== undefined) out[key] = val;
+        if(val === undefined) return;
+        const gain = readGain('out', key);
+        if(key === 'master')
+            out[key] = { channels: Array.isArray(val) ? val : [val], gain };
+        else
+            out[key] = { channel: val, gain };
     });
 
     const inn = {};
     ROUTING_IN_KEYS.forEach(key => {
         const ch = readChannel('in', key);
         if(ch === undefined) return;
-        inn[key] = { channel: ch, mic: readMic(key), hpf: readHpf(key) };
+        inn[key] = {
+            channel: ch,
+            mic: readMic(key),
+            hpf: readHpf(key),
+            gain: readGain('in', key)
+        };
     });
 
     return { out, in: inn };
@@ -947,7 +1013,8 @@ function downloadConfigJson() {
         showDownloadStatus('Invalid routing channels — check the form', true);
         return;
     }
-    if(!Array.isArray(routing.out.master) || routing.out.master.length < 1) {
+    const masterChans = routing.out.master && routing.out.master.channels;
+    if(!Array.isArray(masterChans) || masterChans.length < 1) {
         showDownloadStatus('Master needs at least one output channel', true);
         return;
     }

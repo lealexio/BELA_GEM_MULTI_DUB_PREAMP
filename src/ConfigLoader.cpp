@@ -1,5 +1,6 @@
 #include "ConfigLoader.h"
 #include "HardwareConfig.h"
+#include "SoftwareConfig.h"
 
 #include <JSONValue.h>   // Bela native SimpleJSON
 
@@ -7,6 +8,7 @@
 #include <sstream>
 #include <cstring>
 #include <cstdio>
+#include <algorithm>
 
 // ---------------------------------------------------------------------------
 // Internal helpers
@@ -94,8 +96,31 @@ static bool boolOf(JSONValue* obj, const wchar_t* key, bool defaultVal) {
     return (v && v->IsBool()) ? v->AsBool() : defaultVal;
 }
 
+/** Clamps ADC input PGA gain to the codec-supported range. */
+static float clampInputGainDb(float g) {
+    return std::max(kCodecInputGainMinDb, std::min(kCodecInputGainMaxDb, g));
+}
+
+/** Clamps DAC output level to the codec-supported range. */
+static float clampOutputGainDb(float g) {
+    return std::max(kCodecOutputGainMinDb, std::min(kCodecOutputGainMaxDb, g));
+}
+
+/** Stores a clamped ADC gain for one physical input channel. */
+static void storeInputGain(int ch, float gainDb) {
+    if(ch >= 0 && ch < kCodecChannels)
+        CODEC_INPUT_GAIN_DB[ch] = clampInputGainDb(gainDb);
+}
+
+/** Stores a clamped DAC gain for one physical output channel. */
+static void storeOutputGain(int ch, float gainDb) {
+    if(ch >= 0 && ch < kCodecChannels)
+        CODEC_OUTPUT_GAIN_DB[ch] = clampOutputGainDb(gainDb);
+}
+
 /**
- * Reads one routing.in entry as either a legacy number or {channel, mic, hpf}.
+ * Reads one routing.in entry as either a legacy number or {channel, mic, hpf, gain}.
+ * Also writes CODEC_INPUT_GAIN_DB[channel] when a channel is resolved.
  * @param inObj       Parent "in" object
  * @param key         Entry key (e.g. L"aux1")
  * @param channelOut  Receives the Bela channel index
@@ -104,26 +129,113 @@ static bool boolOf(JSONValue* obj, const wchar_t* key, bool defaultVal) {
  * @param channelDef  Default channel if key is missing
  * @param micDef      Default mic flag if key/field is missing
  * @param hpfDef      Default HPF Hz if key/field is missing
+ * @param gainDef     Default codec gain dB if key/field is missing
  */
 static void readInEntry(JSONValue* inObj, const wchar_t* key,
                         int* channelOut, bool* micOut, float* hpfOut,
-                        int channelDef, bool micDef, float hpfDef) {
+                        int channelDef, bool micDef, float hpfDef,
+                        float gainDef = 0.f) {
     *channelOut = channelDef;
     *micOut     = micDef;
     if(hpfOut) *hpfOut = hpfDef;
+    float gain  = gainDef;
     JSONValue* v = child(inObj, key);
-    if(!v) return;
+    if(!v) {
+        storeInputGain(*channelOut, gain);
+        return;
+    }
     if(v->IsNumber()) {
         *channelOut = (int)v->AsNumber();
         *micOut     = false;
         if(hpfOut) *hpfOut = 0.f;
+        storeInputGain(*channelOut, gainDef);
         return;
     }
     if(v->IsObject()) {
         *channelOut = (int)numOf(v, L"channel", channelDef);
         *micOut     = boolOf(v, L"mic", micDef);
         if(hpfOut) *hpfOut = (float)numOf(v, L"hpf", hpfDef);
+        gain = (float)numOf(v, L"gain", gainDef);
     }
+    storeInputGain(*channelOut, gain);
+}
+
+/**
+ * Reads channel indices from a routing.out value.
+ * Accepts: number, array of numbers, or object with "channel" / "channels".
+ * @returns Number of channels written into channelsOut (0 if unusable).
+ */
+static int readOutChannelList(JSONValue* v, int* channelsOut, int maxCount, int channelDef) {
+    if(!v) {
+        if(maxCount > 0) { channelsOut[0] = channelDef; return 1; }
+        return 0;
+    }
+    if(v->IsNumber()) {
+        if(maxCount > 0) { channelsOut[0] = (int)v->AsNumber(); return 1; }
+        return 0;
+    }
+    if(v->IsArray()) {
+        const JSONArray& arr = v->AsArray();
+        int count = 0;
+        for(size_t j = 0; j < arr.size() && count < maxCount; ++j)
+            if(arr[j] && arr[j]->IsNumber())
+                channelsOut[count++] = (int)arr[j]->AsNumber();
+        return count;
+    }
+    if(v->IsObject()) {
+        JSONValue* chans = child(v, L"channels");
+        if(chans && chans->IsArray())
+            return readOutChannelList(chans, channelsOut, maxCount, channelDef);
+        if(maxCount > 0) {
+            channelsOut[0] = (int)numOf(v, L"channel", channelDef);
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/** Reads gain dB from a routing.out value (object with "gain", else default). */
+static float readOutGain(JSONValue* v, float gainDef) {
+    if(v && v->IsObject())
+        return (float)numOf(v, L"gain", gainDef);
+    return gainDef;
+}
+
+/**
+ * Reads one single-channel routing.out entry (legacy int or {channel, gain}).
+ * Updates *channelOut and CODEC_OUTPUT_GAIN_DB[*channelOut].
+ */
+static void readOutEntry(JSONValue* outObj, const wchar_t* key,
+                         int* channelOut, int channelDef, float gainDef = 0.f) {
+    JSONValue* v = child(outObj, key);
+    int chans[1] = { channelDef };
+    int n = readOutChannelList(v, chans, 1, channelDef);
+    *channelOut = (n > 0) ? chans[0] : channelDef;
+    storeOutputGain(*channelOut, readOutGain(v, gainDef));
+}
+
+/**
+ * Reads routing.out.master (int, array, or {channels, gain}).
+ * Updates MASTER_OUTS / MASTER_OUTS_COUNT and DAC gains for each channel.
+ */
+static void readMasterOutEntry(JSONValue* outObj, float gainDef = 0.f) {
+    JSONValue* v = child(outObj, L"master");
+    if(!v) {
+        for(int i = 0; i < MASTER_OUTS_COUNT; ++i)
+            storeOutputGain(MASTER_OUTS[i], gainDef);
+        return;
+    }
+    int chans[kMasterOutsMax];
+    int n = readOutChannelList(v, chans, kMasterOutsMax,
+                               MASTER_OUTS_COUNT > 0 ? MASTER_OUTS[0] : 0);
+    if(n > 0) {
+        for(int i = 0; i < n; ++i)
+            MASTER_OUTS[i] = chans[i];
+        MASTER_OUTS_COUNT = n;
+    }
+    float gain = readOutGain(v, gainDef);
+    for(int i = 0; i < MASTER_OUTS_COUNT; ++i)
+        storeOutputGain(MASTER_OUTS[i], gain);
 }
 
 // ---------------------------------------------------------------------------
@@ -182,32 +294,18 @@ bool ConfigLoader::load(const char* path) {
     // --- routing ---
     JSONValue* routObj = child(root, L"routing");
     if(routObj) {
-        // outputs
+        // outputs — int / array / {channel|channels, gain}; fills CODEC_OUTPUT_GAIN_DB
         JSONValue* outObj = child(routObj, L"out");
         if(outObj) {
-            // "master" accepts either a single int or an array of ints
-            JSONValue* masterVal = child(outObj, L"master");
-            if(masterVal) {
-                if(masterVal->IsArray()) {
-                    const JSONArray& ma = masterVal->AsArray();
-                    int count = 0;
-                    for(size_t j = 0; j < ma.size() && count < kMasterOutsMax; ++j)
-                        if(ma[j] && ma[j]->IsNumber())
-                            MASTER_OUTS[count++] = (int)ma[j]->AsNumber();
-                    if(count > 0) MASTER_OUTS_COUNT = count;
-                } else if(masterVal->IsNumber()) {
-                    MASTER_OUTS[0]    = (int)masterVal->AsNumber();
-                    MASTER_OUTS_COUNT = 1;
-                }
-            }
-            FX1_SEND_OUT = (int)numOf(outObj, L"fx1Send", FX1_SEND_OUT);
-            FX2_SEND_OUT = (int)numOf(outObj, L"fx2Send", FX2_SEND_OUT);
-            VU_SUB_OUT   = (int)numOf(outObj, L"vuSub",   VU_SUB_OUT);
-            VU_KICK_OUT  = (int)numOf(outObj, L"vuKick",  VU_KICK_OUT);
-            VU_MID_OUT   = (int)numOf(outObj, L"vuMid",   VU_MID_OUT);
-            VU_TOP_OUT   = (int)numOf(outObj, L"vuTop",   VU_TOP_OUT);
+            readMasterOutEntry(outObj);
+            readOutEntry(outObj, L"fx1Send", &FX1_SEND_OUT, FX1_SEND_OUT);
+            readOutEntry(outObj, L"fx2Send", &FX2_SEND_OUT, FX2_SEND_OUT);
+            readOutEntry(outObj, L"vuSub",   &VU_SUB_OUT,   VU_SUB_OUT);
+            readOutEntry(outObj, L"vuKick",  &VU_KICK_OUT,  VU_KICK_OUT);
+            readOutEntry(outObj, L"vuMid",   &VU_MID_OUT,   VU_MID_OUT);
+            readOutEntry(outObj, L"vuTop",   &VU_TOP_OUT,   VU_TOP_OUT);
         }
-        // inputs — fx returns + channel strip audio inputs ({channel, mic, hpf} or legacy int)
+        // inputs — {channel, mic, hpf, gain} or legacy int; fills CODEC_INPUT_GAIN_DB
         JSONValue* inObj = child(routObj, L"in");
         if(inObj) {
             bool  micIgnored = false;

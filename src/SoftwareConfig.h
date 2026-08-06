@@ -292,6 +292,18 @@ constexpr bool kLimiterEnabled = true;
 constexpr bool kFxReturnPostMaster = true;
 
 // ---------------------------------------------------------------------------
+// Codec ADC / DAC gains (Bela_setAudioInputGain / Bela_setHpLevel)
+// ---------------------------------------------------------------------------
+
+/// ADC input PGA range supported by the codec (dB).
+constexpr float kCodecInputGainMinDb = -12.f;
+constexpr float kCodecInputGainMaxDb =  10.f;
+
+/// DAC output level range supported by the codec (dB).
+constexpr float kCodecOutputGainMinDb = -63.f;
+constexpr float kCodecOutputGainMaxDb =   0.f;
+
+// ---------------------------------------------------------------------------
 // Bela GUI web interface (sketch.js)
 // ---------------------------------------------------------------------------
 

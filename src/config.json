@@ -18,21 +18,21 @@
 
   "routing": {
     "out": {
-      "master":  [1],
-      "fx1Send": 2,
-      "fx2Send": 3,
-      "vuSub":   9,
-      "vuKick":  8,
-      "vuMid":   7,
-      "vuTop":   6
+      "master":  { "channels": [1], "gain": 0 },
+      "fx1Send": { "channel": 2, "gain": 0 },
+      "fx2Send": { "channel": 3, "gain": 0 },
+      "vuSub":   { "channel": 9, "gain": 0 },
+      "vuKick":  { "channel": 8, "gain": 0 },
+      "vuMid":   { "channel": 7, "gain": 0 },
+      "vuTop":   { "channel": 6, "gain": 0 }
     },
     "in": {
-      "fx1Return": { "channel": 6, "mic": false, "hpf": 0 },
-      "fx2Return": { "channel": 7, "mic": false, "hpf": 0 },
-      "aux1":      { "channel": 0, "mic": false, "hpf": 0 },
-      "aux2":      { "channel": 1, "mic": false, "hpf": 0 },
-      "aux3":      { "channel": 3, "mic": false, "hpf": 0 },
-      "aux4":      { "channel": 5, "mic": false, "hpf": 0 }
+      "fx1Return": { "channel": 6, "mic": false, "hpf": 0, "gain": 0 },
+      "fx2Return": { "channel": 7, "mic": false, "hpf": 0, "gain": 0 },
+      "aux1":      { "channel": 0, "mic": false, "hpf": 0, "gain": 0 },
+      "aux2":      { "channel": 1, "mic": false, "hpf": 0, "gain": 0 },
+      "aux3":      { "channel": 3, "mic": false, "hpf": 0, "gain": 0 },
+      "aux4":      { "channel": 5, "mic": false, "hpf": 0, "gain": 0 }
     }
   },
 

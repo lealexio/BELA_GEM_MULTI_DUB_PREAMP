@@ -34,7 +34,7 @@ uint8_t     kMcpAddress = 0x20;
 // ---------------------------------------------------------------------------
 
 int MASTER_OUTS[kMasterOutsMax] = {1};
-int MASTER_OUTS_COUNT           = 2;
+int MASTER_OUTS_COUNT           = 1;
 
 int FX1_SEND_OUT  = 2;
 int FX1_RETURN_IN = 6;
@@ -45,6 +45,10 @@ int VU_SUB_OUT  = 9;
 int VU_KICK_OUT = 8;
 int VU_MID_OUT  = 7;
 int VU_TOP_OUT  = 6;
+
+// Codec defaults — 0 dB (unity). Overwritten from config.json routing.*.gain.
+float CODEC_INPUT_GAIN_DB[kCodecChannels] = {};
+float CODEC_OUTPUT_GAIN_DB[kCodecChannels] = {};
 
 ChannelConfig AUX1_CONFIG = { {0, -1}, false, 0.f };
 ChannelConfig AUX2_CONFIG = { {1, -1}, false, 0.f };
