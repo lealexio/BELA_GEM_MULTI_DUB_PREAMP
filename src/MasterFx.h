@@ -20,7 +20,7 @@
  *   7. BrickwallLimiter : output peak protection (called from render.cpp on final mix)
  *
  * Signal flow:
- *   channel strips (dry mix)
+ *   non-mic channel strips + siren (dry mix)
  *       └──► process(mix)
  *                 │
  *                 ▼
@@ -40,6 +40,13 @@
  *                 │
  *                 ▼
  *           × masterGain
+ *
+ *   mic-mode AUX dry mix
+ *       └──► processMicPath(mix)  — GraphicEq + BandTrim + masterGain only
+ *                                    (bypasses ParamEq / HPF-LPF / kills;
+ *                                     uses dedicated IIR instances)
+ *
+ *         (both paths summed in render.cpp)
  *                 │
  *         (FX returns added HERE in render.cpp — post-master, bypasses all DSP)
  *                 │
@@ -59,7 +66,7 @@
  * Usage pattern:
  *   1. Call setup() once with the audio sample rate.
  *   2. Call set*() methods once per render block (before the sample loop).
- *   3. Call processFxReturn() and process() once per audio sample.
+ *   3. Call processFxReturn() and process() / processMicPath() once per audio sample.
  */
 class MasterFx {
 public:
@@ -75,7 +82,8 @@ public:
     void setParamEqBand(ParametricEq::Band band, float freqPot, float gainDb);
 
     /**
-     * Updates one graphic EQ band. Call for each of the 12 bands once per render block.
+     * Updates one graphic EQ band on both normal and mic-path instances.
+     * Call for each of the 12 bands once per render block.
      * @param band    Band index (0 = 40 Hz … 11 = 16 kHz)
      * @param gainDb  Gain in dB; 0.0 = transparent (centred pot)
      */
@@ -96,7 +104,8 @@ public:
     void setLpf(float freqPot, float resPot);
 
     /**
-     * Updates one band-trim gain. Call for each of the 4 bands once per render block.
+     * Updates one band-trim gain on both normal and mic-path instances.
+     * Call for each of the 4 bands once per render block.
      * @param band    Target band (BandTrim::SUB / KICK / MID / TOP)
      * @param gainDb  Gain in dB; 0.0 = transparent (pot at centre)
      */
@@ -140,15 +149,25 @@ public:
      * Processes one master-bus dry sample through the full chain:
      *   ParametricEq → GraphicEq → FilterSection → BandTrim → KillSwitch → masterGain.
      * FX returns must be added AFTER this call in render.cpp (post-master injection).
-     * @param input  Sum of all dry channel outputs (channels + siren, no FX return)
+     * @param input  Sum of non-mic dry channel outputs (channels + siren, no FX return)
      */
     float process(float input);
+
+    /**
+     * Processes one mic-mode dry sample: GraphicEq → BandTrim → masterGain.
+     * Bypasses ParametricEq, FilterSection and KillSwitch. Uses dedicated IIR
+     * instances so state is not shared with process().
+     * @param input  Sum of mic-mode AUX dry outputs
+     */
+    float processMicPath(float input);
 
 private:
     ParametricEq  paramEq_;
     GraphicEq     graphicEq_;
+    GraphicEq     graphicEqMic_;   ///< Dedicated GEQ for mic-mode path (separate IIR state)
     FilterSection filters_;
     BandTrim      bandTrim_;
+    BandTrim      bandTrimMic_;    ///< Dedicated BandTrim for mic-mode path
     KillSwitch    kills_;
     NoiseGate         fxReturnGate_;
     NoiseGate         fxReturnGate2_;

@@ -14,6 +14,7 @@
  *   [6] Float32[N]       — config metadata (mux, routing, ignoredPots)
  *   [7] Float32[64]      — raw MUX grid [mux×16+pot], normalised 0–1 (unmapped discovery)
  *   [8] Float32[20]      — codec gains: [0..9]=ADC input by physical ch, [10..19]=HP out by physical ch
+ *   [9] Float32[1]       — CPU temperature °C (sysfs thermal_zone0, ~2 s poll)
  */
 
 var __belaPreampSketch = (() => {
@@ -163,8 +164,12 @@ var __belaPreampSketch = (() => {
     AUX2: 17,
     AUX3: 18,
     AUX4: 19,
-    IGNORED_COUNT: 20,
-    IGNORED_BASE: 21
+    MIC_AUX1: 20,
+    MIC_AUX2: 21,
+    MIC_AUX3: 22,
+    MIC_AUX4: 23,
+    IGNORED_COUNT: 24,
+    IGNORED_BASE: 25
   };
   var MASTER_EQ_CONFIG = {
     SAMPLE_RATE: 44100,
@@ -260,7 +265,11 @@ var __belaPreampSketch = (() => {
   };
   function buildFullRouting(routing) {
     const toLabel = (key) => key.toUpperCase();
-    const toPhysical = (val) => Array.isArray(val) ? val[0] : val;
+    const toPhysical = (val) => {
+      if (val != null && typeof val === "object" && !Array.isArray(val))
+        return val.channel;
+      return Array.isArray(val) ? val[0] : val;
+    };
     const inEntries = Object.entries(routing.in || {});
     const outEntries = Object.entries(routing.out || {});
     const levelGroups = [
@@ -965,12 +974,30 @@ font-size:11px;color:#999;margin-top:10px;line-height:1.4;
       "vuTop": 6
     },
     "in": {
-      "fx1Return": 6,
-      "fx2Return": 7,
-      "aux1": 0,
-      "aux2": 1,
-      "aux3": 3,
-      "aux4": 5
+      "fx1Return": {
+        "channel": 6,
+        "mic": false
+      },
+      "fx2Return": {
+        "channel": 7,
+        "mic": false
+      },
+      "aux1": {
+        "channel": 0,
+        "mic": false
+      },
+      "aux2": {
+        "channel": 1,
+        "mic": false
+      },
+      "aux3": {
+        "channel": 3,
+        "mic": false
+      },
+      "aux4": {
+        "channel": 5,
+        "mic": false
+      }
     }
   };
 
@@ -994,6 +1021,17 @@ font-size:11px;color:#999;margin-top:10px;line-height:1.4;
     "vuMid",
     "vuTop"
   ];
+  function routingInChannel(val) {
+    if (val != null && typeof val === "object" && !Array.isArray(val))
+      return val.channel != null ? val.channel : 0;
+    if (Array.isArray(val)) return val[0] != null ? val[0] : 0;
+    return val != null ? val : 0;
+  }
+  function routingInMic(val) {
+    if (val != null && typeof val === "object" && !Array.isArray(val))
+      return !!val.mic;
+    return false;
+  }
   function buildMappingPane() {
     const pane = el("div", { id: "pane-mapping", className: "tab-pane" });
     const note = el("div", { id: "mapping-note" });
@@ -1066,20 +1104,22 @@ font-size:11px;color:#999;margin-top:10px;line-height:1.4;
     title.textContent = "Audio I/O Routing";
     section.appendChild(title);
     const hint = el("div", { className: "routing-hint" });
-    hint.textContent = "Physical Bela channel numbers (0\u20139). Master may list one or two outputs, e.g. 0 or 0,1.";
+    hint.textContent = "Physical Bela channel numbers (0\u20139). Master may list one or two outputs, e.g. 0 or 0,1. Mic: bypass master ParamEQ / HPF-LPF / kills (Graphic EQ + Band Trim still apply).";
     section.appendChild(hint);
     const grid = el("div", { className: "routing-grid" });
     grid.appendChild(buildRoutingTable(
       "Inputs (routing.in)",
       "in",
       ROUTING_IN_KEYS,
-      ROUTING_CONFIG.in || {}
+      ROUTING_CONFIG.in || {},
+      true
     ));
     grid.appendChild(buildRoutingTable(
       "Outputs (routing.out)",
       "out",
       ROUTING_OUT_KEYS,
-      ROUTING_CONFIG.out || {}
+      ROUTING_CONFIG.out || {},
+      false
     ));
     section.appendChild(grid);
     section.querySelectorAll(".ri").forEach((inp) => {
@@ -1089,19 +1129,22 @@ font-size:11px;color:#999;margin-top:10px;line-height:1.4;
     updateMappingConflicts();
     return section;
   }
-  function buildRoutingTable(heading, dir, keys, values) {
+  function buildRoutingTable(heading, dir, keys, values, withMic) {
     const wrap = el("div", { className: "mtable-wrap routing-table-wrap" });
     const sub = el("div", { className: "msec-subtitle" });
     sub.textContent = heading;
     wrap.appendChild(sub);
     const tbl = el("table", { className: "mtable routing-table", id: `routing-${dir}-table` });
+    const micCol = withMic ? '<col class="col-check">' : "";
+    const micHead = withMic ? '<th class="col-check" title="Bypass ParamEQ / HPF-LPF / kills">Mic</th>' : "";
     tbl.innerHTML = `
         <colgroup>
             <col class="col-name">
             <col class="col-num">
+            ${micCol}
         </colgroup>
         <thead><tr>
-            <th>Signal</th><th>Channel</th>
+            <th>Signal</th><th>Channel</th>${micHead}
         </tr></thead>
         <tbody id="routing-${dir}-tbody"></tbody>`;
     wrap.appendChild(tbl);
@@ -1109,13 +1152,19 @@ font-size:11px;color:#999;margin-top:10px;line-height:1.4;
     keys.forEach((key) => {
       const raw = values[key];
       const isMaster = key === "master";
-      const display = formatRoutingValue(raw, isMaster);
+      const channelVal = withMic ? routingInChannel(raw) : raw;
+      const display = formatRoutingValue(channelVal, isMaster);
       const tr = document.createElement("tr");
       tr.dataset.routingDir = dir;
       tr.dataset.routingKey = key;
       const inputType = isMaster ? "text" : "number";
       const extraAttrs = isMaster ? 'placeholder="0 or 0,1" spellcheck="false"' : `min="${ROUTING_CH_MIN}" max="${ROUTING_CH_MAX}" step="1"`;
-      tr.innerHTML = `<td class="pname" title="${key}">${key}</td><td><input type="${inputType}" value="${display}" data-dir="${dir}" data-key="${key}" class="ri" ${extraAttrs}></td>`;
+      let cells = `<td class="pname" title="${key}">${key}</td><td><input type="${inputType}" value="${display}" data-dir="${dir}" data-key="${key}" class="ri" ${extraAttrs}></td>`;
+      if (withMic) {
+        const micChecked = routingInMic(raw) ? "checked" : "";
+        cells += `<td class="col-check"><input type="checkbox" class="ri-mic" data-dir="${dir}" data-key="${key}" ${micChecked} title="Mic mode: bypass ParamEQ / HPF-LPF / kills"></td>`;
+      }
+      tr.innerHTML = cells;
       tbody.appendChild(tr);
     });
     return wrap;
@@ -1170,6 +1219,12 @@ font-size:11px;color:#999;margin-top:10px;line-height:1.4;
         vuTop: Math.round(meta[M.VU_TOP])
       }
     };
+    const micFlags = {
+      aux1: meta[M.MIC_AUX1] > 0.5,
+      aux2: meta[M.MIC_AUX2] > 0.5,
+      aux3: meta[M.MIC_AUX3] > 0.5,
+      aux4: meta[M.MIC_AUX4] > 0.5
+    };
     document.querySelectorAll(".ri").forEach((inp) => {
       const dir = inp.dataset.dir;
       const key = inp.dataset.key;
@@ -1177,10 +1232,14 @@ font-size:11px;color:#999;margin-top:10px;line-height:1.4;
       if (raw === void 0) return;
       inp.value = formatRoutingValue(raw, key === "master");
     });
+    document.querySelectorAll(".ri-mic").forEach((cb) => {
+      const key = cb.dataset.key;
+      cb.checked = !!micFlags[key];
+    });
     updateMappingConflicts();
   }
   function collectRoutingFromForm() {
-    const readKey = (dir, key) => {
+    const readChannel = (dir, key) => {
       const inp = document.querySelector(`.ri[data-dir="${dir}"][data-key="${key}"]`);
       const parsed = parseRoutingInput(inp);
       if (parsed === null) return void 0;
@@ -1188,15 +1247,20 @@ font-size:11px;color:#999;margin-top:10px;line-height:1.4;
         return Array.isArray(parsed) ? parsed : [parsed];
       return parsed;
     };
+    const readMic = (key) => {
+      const cb = document.querySelector(`.ri-mic[data-key="${key}"]`);
+      return cb ? !!cb.checked : false;
+    };
     const out = {};
     ROUTING_OUT_KEYS.forEach((key) => {
-      const val = readKey("out", key);
+      const val = readChannel("out", key);
       if (val !== void 0) out[key] = val;
     });
     const inn = {};
     ROUTING_IN_KEYS.forEach((key) => {
-      const val = readKey("in", key);
-      if (val !== void 0) inn[key] = val;
+      const ch = readChannel("in", key);
+      if (ch === void 0) return;
+      inn[key] = { channel: ch, mic: readMic(key) };
     });
     return { out, in: inn };
   }

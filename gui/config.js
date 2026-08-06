@@ -91,7 +91,8 @@ export const CONFIG_META = {
     VU_SUB: 10, VU_KICK: 11, VU_MID: 12, VU_TOP: 13,
     FX1_RET: 14, FX2_RET: 15,
     AUX1: 16, AUX2: 17, AUX3: 18, AUX4: 19,
-    IGNORED_COUNT: 20, IGNORED_BASE: 21
+    MIC_AUX1: 20, MIC_AUX2: 21, MIC_AUX3: 22, MIC_AUX4: 23,
+    IGNORED_COUNT: 24, IGNORED_BASE: 25
 };
 
 /**
@@ -194,8 +195,8 @@ export const ROUTING_KEY_TO_BUFFER3 = {
  * Builds the full dynamic routing descriptor from a ROUTING_CONFIG object
  * (auto-generated from src/config.json by build-gui.mjs).
  *
- * Channel numbers come directly from the routing values (e.g. routing.in.aux1 = 0),
- * so no configMeta / buffer 6 is needed at runtime.
+ * Channel numbers come from routing.in values — either a legacy number or
+ * `{ channel, mic }` object (e.g. routing.in.aux1.channel = 0).
  *
  * @param {object} routing - ROUTING_CONFIG.in / ROUTING_CONFIG.out structure
  * @returns {{
@@ -206,8 +207,14 @@ export const ROUTING_KEY_TO_BUFFER3 = {
  * }}
  */
 export function buildFullRouting(routing) {
-    const toLabel    = key => key.toUpperCase();
-    const toPhysical = val => Array.isArray(val) ? val[0] : val;
+    const toLabel = key => key.toUpperCase();
+
+    /** Resolves a physical channel from a routing value (number, array, or {channel}). */
+    const toPhysical = val => {
+        if(val != null && typeof val === 'object' && !Array.isArray(val))
+            return val.channel;
+        return Array.isArray(val) ? val[0] : val;
+    };
 
     const inEntries  = Object.entries(routing.in  || {});
     const outEntries = Object.entries(routing.out || {});
@@ -230,7 +237,7 @@ export function buildFullRouting(routing) {
     const levelLabels = {};
     [...inEntries, ...outEntries].forEach(([key]) => {
         const idx = ROUTING_KEY_TO_BUFFER3[key];
-        if (idx !== undefined) levelLabels[idx] = toLabel(key);
+        if(idx !== undefined) levelLabels[idx] = toLabel(key);
     });
 
     const inputChannels = inEntries.map(([key, val]) => ({

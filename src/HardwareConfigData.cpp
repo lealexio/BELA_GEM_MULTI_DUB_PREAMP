@@ -46,10 +46,10 @@ int VU_KICK_OUT = 8;
 int VU_MID_OUT  = 7;
 int VU_TOP_OUT  = 6;
 
-ChannelConfig AUX1_CONFIG = { {0, -1} };
-ChannelConfig AUX2_CONFIG = { {1, -1} };
-ChannelConfig AUX3_CONFIG = { {3, -1} };
-ChannelConfig AUX4_CONFIG = { {5, -1} };
+ChannelConfig AUX1_CONFIG = { {0, -1}, false };
+ChannelConfig AUX2_CONFIG = { {1, -1}, false };
+ChannelConfig AUX3_CONFIG = { {3, -1}, false };
+ChannelConfig AUX4_CONFIG = { {5, -1}, false };
 
 // ---------------------------------------------------------------------------
 // Switch mapping

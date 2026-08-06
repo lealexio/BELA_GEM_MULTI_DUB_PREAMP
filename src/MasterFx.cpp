@@ -3,8 +3,10 @@
 void MasterFx::setup(float sampleRate) {
     paramEq_.setup(sampleRate);
     graphicEq_.setup(sampleRate);
+    graphicEqMic_.setup(sampleRate);
     filters_.setup(sampleRate);
     bandTrim_.setup(sampleRate);
+    bandTrimMic_.setup(sampleRate);
     kills_.setup(sampleRate);
     fxReturnGate_.setup(sampleRate);
     fxReturnGate2_.setup(sampleRate);
@@ -17,6 +19,7 @@ void MasterFx::setParamEqBand(ParametricEq::Band band, float freqPot, float gain
 
 void MasterFx::setGraphicEqBand(int band, float gainDb) {
     graphicEq_.setBandGainDb(band, gainDb);
+    graphicEqMic_.setBandGainDb(band, gainDb);
 }
 
 void MasterFx::setHpf(float freqPot, float resPot) {
@@ -29,6 +32,7 @@ void MasterFx::setLpf(float freqPot, float resPot) {
 
 void MasterFx::setBandTrim(BandTrim::Band band, float gainDb) {
     bandTrim_.setBand(band, gainDb);
+    bandTrimMic_.setBand(band, gainDb);
 }
 
 void MasterFx::setKills(bool killSub, bool killKick, bool killMid, bool killTop) {
@@ -57,5 +61,11 @@ float MasterFx::process(float input) {
     out = filters_.process(out);
     out = bandTrim_.process(out);
     out = kills_.process(out);
+    return out * masterGain_;
+}
+
+float MasterFx::processMicPath(float input) {
+    float out = graphicEqMic_.process(input);
+    out = bandTrimMic_.process(out);
     return out * masterGain_;
 }

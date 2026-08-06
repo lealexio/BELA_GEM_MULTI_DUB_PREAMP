@@ -293,7 +293,7 @@ constexpr int kGuiUpdateIntervalSamples = 2205;
 constexpr int kGuiStaticBufSendDivisor = 40;
 
 /// Float count for GUI buffer 6 (mux, routing, ignoredPots). Must match sketch.js.
-constexpr int kGuiConfigMetaHeaderFloats = 21;
+constexpr int kGuiConfigMetaHeaderFloats = 25;
 constexpr int kGuiConfigMetaSize         = kGuiConfigMetaHeaderFloats + 32; // 16 ignored pairs max
 
 /// Raw MUX grid for GUI buffer 7: kNumMux × kPotsPerMux (must match HardwareConfig.h).

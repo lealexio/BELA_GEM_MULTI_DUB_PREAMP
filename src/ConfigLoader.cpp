@@ -94,6 +94,33 @@ static bool boolOf(JSONValue* obj, const wchar_t* key, bool defaultVal) {
     return (v && v->IsBool()) ? v->AsBool() : defaultVal;
 }
 
+/**
+ * Reads one routing.in entry as either a legacy number or {channel, mic}.
+ * @param inObj       Parent "in" object
+ * @param key         Entry key (e.g. L"aux1")
+ * @param channelOut  Receives the Bela channel index
+ * @param micOut      Receives mic flag (false when legacy number or absent)
+ * @param channelDef  Default channel if key is missing
+ * @param micDef      Default mic flag if key/field is missing
+ */
+static void readInEntry(JSONValue* inObj, const wchar_t* key,
+                        int* channelOut, bool* micOut,
+                        int channelDef, bool micDef) {
+    *channelOut = channelDef;
+    *micOut     = micDef;
+    JSONValue* v = child(inObj, key);
+    if(!v) return;
+    if(v->IsNumber()) {
+        *channelOut = (int)v->AsNumber();
+        *micOut     = false;
+        return;
+    }
+    if(v->IsObject()) {
+        *channelOut = (int)numOf(v, L"channel", channelDef);
+        *micOut     = boolOf(v, L"mic", micDef);
+    }
+}
+
 // ---------------------------------------------------------------------------
 // ConfigLoader::load
 // ---------------------------------------------------------------------------
@@ -175,15 +202,26 @@ bool ConfigLoader::load(const char* path) {
             VU_MID_OUT   = (int)numOf(outObj, L"vuMid",   VU_MID_OUT);
             VU_TOP_OUT   = (int)numOf(outObj, L"vuTop",   VU_TOP_OUT);
         }
-        // inputs — fx returns + channel strip audio inputs
+        // inputs — fx returns + channel strip audio inputs ({channel, mic} or legacy int)
         JSONValue* inObj = child(routObj, L"in");
         if(inObj) {
-            FX1_RETURN_IN           = (int)numOf(inObj, L"fx1Return", FX1_RETURN_IN);
-            FX2_RETURN_IN           = (int)numOf(inObj, L"fx2Return", FX2_RETURN_IN);
-            AUX1_CONFIG.audioIns[0] = (int)numOf(inObj, L"aux1",      AUX1_CONFIG.audioIns[0]);
-            AUX2_CONFIG.audioIns[0] = (int)numOf(inObj, L"aux2",      AUX2_CONFIG.audioIns[0]);
-            AUX3_CONFIG.audioIns[0] = (int)numOf(inObj, L"aux3",      AUX3_CONFIG.audioIns[0]);
-            AUX4_CONFIG.audioIns[0] = (int)numOf(inObj, L"aux4",      AUX4_CONFIG.audioIns[0]);
+            bool micIgnored = false;
+            readInEntry(inObj, L"fx1Return", &FX1_RETURN_IN, &micIgnored,
+                        FX1_RETURN_IN, false);
+            readInEntry(inObj, L"fx2Return", &FX2_RETURN_IN, &micIgnored,
+                        FX2_RETURN_IN, false);
+            readInEntry(inObj, L"aux1",
+                        &AUX1_CONFIG.audioIns[0], &AUX1_CONFIG.micMode,
+                        AUX1_CONFIG.audioIns[0], AUX1_CONFIG.micMode);
+            readInEntry(inObj, L"aux2",
+                        &AUX2_CONFIG.audioIns[0], &AUX2_CONFIG.micMode,
+                        AUX2_CONFIG.audioIns[0], AUX2_CONFIG.micMode);
+            readInEntry(inObj, L"aux3",
+                        &AUX3_CONFIG.audioIns[0], &AUX3_CONFIG.micMode,
+                        AUX3_CONFIG.audioIns[0], AUX3_CONFIG.micMode);
+            readInEntry(inObj, L"aux4",
+                        &AUX4_CONFIG.audioIns[0], &AUX4_CONFIG.micMode,
+                        AUX4_CONFIG.audioIns[0], AUX4_CONFIG.micMode);
         }
     }
 

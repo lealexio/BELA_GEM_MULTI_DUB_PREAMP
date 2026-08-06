@@ -125,10 +125,14 @@ static void fillConfigMetaBuf() {
     gConfigMetaBuf[17] = (float)AUX2_CONFIG.audioIns[0];
     gConfigMetaBuf[18] = (float)AUX3_CONFIG.audioIns[0];
     gConfigMetaBuf[19] = (float)AUX4_CONFIG.audioIns[0];
-    gConfigMetaBuf[20] = (float)kIgnoredPotsCount;
+    gConfigMetaBuf[20] = AUX1_CONFIG.micMode ? 1.f : 0.f;
+    gConfigMetaBuf[21] = AUX2_CONFIG.micMode ? 1.f : 0.f;
+    gConfigMetaBuf[22] = AUX3_CONFIG.micMode ? 1.f : 0.f;
+    gConfigMetaBuf[23] = AUX4_CONFIG.micMode ? 1.f : 0.f;
+    gConfigMetaBuf[24] = (float)kIgnoredPotsCount;
     for(int i = 0; i < kIgnoredPotsCount; ++i) {
-        gConfigMetaBuf[21 + i*2 + 0] = (float)kIgnoredPots[i].mux;
-        gConfigMetaBuf[21 + i*2 + 1] = (float)kIgnoredPots[i].pot;
+        gConfigMetaBuf[25 + i*2 + 0] = (float)kIgnoredPots[i].mux;
+        gConfigMetaBuf[25 + i*2 + 1] = (float)kIgnoredPots[i].pot;
     }
 }
 
@@ -633,6 +637,10 @@ void render(BelaContext* context, void* userData) {
     const float fx1ReturnGain = gHardwareManager.getPotValue(FX1_RETURN_GAIN);
     const float fx2ReturnGain = gHardwareManager.getPotValue(FX2_RETURN_GAIN);
 
+    // Mic-mode flags are config-time only — compute once per block.
+    const bool anyMic = AUX1_CONFIG.micMode || AUX2_CONFIG.micMode
+                     || AUX3_CONFIG.micMode || AUX4_CONFIG.micMode;
+
     // --- Sample loop ---
     bool clipCh0 = false;
     bool clipCh1 = false;
@@ -683,12 +691,28 @@ void render(BelaContext* context, void* userData) {
         // Master bus mix — routing controlled by kFxReturnPostMaster (SoftwareConfig.h).
         // POST (true) : FX returns bypass all master DSP; only masterGain applies.
         // PRE  (false): FX returns enter the full chain (EQ → filters → kills).
+        // Mic-mode AUX dry is summed separately and processed via processMicPath()
+        // (bypasses ParamEq / HPF-LPF / kills; still gets GEQ + BandTrim + gain).
+        float dryNormal = 0.f;
+        float dryMic    = 0.f;
+        if(AUX1_CONFIG.micMode) dryMic    += dry1; else dryNormal += dry1;
+        if(AUX2_CONFIG.micMode) dryMic    += dry2; else dryNormal += dry2;
+        if(AUX3_CONFIG.micMode) dryMic    += dry3; else dryNormal += dry3;
+        if(AUX4_CONFIG.micMode) dryMic    += dry4; else dryNormal += dry4;
+        dryNormal += sirenOut;
+
         float out;
-        if(kFxReturnPostMaster)
-            out = gMasterFx.process(dry1 + dry2 + dry3 + dry4 + sirenOut)
-                + (fxReturn + fxReturn2) * gMasterFx.getMasterGain();
-        else
-            out = gMasterFx.process(dry1 + dry2 + dry3 + dry4 + sirenOut + fxReturn + fxReturn2);
+        if(kFxReturnPostMaster) {
+            out = gMasterFx.process(dryNormal);
+            if(anyMic)
+                out += gMasterFx.processMicPath(dryMic);
+            out += (fxReturn + fxReturn2) * gMasterFx.getMasterGain();
+        } else {
+            // PRE: FX returns join the normal (non-mic) path through the full chain.
+            out = gMasterFx.process(dryNormal + fxReturn + fxReturn2);
+            if(anyMic)
+                out += gMasterFx.processMicPath(dryMic);
+        }
 
         out = gMasterFx.limitOutput(out);
 
@@ -705,11 +729,12 @@ void render(BelaContext* context, void* userData) {
         for(int i = 0; i < MASTER_OUTS_COUNT; ++i)
             audioWrite(context, n, MASTER_OUTS[i], out * startupGain);
 
-        // VU meter outputs — muted when the corresponding kill is active
-        float vuSub  = killSub  ? 0.f : gVuSubLpf.process(out);
-        float vuKick = killKick ? 0.f : gVuKickLpf.process(gVuKickHpf.process(out));
-        float vuMid  = killMid  ? 0.f : gVuMidLpf .process(gVuMidHpf .process(out));
-        float vuTop  = killTop  ? 0.f : gVuTopHpf.process(out);
+        // VU meters — band-split the actual master out (kills already applied
+        // on the normal path; mic-mode energy remains visible when present).
+        float vuSub  = gVuSubLpf.process(out);
+        float vuKick = gVuKickLpf.process(gVuKickHpf.process(out));
+        float vuMid  = gVuMidLpf .process(gVuMidHpf .process(out));
+        float vuTop  = gVuTopHpf.process(out);
         audioWrite(context, n, VU_SUB_OUT,  vuSub  * startupGain);
         audioWrite(context, n, VU_KICK_OUT, vuKick * startupGain);
         audioWrite(context, n, VU_MID_OUT,  vuMid  * startupGain);
