@@ -8,7 +8,7 @@ import { buildUI } from './dom/shell.js';
 import { layoutTopChrome, hideP5Dom } from './dom/utils.js';
 import { updateSiren, syncMicInputs } from './dom/live.js';
 import { updateConsole, updateSwitches } from './dom/console.js';
-import { startMeterAnim, syncCodecGains } from './dom/meters.js';
+import { startMeterAnim, syncCodecGains, updateClipIndicators, clearClipBadges } from './dom/meters.js';
 import { TAB_LIVE } from './config.js';
 import { isLiveTileOn } from './live-layout.js';
 import { updateMasterEq, resizeMasterEqCanvas } from './dom/masterEq.js';
@@ -47,6 +47,7 @@ export default function sketch(p) {
         if(typeof Bela === 'undefined') {
             updateBadge();
             updateTempBadge(undefined);
+            clearClipBadges();
             return;
         }
 
@@ -56,6 +57,7 @@ export default function sketch(p) {
         if(!isBelaConnected()) {
             updateBadge();
             updateTempBadge(undefined);
+            clearClipBadges();
             return;
         }
 
@@ -111,6 +113,7 @@ export default function sketch(p) {
         updateSiren();
         updateSwitches();
         updateMasterEq();
+        updateClipIndicators();
         updateBadge();
 
         if(ctx.currentTab === TAB_LIVE &&

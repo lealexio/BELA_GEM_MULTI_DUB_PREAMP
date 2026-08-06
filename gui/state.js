@@ -40,7 +40,6 @@ export function createState() {
         sirenModLbl: null,
         downloadStatusEl: null,
         detectStatusEl: null,
-        micLiveStatusEl: null,
         liveLayoutPrefs: null,
         masterEqTargets: [],
         consoleLists: [],

@@ -26,6 +26,18 @@ const HP_GAIN_MAX     = 0;
 const HP_GAIN_STEP    = 1;
 const METER_COUNT     = 13;
 
+/** Compact header labels for clip badges (routing key → text). */
+const CLIP_BADGE_LABELS = {
+    aux1: 'AUX1', aux2: 'AUX2', aux3: 'AUX3', aux4: 'AUX4',
+    fx1Return: 'FX1R', fx2Return: 'FX2R',
+    master: 'MASTER',
+    fx1Send: 'FX1S', fx2Send: 'FX2S',
+    vuSub: 'SUB', vuKick: 'KICK', vuMid: 'MID', vuTop: 'TOP'
+};
+
+/** Header clip-badge elements keyed by buffer-3 index (lazy-built). */
+let _clipBadgesByIdx = null;
+
 /** Picker handles for syncCodecGains() — indexed by physical channel. */
 const _inputPickers  = new Array(10).fill(null);
 const _outputPickers = new Array(10).fill(null);
@@ -318,6 +330,96 @@ function levelToDbLabel(raw) {
     return dB < -80 ? '-\u221e' : dB.toFixed(1) + '\u202FdB';
 }
 
+/**
+ * Builds header clip badges once (one pill per routed I/O).
+ * @returns {Object<number, HTMLElement>|null}
+ */
+function ensureClipBadges() {
+    if (_clipBadgesByIdx) {
+        const sample = Object.values(_clipBadgesByIdx)[0];
+        if (sample && sample.isConnected) return _clipBadgesByIdx;
+        _clipBadgesByIdx = null;
+    }
+    const host = document.getElementById('clip-badges');
+    if (!host) return null;
+
+    const { inputChannels, outputChannels } = buildFullRouting(ROUTING_CONFIG);
+    const byIdx = {};
+    [...inputChannels, ...outputChannels].forEach(ch => {
+        if (ch.buf3 == null || byIdx[ch.buf3]) return;
+        const label = CLIP_BADGE_LABELS[ch.key] || ch.label;
+        const badge = el('span', {
+            className: 'badge clip',
+            id: 'clip-badge-' + ch.buf3,
+            title: label + ' clipping',
+            'aria-hidden': 'true'
+        });
+        badge.textContent = label;
+        badge.dataset.buf3 = String(ch.buf3);
+        host.appendChild(badge);
+        byIdx[ch.buf3] = badge;
+    });
+    _clipBadgesByIdx = byIdx;
+    return byIdx;
+}
+
+/**
+ * Updates clip hold timers and header/meter clip UI from audio peaks.
+ * Runs independently of the meters tile so header badges stay available.
+ */
+export function updateClipIndicators() {
+    const ctx = getContext();
+    const now = performance.now();
+    const badges = ensureClipBadges();
+
+    for (let i = 0; i < METER_COUNT; i++) {
+        const raw = ctx.audioLevels[i] || 0;
+        if (raw >= CLIP_THRESHOLD || ctx.peakHoldLevel[i] >= CLIP_THRESHOLD)
+            ctx.clipHoldUntil[i] = now + CLIP_HOLD_MS;
+
+        const clipping = now < ctx.clipHoldUntil[i];
+
+        if (badges && badges[i]) {
+            const on = clipping;
+            if (badges[i].classList.contains('on') !== on) {
+                badges[i].classList.toggle('on', on);
+                badges[i].setAttribute('aria-hidden', on ? 'false' : 'true');
+            }
+        }
+
+        const clipLed = ctx.meterClipLeds[i];
+        if (clipLed) {
+            const on = clipping;
+            if (clipLed.classList.contains('on') !== on) {
+                clipLed.classList.toggle('on', on);
+                clipLed.setAttribute(
+                    'aria-label',
+                    on ? 'Clip indicator on' : 'Clip indicator off'
+                );
+            }
+        }
+
+        const peakDb = ctx.meterPeakDbs[i];
+        if (peakDb)
+            peakDb.classList.toggle('clip', clipping);
+    }
+}
+
+/** Hides all header clip badges (e.g. when Bela goes offline). */
+export function clearClipBadges() {
+    const badges = _clipBadgesByIdx || ensureClipBadges();
+    if (!badges) return;
+    Object.keys(badges).forEach(k => {
+        const b = badges[k];
+        if (!b.classList.contains('on')) return;
+        b.classList.remove('on');
+        b.setAttribute('aria-hidden', 'true');
+    });
+    const ctx = getContext();
+    if (ctx && ctx.clipHoldUntil)
+        ctx.clipHoldUntil.fill(0);
+}
+
 /** Builds the meters section (VU strips + inline codec gains) for the Live tab. */
 export function buildMetersSection() {
     const wrap    = el('div', {id: 'meters-wrap'});
@@ -455,8 +557,7 @@ function updateMetersFrame() {
     const now = performance.now();
 
     for (let i = 0; i < METER_COUNT; i++) {
-        const vu = ctx.meterVu[i];
-        if (!vu) continue;
+        if (!ctx.meterVu[i]) continue;
 
         const raw = ctx.audioLevels[i];
         const smooth = ctx.meterSmooth[i];
@@ -469,28 +570,16 @@ function updateMetersFrame() {
         } else if (now >= ctx.peakHoldExpire[i]) {
             ctx.peakHoldLevel[i] *= PEAK_DECAY;
         }
+    }
 
-        if (raw >= CLIP_THRESHOLD || ctx.peakHoldLevel[i] >= CLIP_THRESHOLD)
-            ctx.clipHoldUntil[i] = now + CLIP_HOLD_MS;
+    // After peak-hold update so clip can use peakHoldLevel.
+    updateClipIndicators();
 
-        const clipping = now < ctx.clipHoldUntil[i];
-
-        const clipLed = ctx.meterClipLeds[i];
-        if (clipLed) {
-            const on = clipping;
-            if (clipLed.classList.contains('on') !== on) {
-                clipLed.classList.toggle('on', on);
-                clipLed.setAttribute(
-                    'aria-label',
-                    on ? 'Clip indicator on' : 'Clip indicator off'
-                );
-            }
-        }
+    for (let i = 0; i < METER_COUNT; i++) {
+        const vu = ctx.meterVu[i];
+        if (!vu) continue;
 
         const peakDb = ctx.meterPeakDbs[i];
-        if (peakDb)
-            peakDb.classList.toggle('clip', clipping);
-
         vu.setTargets(
             levelToBarPct(ctx.meterSmooth[i]),
             levelToBarPct(ctx.peakHoldLevel[i])

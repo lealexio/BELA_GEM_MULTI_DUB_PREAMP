@@ -40,23 +40,11 @@ function _holdMicSync(idx, kind) {
 /**
  * Sends a custom control payload to render.cpp via Bela.control.
  * @param {object} payload
- * @param {string} desc
- * @param {Element|null} statusEl
  */
-function _sendMicControl(payload, desc, statusEl) {
-    if (!belaControlReady()) {
-        if (statusEl) {
-            statusEl.textContent = 'Bela not connected — project must be running';
-            statusEl.className = 'mic-live-status err';
-        }
-        return;
-    }
+function _sendMicControl(payload) {
+    if (!belaControlReady()) return;
     /* global Bela */
     Bela.control.send(payload);
-    if (statusEl) {
-        statusEl.textContent = `Live: ${desc} (lost on Bela restart)`;
-        statusEl.className = 'mic-live-status ok';
-    }
 }
 
 /** Builds the Siren status card. */
@@ -106,7 +94,7 @@ function buildSirenCard() {
 
 /**
  * Builds the Live "Mic inputs" card: Mic toggle + HPF Hz per AUX1–4.
- * Changes are sent via Bela.control (immediate DSP, lost on Bela restart).
+ * Changes are sent via Bela.control (immediate DSP).
  */
 function buildMicInputsCard() {
     const card = el('div', {
@@ -118,13 +106,8 @@ function buildMicInputsCard() {
 
     const note = el('div', {className: 'mic-live-note'});
     note.textContent =
-        'Mic bypasses ParamEQ / filters / kills. HPF Hz cuts subs (0 = off). Live — lost on restart.';
+        'Mic bypasses ParamEQ / filters / kills. HPF Hz cuts subs (0 = off).';
     card.appendChild(note);
-
-    const statusEl = el('div', {className: 'mic-live-status'});
-    statusEl.textContent = 'Waiting for Bela.control…';
-    card.appendChild(statusEl);
-    getContext().micLiveStatusEl = statusEl;
 
     const list = el('div', {className: 'mic-live-list'});
     for (let i = 0; i < 4; ++i) {
@@ -164,11 +147,7 @@ function buildMicInputsCard() {
 
         micCb.addEventListener('change', () => {
             _holdMicSync(i, 'mic');
-            _sendMicControl(
-                { event: 'custom', auxMic: auxN, mic: !!micCb.checked },
-                `AUX${auxN} mic ${micCb.checked ? 'on' : 'off'}`,
-                statusEl
-            );
+            _sendMicControl({ event: 'custom', auxMic: auxN, mic: !!micCb.checked });
         });
 
         const sendHpf = () => {
@@ -177,11 +156,7 @@ function buildMicInputsCard() {
             hz = Math.min(MIC_HPF_HZ_MAX, Math.max(MIC_HPF_HZ_MIN, Math.round(hz)));
             hpfInp.value = String(hz);
             _holdMicSync(i, 'hpf');
-            _sendMicControl(
-                { event: 'custom', auxHpf: auxN, hpf: hz },
-                `AUX${auxN} HPF ${hz} Hz`,
-                statusEl
-            );
+            _sendMicControl({ event: 'custom', auxHpf: auxN, hpf: hz });
         };
 
         hpfInp.addEventListener('change', sendHpf);
@@ -211,14 +186,6 @@ function buildMicInputsCard() {
         };
     }
     card.appendChild(list);
-
-    const poll = setInterval(() => {
-        if (belaControlReady()) {
-            statusEl.textContent = 'Live — lost on Bela restart';
-            statusEl.className = 'mic-live-status ok';
-            clearInterval(poll);
-        }
-    }, 500);
 
     return card;
 }

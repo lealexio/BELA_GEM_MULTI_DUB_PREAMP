@@ -80,6 +80,19 @@ letter-spacing:.02em;min-width:3.6em;text-align:center;
 .badge.temp.warm{background:#d97706}
 .badge.temp.hot{background:var(--accent)}
 .badge.temp.unknown{background:#555}
+.clip-badges{
+display:flex;align-items:center;gap:6px;flex-wrap:wrap;min-width:0;
+}
+.badge.clip{
+display:none;
+background:#e11d2e;letter-spacing:.04em;
+animation:clip-badge-pulse 1s ease-in-out infinite;
+}
+.badge.clip.on{display:inline-block}
+@keyframes clip-badge-pulse{
+0%,100%{opacity:1}
+50%{opacity:.72}
+}
 
 /* --- Tab bar --- */
 #tab-bar{
@@ -617,11 +630,6 @@ display:flex;flex-direction:column;
 .mic-live-note{
 font-size:11px;color:var(--muted);line-height:1.4;margin-bottom:6px;
 }
-.mic-live-status{
-font-size:11px;font-weight:600;margin-bottom:8px;color:var(--muted);
-}
-.mic-live-status.ok{color:#1a7a3a}
-.mic-live-status.err{color:#a33}
 .mic-live-list{display:flex;flex-direction:column;gap:6px}
 .mic-live-row{
 display:flex;align-items:center;gap:10px;flex-wrap:nowrap;

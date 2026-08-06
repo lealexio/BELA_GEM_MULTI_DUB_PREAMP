@@ -34,6 +34,12 @@ export function buildUI() {
     });
     tempBadge.textContent = '--°C';
     hdr.appendChild(tempBadge);
+    const clipBadges = el('div', {
+        id: 'clip-badges',
+        className: 'clip-badges',
+        'aria-live': 'polite'
+    });
+    hdr.appendChild(clipBadges);
     hdr.appendChild(el('span', { className: 'spacer' }));
     const logo = el('img', { id: 'gui-logo', alt: 'Fulla Vibes' });
     logo.src = projectFileUrl('LOGO.png');

@@ -374,7 +374,6 @@ var __belaPreampSketch = (() => {
       sirenModLbl: null,
       downloadStatusEl: null,
       detectStatusEl: null,
-      micLiveStatusEl: null,
       liveLayoutPrefs: null,
       masterEqTargets: [],
       consoleLists: [],
@@ -475,6 +474,19 @@ letter-spacing:.02em;min-width:3.6em;text-align:center;
 .badge.temp.warm{background:#d97706}
 .badge.temp.hot{background:var(--accent)}
 .badge.temp.unknown{background:#555}
+.clip-badges{
+display:flex;align-items:center;gap:6px;flex-wrap:wrap;min-width:0;
+}
+.badge.clip{
+display:none;
+background:#e11d2e;letter-spacing:.04em;
+animation:clip-badge-pulse 1s ease-in-out infinite;
+}
+.badge.clip.on{display:inline-block}
+@keyframes clip-badge-pulse{
+0%,100%{opacity:1}
+50%{opacity:.72}
+}
 
 /* --- Tab bar --- */
 #tab-bar{
@@ -1012,11 +1024,6 @@ display:flex;flex-direction:column;
 .mic-live-note{
 font-size:11px;color:var(--muted);line-height:1.4;margin-bottom:6px;
 }
-.mic-live-status{
-font-size:11px;font-weight:600;margin-bottom:8px;color:var(--muted);
-}
-.mic-live-status.ok{color:#1a7a3a}
-.mic-live-status.err{color:#a33}
 .mic-live-list{display:flex;flex-direction:column;gap:6px}
 .mic-live-row{
 display:flex;align-items:center;gap:10px;flex-wrap:nowrap;
@@ -1356,6 +1363,22 @@ border-radius:6px;background:transparent;
   var HP_GAIN_MAX = 0;
   var HP_GAIN_STEP = 1;
   var METER_COUNT = 13;
+  var CLIP_BADGE_LABELS = {
+    aux1: "AUX1",
+    aux2: "AUX2",
+    aux3: "AUX3",
+    aux4: "AUX4",
+    fx1Return: "FX1R",
+    fx2Return: "FX2R",
+    master: "MASTER",
+    fx1Send: "FX1S",
+    fx2Send: "FX2S",
+    vuSub: "SUB",
+    vuKick: "KICK",
+    vuMid: "MID",
+    vuTop: "TOP"
+  };
+  var _clipBadgesByIdx = null;
   var _inputPickers = new Array(10).fill(null);
   var _outputPickers = new Array(10).fill(null);
   function _sendGain(payload) {
@@ -1570,6 +1593,78 @@ border-radius:6px;background:transparent;
     const dB = raw > 32e-6 ? 20 * Math.log10(raw) : -90;
     return dB < -80 ? "-\u221E" : dB.toFixed(1) + "\u202FdB";
   }
+  function ensureClipBadges() {
+    if (_clipBadgesByIdx) {
+      const sample = Object.values(_clipBadgesByIdx)[0];
+      if (sample && sample.isConnected) return _clipBadgesByIdx;
+      _clipBadgesByIdx = null;
+    }
+    const host = document.getElementById("clip-badges");
+    if (!host) return null;
+    const { inputChannels, outputChannels } = buildFullRouting(ROUTING_CONFIG);
+    const byIdx = {};
+    [...inputChannels, ...outputChannels].forEach((ch) => {
+      if (ch.buf3 == null || byIdx[ch.buf3]) return;
+      const label = CLIP_BADGE_LABELS[ch.key] || ch.label;
+      const badge = el("span", {
+        className: "badge clip",
+        id: "clip-badge-" + ch.buf3,
+        title: label + " clipping",
+        "aria-hidden": "true"
+      });
+      badge.textContent = label;
+      badge.dataset.buf3 = String(ch.buf3);
+      host.appendChild(badge);
+      byIdx[ch.buf3] = badge;
+    });
+    _clipBadgesByIdx = byIdx;
+    return byIdx;
+  }
+  function updateClipIndicators() {
+    const ctx = getContext();
+    const now = performance.now();
+    const badges = ensureClipBadges();
+    for (let i = 0; i < METER_COUNT; i++) {
+      const raw = ctx.audioLevels[i] || 0;
+      if (raw >= CLIP_THRESHOLD || ctx.peakHoldLevel[i] >= CLIP_THRESHOLD)
+        ctx.clipHoldUntil[i] = now + CLIP_HOLD_MS;
+      const clipping = now < ctx.clipHoldUntil[i];
+      if (badges && badges[i]) {
+        const on = clipping;
+        if (badges[i].classList.contains("on") !== on) {
+          badges[i].classList.toggle("on", on);
+          badges[i].setAttribute("aria-hidden", on ? "false" : "true");
+        }
+      }
+      const clipLed = ctx.meterClipLeds[i];
+      if (clipLed) {
+        const on = clipping;
+        if (clipLed.classList.contains("on") !== on) {
+          clipLed.classList.toggle("on", on);
+          clipLed.setAttribute(
+            "aria-label",
+            on ? "Clip indicator on" : "Clip indicator off"
+          );
+        }
+      }
+      const peakDb = ctx.meterPeakDbs[i];
+      if (peakDb)
+        peakDb.classList.toggle("clip", clipping);
+    }
+  }
+  function clearClipBadges() {
+    const badges = _clipBadgesByIdx || ensureClipBadges();
+    if (!badges) return;
+    Object.keys(badges).forEach((k) => {
+      const b = badges[k];
+      if (!b.classList.contains("on")) return;
+      b.classList.remove("on");
+      b.setAttribute("aria-hidden", "true");
+    });
+    const ctx = getContext();
+    if (ctx && ctx.clipHoldUntil)
+      ctx.clipHoldUntil.fill(0);
+  }
   function buildMetersSection() {
     const wrap = el("div", { id: "meters-wrap" });
     const columns = el("div", { className: "meters-columns" });
@@ -1677,8 +1772,7 @@ border-radius:6px;background:transparent;
     const ctx = getContext();
     const now = performance.now();
     for (let i = 0; i < METER_COUNT; i++) {
-      const vu = ctx.meterVu[i];
-      if (!vu) continue;
+      if (!ctx.meterVu[i]) continue;
       const raw = ctx.audioLevels[i];
       const smooth = ctx.meterSmooth[i];
       const coeff = raw > smooth ? METER_ATTACK : METER_RELEASE;
@@ -1689,23 +1783,12 @@ border-radius:6px;background:transparent;
       } else if (now >= ctx.peakHoldExpire[i]) {
         ctx.peakHoldLevel[i] *= PEAK_DECAY;
       }
-      if (raw >= CLIP_THRESHOLD || ctx.peakHoldLevel[i] >= CLIP_THRESHOLD)
-        ctx.clipHoldUntil[i] = now + CLIP_HOLD_MS;
-      const clipping = now < ctx.clipHoldUntil[i];
-      const clipLed = ctx.meterClipLeds[i];
-      if (clipLed) {
-        const on = clipping;
-        if (clipLed.classList.contains("on") !== on) {
-          clipLed.classList.toggle("on", on);
-          clipLed.setAttribute(
-            "aria-label",
-            on ? "Clip indicator on" : "Clip indicator off"
-          );
-        }
-      }
+    }
+    updateClipIndicators();
+    for (let i = 0; i < METER_COUNT; i++) {
+      const vu = ctx.meterVu[i];
+      if (!vu) continue;
       const peakDb = ctx.meterPeakDbs[i];
-      if (peakDb)
-        peakDb.classList.toggle("clip", clipping);
       vu.setTargets(
         levelToBarPct(ctx.meterSmooth[i]),
         levelToBarPct(ctx.peakHoldLevel[i])
@@ -3081,19 +3164,9 @@ border-radius:6px;background:transparent;
     if (kind === "mic" || kind === "both") _micSyncHoldUntil[idx] = until;
     if (kind === "hpf" || kind === "both") _hpfSyncHoldUntil[idx] = until;
   }
-  function _sendMicControl(payload, desc, statusEl) {
-    if (!belaControlReady()) {
-      if (statusEl) {
-        statusEl.textContent = "Bela not connected \u2014 project must be running";
-        statusEl.className = "mic-live-status err";
-      }
-      return;
-    }
+  function _sendMicControl(payload) {
+    if (!belaControlReady()) return;
     Bela.control.send(payload);
-    if (statusEl) {
-      statusEl.textContent = `Live: ${desc} (lost on Bela restart)`;
-      statusEl.className = "mic-live-status ok";
-    }
   }
   function buildSirenCard() {
     const sirenCard = el("div", { className: "card live-tile" });
@@ -3141,12 +3214,8 @@ border-radius:6px;background:transparent;
     card.dataset.tile = "mic";
     card.appendChild(cardTitle("Mic inputs"));
     const note = el("div", { className: "mic-live-note" });
-    note.textContent = "Mic bypasses ParamEQ / filters / kills. HPF Hz cuts subs (0 = off). Live \u2014 lost on restart.";
+    note.textContent = "Mic bypasses ParamEQ / filters / kills. HPF Hz cuts subs (0 = off).";
     card.appendChild(note);
-    const statusEl = el("div", { className: "mic-live-status" });
-    statusEl.textContent = "Waiting for Bela.control\u2026";
-    card.appendChild(statusEl);
-    getContext().micLiveStatusEl = statusEl;
     const list = el("div", { className: "mic-live-list" });
     for (let i = 0; i < 4; ++i) {
       const auxN = i + 1;
@@ -3181,11 +3250,7 @@ border-radius:6px;background:transparent;
       hpfWrap.appendChild(hpfUnit);
       micCb.addEventListener("change", () => {
         _holdMicSync(i, "mic");
-        _sendMicControl(
-          { event: "custom", auxMic: auxN, mic: !!micCb.checked },
-          `AUX${auxN} mic ${micCb.checked ? "on" : "off"}`,
-          statusEl
-        );
+        _sendMicControl({ event: "custom", auxMic: auxN, mic: !!micCb.checked });
       });
       const sendHpf = () => {
         let hz = parseFloat(hpfInp.value);
@@ -3193,11 +3258,7 @@ border-radius:6px;background:transparent;
         hz = Math.min(MIC_HPF_HZ_MAX, Math.max(MIC_HPF_HZ_MIN, Math.round(hz)));
         hpfInp.value = String(hz);
         _holdMicSync(i, "hpf");
-        _sendMicControl(
-          { event: "custom", auxHpf: auxN, hpf: hz },
-          `AUX${auxN} HPF ${hz} Hz`,
-          statusEl
-        );
+        _sendMicControl({ event: "custom", auxHpf: auxN, hpf: hz });
       };
       hpfInp.addEventListener("change", sendHpf);
       hpfInp.addEventListener("input", () => {
@@ -3224,13 +3285,6 @@ border-radius:6px;background:transparent;
       };
     }
     card.appendChild(list);
-    const poll = setInterval(() => {
-      if (belaControlReady()) {
-        statusEl.textContent = "Live \u2014 lost on Bela restart";
-        statusEl.className = "mic-live-status ok";
-        clearInterval(poll);
-      }
-    }, 500);
     return card;
   }
   function buildMetersTile() {
@@ -3526,6 +3580,12 @@ border-radius:6px;background:transparent;
     });
     tempBadge.textContent = "--\xB0C";
     hdr.appendChild(tempBadge);
+    const clipBadges = el("div", {
+      id: "clip-badges",
+      className: "clip-badges",
+      "aria-live": "polite"
+    });
+    hdr.appendChild(clipBadges);
     hdr.appendChild(el("span", { className: "spacer" }));
     const logo = el("img", { id: "gui-logo", alt: "Fulla Vibes" });
     logo.src = projectFileUrl("LOGO.png");
@@ -3615,6 +3675,7 @@ border-radius:6px;background:transparent;
       if (typeof Bela === "undefined") {
         updateBadge();
         updateTempBadge(void 0);
+        clearClipBadges();
         return;
       }
       const b = Bela.data.buffers;
@@ -3622,6 +3683,7 @@ border-radius:6px;background:transparent;
       if (!isBelaConnected()) {
         updateBadge();
         updateTempBadge(void 0);
+        clearClipBadges();
         return;
       }
       if (b[0]) {
@@ -3670,6 +3732,7 @@ border-radius:6px;background:transparent;
       updateSiren();
       updateSwitches();
       updateMasterEq();
+      updateClipIndicators();
       updateBadge();
       if (ctx.currentTab === TAB_LIVE && isLiveTileOn(ctx.liveLayoutPrefs, "meters") && ctx.meterAnimId == null)
         startMeterAnim();
