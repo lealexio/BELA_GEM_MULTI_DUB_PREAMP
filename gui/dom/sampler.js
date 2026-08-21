@@ -1,6 +1,6 @@
 /** Live Sampler tile: lists project samples/ audio and triggers playback on Bela. */
 import { getContext } from '../context.js';
-import { MAX_SAMPLES, MAX_SAMPLE_NAME_LEN } from '../config.js';
+import { MAX_SAMPLES, MAX_SAMPLE_NAME_LEN, SAMPLER_PAD_LABEL_LEN } from '../config.js';
 import { belaControlReady } from '../bela/connection.js';
 import { el, cardTitle } from './utils.js';
 
@@ -42,23 +42,20 @@ function _sendPlay(slot) {
 }
 
 /**
- * Builds up to 3 pad lines from the basename (no extension).
- * Spaces force a line break; each line is capped at 6 characters.
- * Extra words / characters are discarded.
+ * Single-line pad label from basename (no extension), capped at SAMPLER_PAD_LABEL_LEN.
  * @param {string} filename
- * @returns {string[]}
+ * @returns {string}
  */
-function _padLines(filename) {
-    const base = String(filename || '').replace(/\.(wav|mp3)$/i, '');
-    const words = base.split(/\s+/).filter(Boolean);
-    const lines = [];
-    for (let i = 0; i < words.length && lines.length < 3; ++i)
-        lines.push(words[i].slice(0, 6));
-    return lines.length ? lines : ['?'];
+function _padLabel(filename) {
+    const base = String(filename || '').replace(/\.(wav|mp3)$/i, '').trim();
+    if (!base) return '?';
+    return base.length > SAMPLER_PAD_LABEL_LEN
+        ? base.slice(0, SAMPLER_PAD_LABEL_LEN)
+        : base;
 }
 
 /**
- * Rebuilds the square pad grid from decoded names.
+ * Rebuilds the rectangular pad grid from decoded names.
  * @param {string[]} names
  */
 function _rebuildList(names) {
@@ -83,11 +80,7 @@ function _rebuildList(names) {
     names.forEach((name, i) => {
         const btn = el('button', { className: 'sampler-pad', type: 'button' });
         btn.title = name;
-        _padLines(name).forEach((line) => {
-            const row = el('span', { className: 'sampler-pad-line' });
-            row.textContent = line;
-            btn.appendChild(row);
-        });
+        btn.textContent = _padLabel(name);
         btn.addEventListener('click', () => _sendPlay(i));
         list.appendChild(btn);
         ctx.samplerButtons.push(btn);

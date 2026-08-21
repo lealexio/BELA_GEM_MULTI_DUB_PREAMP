@@ -23,6 +23,8 @@ export const LIVE_TILES = [
 /** Must match kMaxSamples / kMaxSampleNameLen in SoftwareConfig.h. */
 export const MAX_SAMPLES = 32;
 export const MAX_SAMPLE_NAME_LEN = 64;
+/** Visible pad label length (basename, no extension). */
+export const SAMPLER_PAD_LABEL_LEN = 20;
 
 /** localStorage keys for Live layout prefs (v2 = enabled + order). */
 export const LIVE_LAYOUT_STORAGE_KEY_V1 = 'belaDubPreamp.liveLayout.v1';

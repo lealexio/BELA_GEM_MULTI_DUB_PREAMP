@@ -13,8 +13,10 @@
  *   [5] Float32[9×3]     — switch mapping [pin,portB,rev]×9
  *   [6] Float32[N]       — config metadata (mux, routing, ignoredPots)
  *   [7] Float32[64]      — raw MUX grid [mux×16+pot], normalised 0–1 (unmapped discovery)
- *   [8] Float32[20]      — codec gains: [0..9]=ADC input by physical ch, [10..19]=HP out by physical ch
+ *   [8] Float32[20]      — codec gains: [0..9]=ADC input by physical ch, [10..19]=DAC out by physical ch
  *   [9] Float32[1]       — CPU temperature °C (sysfs thermal_zone0, ~2 s poll)
+ *   [10] Float32[5]      — sampler: [folderOk, count, playingSlot, isPlaying, playhead]
+ *   [11] Float32[32×64]  — sampler filenames packed as ASCII floats (fixed width)
  */
 
 var __belaPreampSketch = (() => {
@@ -70,6 +72,7 @@ var __belaPreampSketch = (() => {
   ];
   var MAX_SAMPLES = 32;
   var MAX_SAMPLE_NAME_LEN = 64;
+  var SAMPLER_PAD_LABEL_LEN = 20;
   var LIVE_LAYOUT_STORAGE_KEY_V1 = "belaDubPreamp.liveLayout.v1";
   var LIVE_LAYOUT_STORAGE_KEY = "belaDubPreamp.liveLayout.v2";
   var DETECT_POT_MIN_DELTA = 0.25;
@@ -634,24 +637,20 @@ font-size:12px;line-height:1.45;color:var(--muted);background:var(--surface);
 }
 .sampler-grid{
 display:grid;
-grid-template-columns:repeat(auto-fill,minmax(72px,1fr));
+grid-template-columns:repeat(auto-fill,minmax(168px,1fr));
 gap:8px;
 }
 .sampler-pad{
-aspect-ratio:1;
-display:flex;flex-direction:column;align-items:center;justify-content:center;
-gap:1px;padding:6px;border-radius:10px;cursor:pointer;
+display:flex;align-items:center;justify-content:flex-start;
+min-height:36px;height:36px;padding:0 12px;border-radius:8px;cursor:pointer;
 background:var(--surface);border:1px solid var(--line);
-font-family:var(--mono);font-size:10px;font-weight:700;color:var(--ink);
-letter-spacing:.02em;text-align:center;line-height:1.15;
+font-family:var(--mono);font-size:11px;font-weight:700;color:var(--ink);
+letter-spacing:.01em;text-align:left;line-height:1;
+white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
 transition:background .12s,border-color .12s,box-shadow .12s,transform .08s;
 }
-.sampler-pad-line{
-display:block;width:100%;
-white-space:pre;overflow:hidden;text-overflow:clip;
-}
 .sampler-pad:hover{border-color:#c8c8d0;background:#fafafa}
-.sampler-pad:active{transform:scale(.96)}
+.sampler-pad:active{transform:scale(.98)}
 .sampler-pad.playing{
 border-color:var(--accent);background:#fff7f5;color:var(--accent);
 box-shadow:0 0 0 1px rgba(231,76,60,.28);
@@ -3328,13 +3327,10 @@ border-radius:6px;background:transparent;
     if (!belaControlReady()) return;
     Bela.control.send({ event: "custom", samplerPlay: slot });
   }
-  function _padLines(filename) {
-    const base = String(filename || "").replace(/\.(wav|mp3)$/i, "");
-    const words = base.split(/\s+/).filter(Boolean);
-    const lines = [];
-    for (let i = 0; i < words.length && lines.length < 3; ++i)
-      lines.push(words[i].slice(0, 6));
-    return lines.length ? lines : ["?"];
+  function _padLabel(filename) {
+    const base = String(filename || "").replace(/\.(wav|mp3)$/i, "").trim();
+    if (!base) return "?";
+    return base.length > SAMPLER_PAD_LABEL_LEN ? base.slice(0, SAMPLER_PAD_LABEL_LEN) : base;
   }
   function _rebuildList(names) {
     const ctx = getContext();
@@ -3354,11 +3350,7 @@ border-radius:6px;background:transparent;
     names.forEach((name, i) => {
       const btn = el("button", { className: "sampler-pad", type: "button" });
       btn.title = name;
-      _padLines(name).forEach((line) => {
-        const row = el("span", { className: "sampler-pad-line" });
-        row.textContent = line;
-        btn.appendChild(row);
-      });
+      btn.textContent = _padLabel(name);
       btn.addEventListener("click", () => _sendPlay(i));
       list.appendChild(btn);
       ctx.samplerButtons.push(btn);
