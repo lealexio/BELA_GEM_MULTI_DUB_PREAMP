@@ -44,6 +44,7 @@ static PotRef* findPotGlobalByName(const char* name) {
         &GEQ_2KHZ, &GEQ_8KHZ, &GEQ_60HZ, &GEQ_40HZ, &GEQ_80HZ, &GEQ_100HZ,
         &GEQ_250HZ, &GEQ_125HZ, &GEQ_500HZ, &GEQ_4KHZ, &GEQ_1KHZ, &GEQ_16KHZ,
         &MASTER_HPF_FREQ, &MASTER_HPF_RES, &MASTER_LPF_RES, &MASTER_LPF_FREQ,
+        &FX1_RETURN_GAIN, &FX2_RETURN_GAIN,
     };
     static constexpr int sCount = sizeof(sAll) / sizeof(sAll[0]);
 
@@ -404,12 +405,41 @@ bool ConfigLoader::load(const char* path) {
         int count = 0;
         for(size_t i = 0; i < arr.size() && count < kIgnoredPotsMax; ++i) {
             JSONValue* e = arr[i];
-            if(!e || !e->IsObject()) continue;
-            if(!e->HasChild(L"mux") || !e->HasChild(L"pot")) continue;
-            kIgnoredPots[count].mux  = (int)numOf(e, L"mux", 0);
-            kIgnoredPots[count].pot  = (int)numOf(e, L"pot", 0);
-            kIgnoredPots[count].name = nullptr;
-            ++count;
+            if(!e) continue;
+            if(e->IsString()) {
+                std::string name = JSON::ws2s(e->AsString());
+                PotRef* p = findPotByName(name.c_str());
+                if(!p) p = findPotGlobalByName(name.c_str());
+                if(p) {
+                    kIgnoredPots[count].mux  = p->mux;
+                    kIgnoredPots[count].pot  = p->pot;
+                    kIgnoredPots[count].name = p->name;
+                    ++count;
+                }
+                continue;
+            }
+            if(!e->IsObject()) continue;
+            if(e->HasChild(L"mux") && e->HasChild(L"pot")) {
+                int mux = (int)numOf(e, L"mux", 0);
+                int pot = (int)numOf(e, L"pot", 0);
+                kIgnoredPots[count].mux  = mux;
+                kIgnoredPots[count].pot  = pot;
+                kIgnoredPots[count].name = getPotName(mux, pot);
+                ++count;
+            } else if(e->HasChild(L"name")) {
+                JSONValue* nv = child(e, L"name");
+                if(nv && nv->IsString()) {
+                    std::string name = JSON::ws2s(nv->AsString());
+                    PotRef* p = findPotByName(name.c_str());
+                    if(!p) p = findPotGlobalByName(name.c_str());
+                    if(p) {
+                        kIgnoredPots[count].mux  = p->mux;
+                        kIgnoredPots[count].pot  = p->pot;
+                        kIgnoredPots[count].name = p->name;
+                        ++count;
+                    }
+                }
+            }
         }
         kIgnoredPotsCount = count;
     }

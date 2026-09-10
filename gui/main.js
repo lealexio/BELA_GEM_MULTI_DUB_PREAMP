@@ -13,7 +13,7 @@ import { startMeterAnim, syncCodecGains, updateClipIndicators, clearClipBadges }
 import { TAB_LIVE } from './config.js';
 import { isLiveTileOn } from './live-layout.js';
 import { updateMasterEq, resizeMasterEqCanvas } from './dom/masterEq.js';
-import { tryBuildMappingTable, updateDetectMode, fillRoutingFromConfigMeta } from './dom/mapping.js';
+import { tryBuildMappingTable, updateDetectMode, fillRoutingFromConfigMeta, fillIgnoredPotsFromConfigMeta } from './dom/mapping.js';
 import {
     updateBelaRxWatchdog, isBelaConnected, updateBadge, updateTempBadge
 } from './bela/connection.js';
@@ -105,6 +105,7 @@ export default function sketch(p) {
         if(b[6] && !ctx.configMeta) {
             ctx.configMeta = Float32Array.from(b[6]);
             fillRoutingFromConfigMeta();
+            fillIgnoredPotsFromConfigMeta();
         }
         // Buffer 6 also carries live mic/hpf flags — sync Live tab (no send back).
         if(b[6]) {

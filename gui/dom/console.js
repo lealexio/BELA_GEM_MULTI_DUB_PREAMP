@@ -7,7 +7,8 @@ import {
 } from '../config.js';
 import { el, cardTitle } from './utils.js';
 import {
-    muxRawIndex, getActiveMuxCount, isPotIgnored, isPotMapped, formatUnmappedPotLabel
+    muxRawIndex, getActiveMuxCount, isPotIgnored, isPotMapped, formatUnmappedPotLabel,
+    getPotMuxChannel
 } from './mapping.js';
 
 /** Builds the console "last change" card.
@@ -142,6 +143,9 @@ export function updateConsole() {
     const potPrev  = isNormal ? getContext().prevPotValuesNormal : getContext().prevPotValues;
 
     for (let i = 0; i < POT_NAMES.length; i++) {
+        const coords = getPotMuxChannel(i);
+        if (coords && isPotIgnored(coords.mux, coords.pot)) continue;
+
         const v = getContext().potValues[i];
         if (Math.abs(v - potPrev[i]) >= potDelta) {
             potPrev[i] = v;

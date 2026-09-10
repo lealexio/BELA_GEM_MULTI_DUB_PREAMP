@@ -5,7 +5,7 @@ import {
     CONFIG_META, I2C_BUS, DETECT_POT_MIN_DELTA,
     MIC_HPF_HZ_MIN, MIC_HPF_HZ_MAX
 } from '../config.js';
-import { ROUTING_CONFIG } from '../routing-config.js';
+import { ROUTING_CONFIG, IGNORED_POTS_DEFAULT } from '../routing-config.js';
 import { el } from './utils.js';
 
 /** Bela Gem Multi audio channel index range (0-based). */
@@ -171,6 +171,9 @@ export function buildMappingPane() {
         </tbody>`;
     swWrap.appendChild(swTbl);
     pane.appendChild(swWrap);
+
+    // Ignored Pots section
+    pane.appendChild(buildIgnoredPotsSection());
 
     return pane;
 }
@@ -513,6 +516,7 @@ export function tryBuildMappingTable() {
         inp.addEventListener('input',  updateMappingConflicts);
         inp.addEventListener('change', updateMappingConflicts);
     });
+    renderIgnoredPotsTable();
     updateMappingConflicts();
 }
 
@@ -523,7 +527,7 @@ export function tryBuildMappingTable() {
 function updateMappingConflicts() {
     const messages = [];
 
-    document.querySelectorAll('#pot-tbody tr, #sw-tbody tr, #routing-in-tbody tr, #routing-out-tbody tr')
+    document.querySelectorAll('#pot-tbody tr, #sw-tbody tr, #ign-tbody tr, #routing-in-tbody tr, #routing-out-tbody tr')
         .forEach(tr => tr.classList.remove('dup-conflict'));
 
     if(getContext().mappingBuilt) {
@@ -613,6 +617,40 @@ function updateMappingConflicts() {
         });
     });
 
+    // Ignored pots — duplicate MUX + channel
+    if(Array.isArray(getContext().ignoredPotsList)) {
+        const ignGroups = new Map();
+        getContext().ignoredPotsList.forEach((item, idx) => {
+            const key = item.mux + ':' + item.pot;
+            if(!ignGroups.has(key)) ignGroups.set(key, []);
+            ignGroups.get(key).push(idx);
+        });
+        ignGroups.forEach((indices, key) => {
+            if(indices.length < 2) return;
+            const parts = key.split(':');
+            messages.push('Ignored pots duplicate MUX ' + parts[0] + ' / channel ' + parts[1]);
+            indices.forEach(idx => {
+                const tr = document.querySelector(`#ign-tbody tr[data-ign-index="${idx}"]`);
+                if(tr) tr.classList.add('dup-conflict');
+            });
+        });
+    }
+
+    // Refresh status labels in ignored pots table
+    document.querySelectorAll('#ign-tbody tr[data-ign-index]').forEach(tr => {
+        const idx = parseInt(tr.dataset.ignIndex, 10);
+        if(getContext().ignoredPotsList && getContext().ignoredPotsList[idx]) {
+            const item = getContext().ignoredPotsList[idx];
+            const name = getMappedPotName(item.mux, item.pot);
+            const statusCell = tr.querySelector('.ign-status');
+            if(statusCell) {
+                statusCell.innerHTML = name
+                    ? `<span class="pname" title="${name}">${name}</span> <span style="font-size:10px; color:#e67e22; font-weight:600;">(Mapped)</span>`
+                    : `<span style="color:#7f8c8d; font-size:11px; font-style:italic;">Unassigned / Floating</span>`;
+            }
+        }
+    });
+
     const banner = document.getElementById('mapping-conflicts');
     const list   = document.getElementById('mapping-conflicts-list');
     if(!banner || !list) return;
@@ -694,6 +732,11 @@ export function getActiveMuxCount() {
 
 /** Returns true when a physical MUX channel is in the ignored-pots list. */
 export function isPotIgnored(mux, pot) {
+    if(Array.isArray(getContext().ignoredPotsList)) {
+        return getContext().ignoredPotsList.some(
+            p => Math.round(p.mux) === mux && Math.round(p.pot) === pot
+        );
+    }
     if(!getContext().configMeta) return false;
     const count = Math.round(getContext().configMeta[CONFIG_META.IGNORED_COUNT]);
     for(let i = 0; i < count; i++) {
@@ -703,6 +746,228 @@ export function isPotIgnored(mux, pot) {
             return true;
     }
     return false;
+}
+
+/** Returns { mux, pot } for a named pot index, or null. */
+export function getPotMuxChannel(potIndex) {
+    const muxInp = document.querySelector(`.pi[data-i="${potIndex}"][data-f="mux"]`);
+    const potInp = document.querySelector(`.pi[data-i="${potIndex}"][data-f="pot"]`);
+    if(muxInp && potInp) {
+        const m = parseInt(muxInp.value, 10);
+        const p = parseInt(potInp.value, 10);
+        if(!isNaN(m) && !isNaN(p)) return { mux: m, pot: p };
+    }
+    if(getContext().potMapping && getContext().potMapping.length > potIndex * 4 + 1) {
+        return {
+            mux: Math.round(getContext().potMapping[potIndex * 4 + 0]),
+            pot: Math.round(getContext().potMapping[potIndex * 4 + 1])
+        };
+    }
+    return null;
+}
+
+/** Returns the name of a mapped pot at (mux, pot), or null if unassigned. */
+export function getMappedPotName(mux, pot) {
+    for(let i = 0; i < POT_NAMES.length; i++) {
+        const coords = getPotMuxChannel(i);
+        if(coords && coords.mux === mux && coords.pot === pot)
+            return POT_NAMES[i];
+    }
+    return null;
+}
+
+/** Ensures getContext().ignoredPotsList is initialized as an array. */
+function ensureIgnoredPotsList() {
+    if(!Array.isArray(getContext().ignoredPotsList)) {
+        if(Array.isArray(IGNORED_POTS_DEFAULT) && IGNORED_POTS_DEFAULT.length > 0) {
+            getContext().ignoredPotsList = IGNORED_POTS_DEFAULT.map(p => ({
+                mux: Math.max(0, Math.min(3, Math.round(p.mux))),
+                pot: Math.max(0, Math.min(15, Math.round(p.pot)))
+            }));
+        } else {
+            getContext().ignoredPotsList = [];
+        }
+    }
+    return getContext().ignoredPotsList;
+}
+
+/** Builds the DOM structure for the Ignored Potentiometers section. */
+function buildIgnoredPotsSection() {
+    const sec = el('div', { id: 'ignored-pots-section' });
+
+    const title = el('div', { className: 'msec-title' });
+    title.textContent = 'Ignored Potentiometers (Exclusion List)';
+    sec.appendChild(title);
+
+    const hint = el('div', { className: 'routing-hint' });
+    hint.textContent =
+        'Physical MUX channels to exclude from debug console logging and auto-detection (e.g. unassigned or floating pins). Max 16.';
+    sec.appendChild(hint);
+
+    const wrap = el('div', { className: 'mtable-wrap' });
+    const tbl = el('table', { className: 'mtable', id: 'ign-table' });
+    tbl.innerHTML = `
+        <colgroup>
+            <col class="col-num" style="width:80px">
+            <col class="col-num" style="width:80px">
+            <col class="col-name">
+            <col class="col-detect" style="width:70px">
+        </colgroup>
+        <thead><tr>
+            <th>MUX</th><th>Channel</th>
+            <th>Target / Status</th>
+            <th class="detect-col">Action</th>
+        </tr></thead>
+        <tbody id="ign-tbody">
+            <tr><td colspan="4" class="loading-cell">No ignored pots.</td></tr>
+        </tbody>`;
+    wrap.appendChild(tbl);
+    sec.appendChild(wrap);
+
+    const tb = el('div', { style: 'margin:8px 0 16px; display:flex; gap:10px; align-items:center;' });
+    const btnAdd = el('button', { id: 'btn-add-ignored', className: 'btn-add-ign', type: 'button' });
+    btnAdd.textContent = '+ Add Ignored Pot';
+    btnAdd.addEventListener('click', () => addIgnoredPotRow());
+    tb.appendChild(btnAdd);
+
+    const countLabel = el('span', { id: 'ign-count-label', style: 'font-size:11px; color:#888;' });
+    tb.appendChild(countLabel);
+
+    sec.appendChild(tb);
+    return sec;
+}
+
+/** Renders the rows in the Ignored Potentiometers table. */
+export function renderIgnoredPotsTable() {
+    const tbody = document.getElementById('ign-tbody');
+    if(!tbody) return;
+
+    const list = ensureIgnoredPotsList();
+    const countLabel = document.getElementById('ign-count-label');
+    if(countLabel) countLabel.textContent = `${list.length} / 16 ignored`;
+
+    const btnAdd = document.getElementById('btn-add-ignored');
+    if(btnAdd) btnAdd.disabled = list.length >= 16;
+
+    if(list.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="4" class="loading-cell">No ignored pots configured. Click "+ Add Ignored Pot" to exclude a channel.</td></tr>';
+        return;
+    }
+
+    tbody.innerHTML = '';
+    list.forEach((item, idx) => {
+        const tr = document.createElement('tr');
+        tr.dataset.ignIndex = String(idx);
+
+        const mappedName = getMappedPotName(item.mux, item.pot);
+        const statusHtml = mappedName
+            ? `<span class="pname" title="${mappedName}">${mappedName}</span> <span style="font-size:10px; color:#e67e22; font-weight:600;">(Mapped)</span>`
+            : `<span style="color:#7f8c8d; font-size:11px; font-style:italic;">Unassigned / Floating</span>`;
+
+        tr.innerHTML =
+            `<td><input type="number" min="0" max="3" value="${item.mux}" data-idx="${idx}" data-f="mux" class="ii" style="width:100%; padding:3px 4px; border:1px solid #ddd; border-radius:4px; font-size:12px;"></td>` +
+            `<td><input type="number" min="0" max="15" value="${item.pot}" data-idx="${idx}" data-f="pot" class="ii" style="width:100%; padding:3px 4px; border:1px solid #ddd; border-radius:4px; font-size:12px;"></td>` +
+            `<td class="ign-status">${statusHtml}</td>` +
+            `<td style="text-align:center;"><button type="button" class="btn-del-ign" data-idx="${idx}" title="Remove ignored pot">✕</button></td>`;
+
+        tr.querySelector('.btn-del-ign').addEventListener('click', () => {
+            removeIgnoredPotRow(idx);
+        });
+
+        tr.querySelectorAll('.ii').forEach(input => {
+            input.addEventListener('change', (e) => {
+                const field = e.target.dataset.f;
+                const i = parseInt(e.target.dataset.idx, 10);
+                let val = parseInt(e.target.value, 10);
+                if(isNaN(val)) val = 0;
+                if(field === 'mux') val = Math.max(0, Math.min(3, val));
+                if(field === 'pot') val = Math.max(0, Math.min(15, val));
+                e.target.value = val;
+                list[i][field] = val;
+                getContext().ignoredPotsUserEdited = true;
+                cleanConsoleOfIgnored();
+                renderIgnoredPotsTable();
+                updateMappingConflicts();
+            });
+        });
+
+        tbody.appendChild(tr);
+    });
+}
+
+/** Adds a new row to the ignored pots list. */
+export function addIgnoredPotRow(mux, pot) {
+    const list = ensureIgnoredPotsList();
+    if(list.length >= 16) return;
+
+    let m = (mux !== undefined) ? mux : 3;
+    let p = (pot !== undefined) ? pot : 0;
+    if(mux === undefined && pot === undefined) {
+        for(let tryP = 0; tryP < 16; tryP++) {
+            if(!list.some(item => item.mux === m && item.pot === tryP)) {
+                p = tryP;
+                break;
+            }
+        }
+    }
+
+    list.push({ mux: m, pot: p });
+    getContext().ignoredPotsUserEdited = true;
+    cleanConsoleOfIgnored();
+    renderIgnoredPotsTable();
+    updateMappingConflicts();
+}
+
+/** Removes a row from the ignored pots list. */
+export function removeIgnoredPotRow(idx) {
+    const list = ensureIgnoredPotsList();
+    if(idx >= 0 && idx < list.length) {
+        list.splice(idx, 1);
+        getContext().ignoredPotsUserEdited = true;
+        cleanConsoleOfIgnored();
+        renderIgnoredPotsTable();
+        updateMappingConflicts();
+    }
+}
+
+/** Purges any console entries for pots that are currently ignored. */
+export function cleanConsoleOfIgnored() {
+    if(!Array.isArray(getContext().recentChanges)) return;
+    getContext().recentChanges = getContext().recentChanges.filter(entry => {
+        if(entry.type !== 'pot') return true;
+        const potIdx = POT_NAMES.indexOf(entry.name);
+        if(potIdx >= 0) {
+            const coords = getPotMuxChannel(potIdx);
+            if(coords && isPotIgnored(coords.mux, coords.pot)) return false;
+        }
+        const match = entry.name.match(/MUX(\d+)\s+CH(\d+)/i);
+        if(match) {
+            const m = parseInt(match[1], 10);
+            const p = parseInt(match[2], 10);
+            if(isPotIgnored(m, p)) return false;
+        }
+        return true;
+    });
+}
+
+/** Syncs ignored pots from Bela configMeta (buffer 6) once at boot. */
+export function fillIgnoredPotsFromConfigMeta() {
+    if(getContext().ignoredPotsFilledFromMeta || !getContext().configMeta) return;
+    getContext().ignoredPotsFilledFromMeta = true;
+    if(getContext().ignoredPotsUserEdited) return;
+
+    const M = CONFIG_META;
+    const meta = getContext().configMeta;
+    const count = Math.round(meta[M.IGNORED_COUNT]);
+    const list = [];
+    for(let i = 0; i < count; i++) {
+        list.push({
+            mux: Math.round(meta[M.IGNORED_BASE + i * 2 + 0]),
+            pot: Math.round(meta[M.IGNORED_BASE + i * 2 + 1])
+        });
+    }
+    getContext().ignoredPotsList = list;
+    renderIgnoredPotsTable();
 }
 
 /** Returns true when a MUX channel is already assigned to a named pot. */
@@ -947,13 +1212,20 @@ function buildConfigJsonText(pm, sm) {
 
     const M = CONFIG_META;
 
-    const ignoredCount = Math.round(getContext().configMeta[M.IGNORED_COUNT]);
-    const ignoredPots  = [];
-    for(let i = 0; i < ignoredCount; i++) {
-        ignoredPots.push({
-            mux: Math.round(getContext().configMeta[M.IGNORED_BASE + i*2 + 0]),
-            pot: Math.round(getContext().configMeta[M.IGNORED_BASE + i*2 + 1])
-        });
+    let ignoredPots = [];
+    if(Array.isArray(getContext().ignoredPotsList)) {
+        ignoredPots = getContext().ignoredPotsList.map(item => ({
+            mux: Math.max(0, Math.min(3, Math.round(item.mux))),
+            pot: Math.max(0, Math.min(15, Math.round(item.pot)))
+        }));
+    } else {
+        const ignoredCount = Math.round(getContext().configMeta[M.IGNORED_COUNT]);
+        for(let i = 0; i < ignoredCount; i++) {
+            ignoredPots.push({
+                mux: Math.round(getContext().configMeta[M.IGNORED_BASE + i*2 + 0]),
+                pot: Math.round(getContext().configMeta[M.IGNORED_BASE + i*2 + 1])
+            });
+        }
     }
 
     const pots = POT_NAMES.map((name, i) => ({

@@ -581,6 +581,17 @@ font-weight:700;color:#1a1a2e;
 white-space:nowrap;text-overflow:ellipsis;overflow:hidden;
 }
 .loading-cell{font-style:italic;color:#bbb;padding:10px}
+.btn-add-ign{
+padding:5px 12px;background:#f0f0f4;color:#2c2c54;border:1px solid #ccc;
+border-radius:4px;font-size:11px;font-weight:600;cursor:pointer;transition:all .15s;
+}
+.btn-add-ign:hover{background:#e2e2ec;border-color:#999}
+.btn-add-ign:disabled{opacity:.4;cursor:not-allowed}
+.btn-del-ign{
+padding:2px 7px;background:#fce4e4;color:#c0392b;border:1px solid #f5b7b1;
+border-radius:4px;font-size:11px;font-weight:700;cursor:pointer;transition:all .15s;line-height:1.2;
+}
+.btn-del-ign:hover{background:#f5b7b1;color:#922b21}
 
 /* --- Responsive --- */
 @media(min-width:580px){

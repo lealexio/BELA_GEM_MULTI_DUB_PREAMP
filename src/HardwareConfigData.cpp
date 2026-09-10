@@ -82,8 +82,8 @@ PotRef SIREN_MOD       = {0,  9, true, "SIREN_MOD"};
 
 // FX return input gains — reversed: pot at max physical position = unity gain (1.0),
 // pot at min physical position = mute (0.0). Useful to silence a noisy external effect.
-PotRef FX1_RETURN_GAIN = {0,  0, true, "FX1_RETURN_GAIN"};
-PotRef FX2_RETURN_GAIN = {0, 15, true, "FX2_RETURN_GAIN"};
+PotRef FX1_RETURN_GAIN = {3,  9, true, "FX1_RETURN_GAIN", false};
+PotRef FX2_RETURN_GAIN = {3,  8, true, "FX2_RETURN_GAIN", true};
 
 // MUX 3 — siren + channel gain/send
 PotRef SIREN_GAIN     = {3,  0, true,  "SIREN_GAIN"};
@@ -195,10 +195,5 @@ int kAllNamedPotsCount = 60;
 // Debug logging exclusion list
 // ---------------------------------------------------------------------------
 
-PotRef kIgnoredPots[kIgnoredPotsMax] = {
-    {2, 2, false, nullptr},
-    {0, 2, false, nullptr},
-    {0, 4, false, nullptr},
-    {2, 4, false, nullptr},
-};
-int kIgnoredPotsCount = 4;
+PotRef kIgnoredPots[kIgnoredPotsMax] = {};
+int kIgnoredPotsCount = 0;

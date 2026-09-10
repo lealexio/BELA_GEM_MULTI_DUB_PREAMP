@@ -71,3 +71,21 @@ export const ROUTING_CONFIG = {
     }
   }
 };
+export const IGNORED_POTS_DEFAULT = [
+  {
+    "mux": 3,
+    "pot": 0
+  },
+  {
+    "mux": 3,
+    "pot": 1
+  },
+  {
+    "mux": 3,
+    "pot": 14
+  },
+  {
+    "mux": 3,
+    "pot": 15
+  }
+];
