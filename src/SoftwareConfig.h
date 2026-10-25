@@ -338,7 +338,10 @@ constexpr int kGuiUpdateIntervalSamples = 2205;
 constexpr int kGuiStaticBufSendDivisor = 40;
 
 /// Float count for GUI buffer 6 (mux, routing, ignoredPots). Must match sketch.js.
-constexpr int kGuiConfigMetaHeaderFloats = 29;
+/// Layout: [0-4] mux/cal/i2c | [5-7] master outs | [8-9] fx sends | [10-13] vu outs
+///         [14-15] fx returns | [16-19] AUX channelL | [20-23] AUX micMode
+///         [24-27] AUX hpfHz | [28-31] AUX channelR | [32] ignoredPotsCount | [33+] ignored pairs
+constexpr int kGuiConfigMetaHeaderFloats = 33;
 constexpr int kGuiConfigMetaSize         = kGuiConfigMetaHeaderFloats + 32; // 16 ignored pairs max
 
 /// Raw MUX grid for GUI buffer 7: kNumMux × kPotsPerMux (must match HardwareConfig.h).
@@ -351,3 +354,14 @@ constexpr int kCpuTempPollUs = 2000000; // 2 s
 /// Sysfs path for the first thermal zone (millidegrees C). Matches
 /// `cat /sys/class/thermal/thermal_zone*/temp` first glob hit on Bela.
 constexpr const char* kCpuTempSysfsPath = "/sys/class/thermal/thermal_zone0/temp";
+
+// ---------------------------------------------------------------------------
+// MCP23017 / I2C fault tolerance
+// ---------------------------------------------------------------------------
+
+/// Reconnection retry interval in milliseconds when MCP23017 is disconnected.
+constexpr unsigned int kMcpReconnectIntervalMs = 1000;
+
+/// Number of consecutive I2C read errors before declaring MCP23017 disconnected.
+constexpr int kMcpMaxConsecutiveErrors = 5;
+

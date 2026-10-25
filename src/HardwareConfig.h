@@ -91,9 +91,12 @@ extern float CODEC_OUTPUT_GAIN_DB[kCodecChannels];
 // ---------------------------------------------------------------------------
 
 struct ChannelConfig {
-    int   audioIns[2]; ///< Bela audio input indices (-1 = unused slot).
+    int   audioIns[2]; ///< Bela audio input indices. [0] = left/mono, [1] = right (-1 = mono: right mirrors left).
     bool  micMode;     ///< true = bypass master ParamEq / HPF-LPF / kills.
     float hpfHz;       ///< Mic-path HPF cutoff (Hz); 0 = off. Applied only when micMode.
+
+    /// Returns true when this channel is configured as stereo (audioIns[1] != -1).
+    bool isStereo() const { return audioIns[1] != -1; }
 };
 
 extern ChannelConfig AUX1_CONFIG;

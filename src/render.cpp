@@ -27,12 +27,17 @@ https://bela.io
 #include "ConfigLoader.h"
 
 HardwareManager gHardwareManager;
-ChannelStrip    gChannelStrip;   // IN0 → master (CH1)
-ChannelStrip    gChannelStrip2;  // IN1 → master (CH2)
-ChannelStrip    gChannelStrip3;  // IN2 → master (AUX3)
-ChannelStrip    gChannelStrip4;  // IN3 → master (AUX4)
+ChannelStrip    gChannelStrip;    // AUX1 left/mono
+ChannelStrip    gChannelStripR;   // AUX1 right (active when AUX1_CONFIG.isStereo())
+ChannelStrip    gChannelStrip2;   // AUX2 left/mono
+ChannelStrip    gChannelStrip2R;  // AUX2 right
+ChannelStrip    gChannelStrip3;   // AUX3 left/mono
+ChannelStrip    gChannelStrip3R;  // AUX3 right
+ChannelStrip    gChannelStrip4;   // AUX4 left/mono
+ChannelStrip    gChannelStrip4R;  // AUX4 right
 
-MasterFx        gMasterFx;
+MasterFx        gMasterFx;   // left / mono master bus
+MasterFx        gMasterFxR;  // right master bus (used only when MASTER_OUTS_COUNT >= 2)
 DubSiren        gDubSiren;
 SamplePlayer    gSamplePlayer;
 AuxiliaryTask   gI2cTask;
@@ -57,7 +62,9 @@ BiquadFilter    gVuMidLpf;  // MID  : LPF  @ kKillFc2 (1200 Hz)
 BiquadFilter    gVuTopHpf;  // TOP  : HPF  @ kKillFc2 (1200 Hz)
 
 // Mic-mode dry HPF: 24 dB/oct (kMicHpfStages × Butterworth) per AUX.
-BiquadFilter    gMicHpf[4][kMicHpfStages];
+// Separate L and R instances so both can run in the same sample iteration.
+BiquadFilter    gMicHpf [4][kMicHpfStages]; // left bus
+BiquadFilter    gMicHpfR[4][kMicHpfStages]; // right bus
 bool            gMicHpfActive[4] = { false, false, false, false };
 /// Bits 0–3 set by gui_control callback; consumed at start of render() to rebuild coeffs.
 static std::atomic<uint8_t> gMicHpfPendingMask{0};
@@ -163,7 +170,7 @@ static void fillConfigMetaBuf() {
     gConfigMetaBuf[4]  = (float)kMcpAddress;
     gConfigMetaBuf[5]  = (float)MASTER_OUTS_COUNT;
     gConfigMetaBuf[6]  = (float)(MASTER_OUTS_COUNT > 0 ? MASTER_OUTS[0] : 0);
-    gConfigMetaBuf[7]  = (float)(MASTER_OUTS_COUNT > 1 ? MASTER_OUTS[1] : 0);
+    gConfigMetaBuf[7]  = (float)(MASTER_OUTS_COUNT > 1 ? MASTER_OUTS[1] : -1);
     gConfigMetaBuf[8]  = (float)FX1_SEND_OUT;
     gConfigMetaBuf[9]  = (float)FX2_SEND_OUT;
     gConfigMetaBuf[10] = (float)VU_SUB_OUT;
@@ -172,22 +179,31 @@ static void fillConfigMetaBuf() {
     gConfigMetaBuf[13] = (float)VU_TOP_OUT;
     gConfigMetaBuf[14] = (float)FX1_RETURN_IN;
     gConfigMetaBuf[15] = (float)FX2_RETURN_IN;
+    // AUX channel left (L / mono)
     gConfigMetaBuf[16] = (float)AUX1_CONFIG.audioIns[0];
     gConfigMetaBuf[17] = (float)AUX2_CONFIG.audioIns[0];
     gConfigMetaBuf[18] = (float)AUX3_CONFIG.audioIns[0];
     gConfigMetaBuf[19] = (float)AUX4_CONFIG.audioIns[0];
+    // AUX mic mode
     gConfigMetaBuf[20] = AUX1_CONFIG.micMode ? 1.f : 0.f;
     gConfigMetaBuf[21] = AUX2_CONFIG.micMode ? 1.f : 0.f;
     gConfigMetaBuf[22] = AUX3_CONFIG.micMode ? 1.f : 0.f;
     gConfigMetaBuf[23] = AUX4_CONFIG.micMode ? 1.f : 0.f;
+    // AUX HPF cutoff
     gConfigMetaBuf[24] = AUX1_CONFIG.hpfHz;
     gConfigMetaBuf[25] = AUX2_CONFIG.hpfHz;
     gConfigMetaBuf[26] = AUX3_CONFIG.hpfHz;
     gConfigMetaBuf[27] = AUX4_CONFIG.hpfHz;
-    gConfigMetaBuf[28] = (float)kIgnoredPotsCount;
+    // AUX channel right (-1 = mono)
+    gConfigMetaBuf[28] = (float)AUX1_CONFIG.audioIns[1];
+    gConfigMetaBuf[29] = (float)AUX2_CONFIG.audioIns[1];
+    gConfigMetaBuf[30] = (float)AUX3_CONFIG.audioIns[1];
+    gConfigMetaBuf[31] = (float)AUX4_CONFIG.audioIns[1];
+    // Ignored pots
+    gConfigMetaBuf[32] = (float)kIgnoredPotsCount;
     for(int i = 0; i < kIgnoredPotsCount; ++i) {
-        gConfigMetaBuf[29 + i*2 + 0] = (float)kIgnoredPots[i].mux;
-        gConfigMetaBuf[29 + i*2 + 1] = (float)kIgnoredPots[i].pot;
+        gConfigMetaBuf[33 + i*2 + 0] = (float)kIgnoredPots[i].mux;
+        gConfigMetaBuf[33 + i*2 + 1] = (float)kIgnoredPots[i].pot;
     }
 }
 
@@ -205,9 +221,20 @@ static PotRef gGeqPots[GraphicEq::kNumBands];
 // ---------------------------------------------------------------------------
 
 void readI2cTask(void*) {
+    const int reconnectTicksMax = (int)(kMcpReconnectIntervalMs / 5);
+    int reconnectTicks = 0;
     while(!Bela_stopRequested()) {
-        gHardwareManager.readMcp23017();
-        usleep(5000);
+        if(gHardwareManager.isMcpConnected()) {
+            gHardwareManager.readMcp23017();
+            usleep(5000);
+        } else {
+            // When MCP is not connected, retry probe periodically without blocking audio
+            if(++reconnectTicks >= reconnectTicksMax) {
+                reconnectTicks = 0;
+                gHardwareManager.initMcp23017(false);
+            }
+            usleep(5000);
+        }
     }
 }
 
@@ -252,24 +279,28 @@ static inline float scaleFxSendPot(float pot) {
 }
 
 /**
- * Reads all valid audio inputs for the given config and returns their average.
- * Single input → direct pass-through. Two inputs → averaged to mono.
+ * Returns the left (or only) input sample for the given config and frame.
+ * audioIns[0] is always the left/mono channel.
  */
-static inline float readChannelInput(BelaContext* ctx, unsigned int frame,
-                                     const ChannelConfig& cfg) {
-    float sum   = 0.f;
-    int   count = 0;
-    for(int i = 0; i < 2; ++i) {
-        if(cfg.audioIns[i] != -1) {
-            sum += audioRead(ctx, frame, cfg.audioIns[i]);
-            ++count;
-        }
-    }
-    return (count > 0) ? sum / count : 0.f;
+static inline float readChannelInputL(BelaContext* ctx, unsigned int frame,
+                                      const ChannelConfig& cfg) {
+    int ch = cfg.audioIns[0];
+    return (ch >= 0 && (unsigned int)ch < ctx->audioInChannels) ? audioRead(ctx, frame, ch) : 0.f;
 }
 
 /**
- * Configures one AUX mic HPF from ChannelConfig.
+ * Returns the right input sample for the given config and frame.
+ * When audioIns[1] == -1 (mono channel), mirrors the left sample.
+ */
+static inline float readChannelInputR(BelaContext* ctx, unsigned int frame,
+                                      const ChannelConfig& cfg) {
+    int ch = (cfg.audioIns[1] != -1) ? cfg.audioIns[1] : cfg.audioIns[0];
+    return (ch >= 0 && (unsigned int)ch < ctx->audioInChannels) ? audioRead(ctx, frame, ch) : 0.f;
+}
+
+
+/**
+ * Configures one AUX mic HPF from ChannelConfig (both L and R instances).
  * hpfHz <= 0 or !micMode → inactive bypass.
  * Safe to call from the audio thread (start of render block).
  */
@@ -281,8 +312,10 @@ static void setupMicHpf(int idx, const ChannelConfig& cfg, float sampleRate) {
     if(fc < kMicHpfFMin) fc = kMicHpfFMin;
     if(fc > kMicHpfFMax) fc = kMicHpfFMax;
     for(int s = 0; s < kMicHpfStages; ++s) {
-        gMicHpf[idx][s].reset();
-        gMicHpf[idx][s].setHighPass(fc, kMicHpfQ, sampleRate);
+        gMicHpf [idx][s].reset();
+        gMicHpfR[idx][s].reset();
+        gMicHpf [idx][s].setHighPass(fc, kMicHpfQ, sampleRate);
+        gMicHpfR[idx][s].setHighPass(fc, kMicHpfQ, sampleRate);
     }
     gMicHpfActive[idx] = true;
 }
@@ -311,11 +344,19 @@ static void refreshMicMetaSlots() {
     gConfigMetaBuf[27] = AUX4_CONFIG.hpfHz;
 }
 
-/** Applies the mic-path HPF cascade when active; otherwise returns x unchanged. */
+/** Applies the left mic-path HPF cascade when active; otherwise returns x unchanged. */
 static inline float applyMicHpf(int idx, float x) {
     if(!gMicHpfActive[idx]) return x;
     for(int s = 0; s < kMicHpfStages; ++s)
         x = gMicHpf[idx][s].process(x);
+    return x;
+}
+
+/** Applies the right mic-path HPF cascade when active; otherwise returns x unchanged. */
+static inline float applyMicHpfR(int idx, float x) {
+    if(!gMicHpfActive[idx]) return x;
+    for(int s = 0; s < kMicHpfStages; ++s)
+        x = gMicHpfR[idx][s].process(x);
     return x;
 }
 
@@ -398,6 +439,7 @@ static bool isSwitchNamed(bool portB, int pin) {
 
 /** Prints named switches (logical state) and unassigned pins (raw state) on change. */
 static void printChangedSwitches() {
+    if(!gHardwareManager.isMcpConnected()) return;
     static bool prevNamed[8] = {};  // sized for kNamedSwitches[8]
     static int  prevRawA = -1;
     static int  prevRawB = -1;
@@ -463,6 +505,14 @@ bool setup(BelaContext* context, void* userData) {
     // Apply routing.*.gain defaults to the codec (same APIs as the Meters UI).
     applyCodecGainsFromConfig();
 
+    rt_printf("[Audio] Channels active: %u in, %u out @ %.0f Hz\n",
+              context->audioInChannels, context->audioOutChannels, context->audioSampleRate);
+    if(context->audioInChannels < 10) {
+        rt_printf("[WARNING] Only %u audio inputs active! Channels 2-9 will be silent.\n"
+                  "          Set 'Audio input channels' to 10 in Bela IDE Project Settings (or pass -i 10 -o 10).\n",
+                  context->audioInChannels);
+    }
+
     // Populate the named-switch table after JSON overrides are applied.
     kNamedSwitches[0] = { "KILL_KICK",       KILL_KICK,       "KILL",    "open"     };
     kNamedSwitches[1] = { "KILL_SUB",        KILL_SUB,        "KILL",    "open"     };
@@ -489,10 +539,15 @@ bool setup(BelaContext* context, void* userData) {
     }
 
     gChannelStrip.setup(context->audioSampleRate);
+    gChannelStripR.setup(context->audioSampleRate);
     gChannelStrip2.setup(context->audioSampleRate);
+    gChannelStrip2R.setup(context->audioSampleRate);
     gChannelStrip3.setup(context->audioSampleRate);
+    gChannelStrip3R.setup(context->audioSampleRate);
     gChannelStrip4.setup(context->audioSampleRate);
+    gChannelStrip4R.setup(context->audioSampleRate);
     gMasterFx.setup(context->audioSampleRate);
+    gMasterFxR.setup(context->audioSampleRate);
     gDubSiren.setup(context->audioSampleRate);
     gSamplePlayer.setup(context->audioSampleRate, context->projectName);
 
@@ -523,8 +578,10 @@ bool setup(BelaContext* context, void* userData) {
     gStartupRampTotal     = (int)(sr * kStartupRampMs / 1000.f);
     gStartupRampRemaining = gStartupRampTotal;
 
-    if(!gHardwareManager.initMcp23017())
-        return false;
+    // Initialise MCP23017 — non-blocking if disconnected (preamp starts anyway)
+    if(!gHardwareManager.initMcp23017(true)) {
+        rt_printf("render: MCP23017 not detected — running without hardware switches (all switches OFF)\n");
+    }
 
     gI2cTask = Bela_createAuxiliaryTask(readI2cTask, 50, "i2c-reader", nullptr);
     Bela_scheduleAuxiliaryTask(gI2cTask);
@@ -683,6 +740,7 @@ void render(BelaContext* context, void* userData) {
 
     gHardwareManager.scanStep(context);
 
+    // Shared controls between L and R strips (same gain/EQ/FX send on both sides)
     // --- Channel Strip 1 controls ---
     gChannelStrip.setInputGain(gHardwareManager.getPotValue(AUX1_INPUT_GAIN));
     gChannelStrip.setEqGains(
@@ -692,6 +750,14 @@ void render(BelaContext* context, void* userData) {
     );
     gChannelStrip.setFxSend1Level(scaleFxSendPot(gHardwareManager.getPotValue(AUX1_FX_SEND)));
     gChannelStrip.setFxSend2Level(scaleFxSendPot(gHardwareManager.getPotValue(AUX1_FX2_SEND)));
+    gChannelStripR.setInputGain(gHardwareManager.getPotValue(AUX1_INPUT_GAIN));
+    gChannelStripR.setEqGains(
+        potToGainDb(gHardwareManager.getPotValue(AUX1_EQ_LOW)),
+        potToGainDb(gHardwareManager.getPotValue(AUX1_EQ_MID)),
+        potToGainDb(gHardwareManager.getPotValue(AUX1_EQ_HIGH))
+    );
+    gChannelStripR.setFxSend1Level(scaleFxSendPot(gHardwareManager.getPotValue(AUX1_FX_SEND)));
+    gChannelStripR.setFxSend2Level(scaleFxSendPot(gHardwareManager.getPotValue(AUX1_FX2_SEND)));
 
     // --- Channel Strip 2 controls ---
     gChannelStrip2.setInputGain(gHardwareManager.getPotValue(AUX2_INPUT_GAIN));
@@ -702,6 +768,14 @@ void render(BelaContext* context, void* userData) {
     );
     gChannelStrip2.setFxSend1Level(scaleFxSendPot(gHardwareManager.getPotValue(AUX2_FX_SEND)));
     gChannelStrip2.setFxSend2Level(scaleFxSendPot(gHardwareManager.getPotValue(AUX2_FX2_SEND)));
+    gChannelStrip2R.setInputGain(gHardwareManager.getPotValue(AUX2_INPUT_GAIN));
+    gChannelStrip2R.setEqGains(
+        potToGainDb(gHardwareManager.getPotValue(AUX2_EQ_LOW)),
+        potToGainDb(gHardwareManager.getPotValue(AUX2_EQ_MID)),
+        potToGainDb(gHardwareManager.getPotValue(AUX2_EQ_HIGH))
+    );
+    gChannelStrip2R.setFxSend1Level(scaleFxSendPot(gHardwareManager.getPotValue(AUX2_FX_SEND)));
+    gChannelStrip2R.setFxSend2Level(scaleFxSendPot(gHardwareManager.getPotValue(AUX2_FX2_SEND)));
 
     // --- AUX 3 controls ---
     gChannelStrip3.setInputGain(gHardwareManager.getPotValue(AUX3_INPUT_GAIN));
@@ -712,6 +786,14 @@ void render(BelaContext* context, void* userData) {
     );
     gChannelStrip3.setFxSend1Level(scaleFxSendPot(gHardwareManager.getPotValue(AUX3_FX_SEND)));
     gChannelStrip3.setFxSend2Level(scaleFxSendPot(gHardwareManager.getPotValue(AUX3_FX2_SEND)));
+    gChannelStrip3R.setInputGain(gHardwareManager.getPotValue(AUX3_INPUT_GAIN));
+    gChannelStrip3R.setEqGains(
+        potToGainDb(gHardwareManager.getPotValue(AUX3_EQ_LOW)),
+        potToGainDb(gHardwareManager.getPotValue(AUX3_EQ_MID)),
+        potToGainDb(gHardwareManager.getPotValue(AUX3_EQ_HIGH))
+    );
+    gChannelStrip3R.setFxSend1Level(scaleFxSendPot(gHardwareManager.getPotValue(AUX3_FX_SEND)));
+    gChannelStrip3R.setFxSend2Level(scaleFxSendPot(gHardwareManager.getPotValue(AUX3_FX2_SEND)));
 
     // --- AUX 4 controls ---
     gChannelStrip4.setInputGain(gHardwareManager.getPotValue(AUX4_INPUT_GAIN));
@@ -722,54 +804,84 @@ void render(BelaContext* context, void* userData) {
     );
     gChannelStrip4.setFxSend1Level(scaleFxSendPot(gHardwareManager.getPotValue(AUX4_FX_SEND)));
     gChannelStrip4.setFxSend2Level(scaleFxSendPot(gHardwareManager.getPotValue(AUX4_FX2_SEND)));
+    gChannelStrip4R.setInputGain(gHardwareManager.getPotValue(AUX4_INPUT_GAIN));
+    gChannelStrip4R.setEqGains(
+        potToGainDb(gHardwareManager.getPotValue(AUX4_EQ_LOW)),
+        potToGainDb(gHardwareManager.getPotValue(AUX4_EQ_MID)),
+        potToGainDb(gHardwareManager.getPotValue(AUX4_EQ_HIGH))
+    );
+    gChannelStrip4R.setFxSend1Level(scaleFxSendPot(gHardwareManager.getPotValue(AUX4_FX_SEND)));
+    gChannelStrip4R.setFxSend2Level(scaleFxSendPot(gHardwareManager.getPotValue(AUX4_FX2_SEND)));
 
-    // --- Master parametric EQ ---
-    gMasterFx.setParamEqBand(ParametricEq::SUB,
-        gHardwareManager.getPotValue(MASTER_EQ_SUB_FREQ),
-        potToGainDb(gHardwareManager.getPotValue(MASTER_EQ_SUB_GAIN), kMasterEqGainRangeDb)
-    );
-    gMasterFx.setParamEqBand(ParametricEq::KICK,
-        gHardwareManager.getPotValue(MASTER_EQ_KICK_FREQ),
-        potToGainDb(gHardwareManager.getPotValue(MASTER_EQ_KICK_GAIN), kMasterEqGainRangeDb)
-    );
-    gMasterFx.setParamEqBand(ParametricEq::MID,
-        gHardwareManager.getPotValue(MASTER_EQ_MID_FREQ),
-        potToGainDb(gHardwareManager.getPotValue(MASTER_EQ_MID_GAIN), kMasterEqGainRangeDb)
-    );
-    gMasterFx.setParamEqBand(ParametricEq::TOP,
-        gHardwareManager.getPotValue(MASTER_EQ_TOP_FREQ),
-        potToGainDb(gHardwareManager.getPotValue(MASTER_EQ_TOP_GAIN), kMasterEqGainRangeDb)
-    );
+    // --- Master parametric EQ — mirrored on both L and R buses ---
+    {
+        const float subFreq  = gHardwareManager.getPotValue(MASTER_EQ_SUB_FREQ);
+        const float subGain  = potToGainDb(gHardwareManager.getPotValue(MASTER_EQ_SUB_GAIN),  kMasterEqGainRangeDb);
+        const float kickFreq = gHardwareManager.getPotValue(MASTER_EQ_KICK_FREQ);
+        const float kickGain = potToGainDb(gHardwareManager.getPotValue(MASTER_EQ_KICK_GAIN), kMasterEqGainRangeDb);
+        const float midFreq  = gHardwareManager.getPotValue(MASTER_EQ_MID_FREQ);
+        const float midGain  = potToGainDb(gHardwareManager.getPotValue(MASTER_EQ_MID_GAIN),  kMasterEqGainRangeDb);
+        const float topFreq  = gHardwareManager.getPotValue(MASTER_EQ_TOP_FREQ);
+        const float topGain  = potToGainDb(gHardwareManager.getPotValue(MASTER_EQ_TOP_GAIN),  kMasterEqGainRangeDb);
+        gMasterFx.setParamEqBand(ParametricEq::SUB,  subFreq,  subGain);
+        gMasterFx.setParamEqBand(ParametricEq::KICK, kickFreq, kickGain);
+        gMasterFx.setParamEqBand(ParametricEq::MID,  midFreq,  midGain);
+        gMasterFx.setParamEqBand(ParametricEq::TOP,  topFreq,  topGain);
+        gMasterFxR.setParamEqBand(ParametricEq::SUB,  subFreq,  subGain);
+        gMasterFxR.setParamEqBand(ParametricEq::KICK, kickFreq, kickGain);
+        gMasterFxR.setParamEqBand(ParametricEq::MID,  midFreq,  midGain);
+        gMasterFxR.setParamEqBand(ParametricEq::TOP,  topFreq,  topGain);
+    }
 
-    // --- Master graphic EQ — 12 bands (centered=true in each PotRef → snap at 0.5) ---
-    for(int i = 0; i < GraphicEq::kNumBands; ++i)
-        gMasterFx.setGraphicEqBand(i, potToGainDb(gHardwareManager.getPotValue(gGeqPots[i]), kGEqGainRangeDb));
+    // --- Master graphic EQ — 12 bands, mirrored on both buses ---
+    for(int i = 0; i < GraphicEq::kNumBands; ++i) {
+        float gdb = potToGainDb(gHardwareManager.getPotValue(gGeqPots[i]), kGEqGainRangeDb);
+        gMasterFx.setGraphicEqBand(i, gdb);
+        gMasterFxR.setGraphicEqBand(i, gdb);
+    }
 
-    // --- Master filter section (HPF + LPF — pot at 0 = filter OFF) ---
-    gMasterFx.setHpf(
-        gHardwareManager.getPotValue(MASTER_HPF_FREQ),
-        gHardwareManager.getPotValue(MASTER_HPF_RES)
-    );
-    gMasterFx.setLpf(
-        gHardwareManager.getPotValue(MASTER_LPF_FREQ),
-        gHardwareManager.getPotValue(MASTER_LPF_RES)
-    );
+    // --- Master filter section (HPF + LPF) — mirrored on both buses ---
+    {
+        const float hpfFreq = gHardwareManager.getPotValue(MASTER_HPF_FREQ);
+        const float hpfRes  = gHardwareManager.getPotValue(MASTER_HPF_RES);
+        const float lpfFreq = gHardwareManager.getPotValue(MASTER_LPF_FREQ);
+        const float lpfRes  = gHardwareManager.getPotValue(MASTER_LPF_RES);
+        gMasterFx.setHpf(hpfFreq, hpfRes);
+        gMasterFx.setLpf(lpfFreq, lpfRes);
+        gMasterFxR.setHpf(hpfFreq, hpfRes);
+        gMasterFxR.setLpf(lpfFreq, lpfRes);
+    }
 
-    // --- Master kill switches — targets updated here, ramp advances per sample ---
+    // --- Master kill switches — mirrored on both buses ---
     const bool killSub  = gHardwareManager.getSwitchState(KILL_SUB);
     const bool killKick = gHardwareManager.getSwitchState(KILL_KICK);
     const bool killMid  = gHardwareManager.getSwitchState(KILL_MID);
     const bool killTop  = gHardwareManager.getSwitchState(KILL_TOP);
     gMasterFx.setKills(killSub, killKick, killMid, killTop);
+    gMasterFxR.setKills(killSub, killKick, killMid, killTop);
 
-    // --- Band Trim (SUB / KICK / MID / TOP) ---
-    gMasterFx.setBandTrim(BandTrim::SUB,  potToGainDb(gHardwareManager.getPotValue(BTRIM_SUB),  kBandTrimGainDb));
-    gMasterFx.setBandTrim(BandTrim::KICK, potToGainDb(gHardwareManager.getPotValue(BTRIM_KICK), kBandTrimGainDb));
-    gMasterFx.setBandTrim(BandTrim::MID,  potToGainDb(gHardwareManager.getPotValue(BTRIM_MID),  kBandTrimGainDb));
-    gMasterFx.setBandTrim(BandTrim::TOP,  potToGainDb(gHardwareManager.getPotValue(BTRIM_TOP),  kBandTrimGainDb));
+    // --- Band Trim — mirrored on both buses ---
+    {
+        const float trimSub  = potToGainDb(gHardwareManager.getPotValue(BTRIM_SUB),  kBandTrimGainDb);
+        const float trimKick = potToGainDb(gHardwareManager.getPotValue(BTRIM_KICK), kBandTrimGainDb);
+        const float trimMid  = potToGainDb(gHardwareManager.getPotValue(BTRIM_MID),  kBandTrimGainDb);
+        const float trimTop  = potToGainDb(gHardwareManager.getPotValue(BTRIM_TOP),  kBandTrimGainDb);
+        gMasterFx.setBandTrim(BandTrim::SUB,  trimSub);
+        gMasterFx.setBandTrim(BandTrim::KICK, trimKick);
+        gMasterFx.setBandTrim(BandTrim::MID,  trimMid);
+        gMasterFx.setBandTrim(BandTrim::TOP,  trimTop);
+        gMasterFxR.setBandTrim(BandTrim::SUB,  trimSub);
+        gMasterFxR.setBandTrim(BandTrim::KICK, trimKick);
+        gMasterFxR.setBandTrim(BandTrim::MID,  trimMid);
+        gMasterFxR.setBandTrim(BandTrim::TOP,  trimTop);
+    }
 
-    // --- Master output gain ---
-    gMasterFx.setMasterGain(gHardwareManager.getPotValue(MASTER_GAIN));
+    // --- Master output gain — mirrored on both buses ---
+    {
+        const float mg = gHardwareManager.getPotValue(MASTER_GAIN);
+        gMasterFx.setMasterGain(mg);
+        gMasterFxR.setMasterGain(mg);
+    }
 
     // --- FX send 1 filter mode (PA5 = MIDS, PA6 = TOPS) ---
     const bool fxModeMids = gHardwareManager.getSwitchState(FX_FILTER_MIDS);
@@ -831,32 +943,51 @@ void render(BelaContext* context, void* userData) {
     const bool anyMic = AUX1_CONFIG.micMode || AUX2_CONFIG.micMode
                      || AUX3_CONFIG.micMode || AUX4_CONFIG.micMode;
 
+    // Stereo output: MASTER_OUTS[0] = L (or mono), MASTER_OUTS[1] = R (when stereo).
+    // true when both L and R master outputs are configured.
+    const bool stereoOut = (MASTER_OUTS_COUNT >= 2);
+
     // --- Sample loop ---
     bool clipCh0 = false;
     bool clipCh1 = false;
 
     for(unsigned int n = 0; n < context->audioFrames; n++) {
-        float in0 = readChannelInput(context, n, AUX1_CONFIG);
-        float in1 = readChannelInput(context, n, AUX2_CONFIG);
+        // Left (or mono) inputs
+        float in0L = readChannelInputL(context, n, AUX1_CONFIG);
+        float in1L = readChannelInputL(context, n, AUX2_CONFIG);
 
-        if(fabsf(in0) >= kClipThreshold) clipCh0 = true;
-        if(fabsf(in1) >= kClipThreshold) clipCh1 = true;
+        if(fabsf(in0L) >= kClipThreshold) clipCh0 = true;
+        if(fabsf(in1L) >= kClipThreshold) clipCh1 = true;
 
-        float in2  = readChannelInput(context, n, AUX3_CONFIG);
-        float in3  = readChannelInput(context, n, AUX4_CONFIG);
-        float dry1 = applyMicHpf(0, gChannelStrip.process(in0));
-        float dry2 = applyMicHpf(1, gChannelStrip2.process(in1));
-        float dry3 = applyMicHpf(2, gChannelStrip3.process(in2));
-        float dry4 = applyMicHpf(3, gChannelStrip4.process(in3));
+        float in2L = readChannelInputL(context, n, AUX3_CONFIG);
+        float in3L = readChannelInputL(context, n, AUX4_CONFIG);
 
-        // Siren + sampler: process before FX send to include their FX outputs
+        // Right inputs (mirror left when mono)
+        float in0R = readChannelInputR(context, n, AUX1_CONFIG);
+        float in1R = readChannelInputR(context, n, AUX2_CONFIG);
+        float in2R = readChannelInputR(context, n, AUX3_CONFIG);
+        float in3R = readChannelInputR(context, n, AUX4_CONFIG);
+
+        // Left channel strips
+        float dry1L = applyMicHpf(0, gChannelStrip.process(in0L));
+        float dry2L = applyMicHpf(1, gChannelStrip2.process(in1L));
+        float dry3L = applyMicHpf(2, gChannelStrip3.process(in2L));
+        float dry4L = applyMicHpf(3, gChannelStrip4.process(in3L));
+
+        // Right channel strips (share gain/EQ targets; independent IIR state + independent mic HPF)
+        float dry1R = applyMicHpfR(0, gChannelStripR.process(in0R));
+        float dry2R = applyMicHpfR(1, gChannelStrip2R.process(in1R));
+        float dry3R = applyMicHpfR(2, gChannelStrip3R.process(in2R));
+        float dry4R = applyMicHpfR(3, gChannelStrip4R.process(in3R));
+
+        // Siren + sampler: mono sources, present equally on L and R
         float sirenOut   = gDubSiren.process();
         float samplerOut = gSamplePlayer.process();
 
-       // FX send 1: all channel strips + siren + sampler → filtered by mode → OUT2
-       float fxSend = gChannelStrip.fxOut()  + gChannelStrip2.fxOut()
-                    + gChannelStrip3.fxOut() + gChannelStrip4.fxOut()
-                    + gDubSiren.fxOut() + gSamplePlayer.fxOut();
+        // FX send 1: use left-bus fxOut() (mono FX bus) — filtered by mode → OUT2
+        float fxSend = gChannelStrip.fxOut()  + gChannelStrip2.fxOut()
+                     + gChannelStrip3.fxOut() + gChannelStrip4.fxOut()
+                     + gDubSiren.fxOut() + gSamplePlayer.fxOut();
         if(fxModeTops)
             fxSend = gFxHpf4k.process(fxSend);                           // > 4 kHz only
         else if(fxModeMids)
@@ -864,7 +995,7 @@ void render(BelaContext* context, void* userData) {
         else
             fxSend = gFxMidHpf.process(fxSend);                          // > 250 Hz (MID+TOP)
 
-        // FX send 2: all channel strips + siren/sampler fx2 → filtered by mode → OUT3
+        // FX send 2: mono FX bus → OUT3
         float fxSend2 = gChannelStrip.fxOut2()  + gChannelStrip2.fxOut2()
                       + gChannelStrip3.fxOut2() + gChannelStrip4.fxOut2()
                       + gDubSiren.fxOut2() + gSamplePlayer.fxOut2();
@@ -875,37 +1006,54 @@ void render(BelaContext* context, void* userData) {
         else
             fxSend2 = gFx2MidHpf.process(fxSend2);                       // > 250 Hz (MID+TOP)
 
-        // FX returns: gain-trimmed (MUX0 CH00/CH15) then noise-gated to suppress idle hum
+        // FX returns: mono, added equally to both buses
         float fxReturn  = gMasterFx.processFxReturn (audioRead(context, n, FX1_RETURN_IN) * fx1ReturnGain);
         float fxReturn2 = gMasterFx.processFxReturn2(audioRead(context, n, FX2_RETURN_IN) * fx2ReturnGain);
+        const float monoExtras = sirenOut + samplerOut;
 
-        // Master bus mix — routing controlled by kFxReturnPostMaster (SoftwareConfig.h).
-        // POST (true) : FX returns bypass all master DSP; only masterGain applies.
-        // PRE  (false): FX returns enter the full chain (EQ → filters → kills).
-        // Mic-mode AUX dry is summed separately and processed via processMicPath()
-        // (bypasses ParamEq / HPF-LPF / kills; still gets GEQ + BandTrim + gain).
-        float dryNormal = 0.f;
-        float dryMic    = 0.f;
-        if(AUX1_CONFIG.micMode) dryMic    += dry1; else dryNormal += dry1;
-        if(AUX2_CONFIG.micMode) dryMic    += dry2; else dryNormal += dry2;
-        if(AUX3_CONFIG.micMode) dryMic    += dry3; else dryNormal += dry3;
-        if(AUX4_CONFIG.micMode) dryMic    += dry4; else dryNormal += dry4;
-        dryNormal += sirenOut + samplerOut;
+        // ---- Left master bus ----
+        // Routing controlled by kFxReturnPostMaster (SoftwareConfig.h).
+        // Mic-mode AUX dry: bypasses ParamEq / HPF-LPF / kills; still gets GEQ + BandTrim + gain.
+        float dryNormalL = 0.f, dryMicL = 0.f;
+        if(AUX1_CONFIG.micMode) dryMicL    += dry1L; else dryNormalL += dry1L;
+        if(AUX2_CONFIG.micMode) dryMicL    += dry2L; else dryNormalL += dry2L;
+        if(AUX3_CONFIG.micMode) dryMicL    += dry3L; else dryNormalL += dry3L;
+        if(AUX4_CONFIG.micMode) dryMicL    += dry4L; else dryNormalL += dry4L;
+        dryNormalL += monoExtras;
 
-        float out;
+        float outL;
         if(kFxReturnPostMaster) {
-            out = gMasterFx.process(dryNormal);
-            if(anyMic)
-                out += gMasterFx.processMicPath(dryMic);
-            out += (fxReturn + fxReturn2) * gMasterFx.getMasterGain();
+            outL = gMasterFx.process(dryNormalL);
+            if(anyMic) outL += gMasterFx.processMicPath(dryMicL);
+            outL += (fxReturn + fxReturn2) * gMasterFx.getMasterGain();
         } else {
-            // PRE: FX returns join the normal (non-mic) path through the full chain.
-            out = gMasterFx.process(dryNormal + fxReturn + fxReturn2);
-            if(anyMic)
-                out += gMasterFx.processMicPath(dryMic);
+            outL = gMasterFx.process(dryNormalL + fxReturn + fxReturn2);
+            if(anyMic) outL += gMasterFx.processMicPath(dryMicL);
         }
+        outL = gMasterFx.limitOutput(outL);
 
-        out = gMasterFx.limitOutput(out);
+        // ---- Right master bus (only when stereo output is configured) ----
+        float outR;
+        if(stereoOut) {
+            float dryNormalR = 0.f, dryMicR = 0.f;
+            if(AUX1_CONFIG.micMode) dryMicR    += dry1R; else dryNormalR += dry1R;
+            if(AUX2_CONFIG.micMode) dryMicR    += dry2R; else dryNormalR += dry2R;
+            if(AUX3_CONFIG.micMode) dryMicR    += dry3R; else dryNormalR += dry3R;
+            if(AUX4_CONFIG.micMode) dryMicR    += dry4R; else dryNormalR += dry4R;
+            dryNormalR += monoExtras;
+
+            if(kFxReturnPostMaster) {
+                outR = gMasterFxR.process(dryNormalR);
+                if(anyMic) outR += gMasterFxR.processMicPath(dryMicR);
+                outR += (fxReturn + fxReturn2) * gMasterFxR.getMasterGain();
+            } else {
+                outR = gMasterFxR.process(dryNormalR + fxReturn + fxReturn2);
+                if(anyMic) outR += gMasterFxR.processMicPath(dryMicR);
+            }
+            outR = gMasterFxR.limitOutput(outR);
+        } else {
+            outR = outL; // unused when mono, but keep consistent
+        }
 
         // Startup mute ramp: linear fade 0→1 over kStartupRampMs to suppress DAC pop
         float startupGain = 1.f;
@@ -914,33 +1062,40 @@ void render(BelaContext* context, void* userData) {
             --gStartupRampRemaining;
         }
 
-        scope.log(dry1 + dry2 + fxReturn, out);
+        scope.log(dry1L + dry2L + fxReturn, outL);
         audioWrite(context, n, FX1_SEND_OUT, fxSend  * startupGain);
         audioWrite(context, n, FX2_SEND_OUT, fxSend2 * startupGain);
-        for(int i = 0; i < MASTER_OUTS_COUNT; ++i)
-            audioWrite(context, n, MASTER_OUTS[i], out * startupGain);
 
-        // VU meters — band-split the actual master out (kills already applied
-        // on the normal path; mic-mode energy remains visible when present).
-        float vuSub  = gVuSubLpf.process(out);
-        float vuKick = gVuKickLpf.process(gVuKickHpf.process(out));
-        float vuMid  = gVuMidLpf .process(gVuMidHpf .process(out));
-        float vuTop  = gVuTopHpf.process(out);
+        // Master outputs: MASTER_OUTS[0] = L (or mono), MASTER_OUTS[1] = R
+        if(stereoOut) {
+            audioWrite(context, n, MASTER_OUTS[0], outL * startupGain);
+            audioWrite(context, n, MASTER_OUTS[1], outR * startupGain);
+            for(int i = 2; i < MASTER_OUTS_COUNT; ++i)
+                audioWrite(context, n, MASTER_OUTS[i], outL * startupGain);
+        } else {
+            for(int i = 0; i < MASTER_OUTS_COUNT; ++i)
+                audioWrite(context, n, MASTER_OUTS[i], outL * startupGain);
+        }
+
+        // VU meters — band-split the L master bus (reference signal)
+        float vuSub  = gVuSubLpf.process(outL);
+        float vuKick = gVuKickLpf.process(gVuKickHpf.process(outL));
+        float vuMid  = gVuMidLpf .process(gVuMidHpf .process(outL));
+        float vuTop  = gVuTopHpf.process(outL);
         audioWrite(context, n, VU_SUB_OUT,  vuSub  * startupGain);
         audioWrite(context, n, VU_KICK_OUT, vuKick * startupGain);
         audioWrite(context, n, VU_MID_OUT,  vuMid  * startupGain);
         audioWrite(context, n, VU_TOP_OUT,  vuTop  * startupGain);
 
         // GUI peak tracking — one max(|x|) per channel per update interval.
-        // Uses pre-gain values so the meters reflect true DSP levels.
         #define GUI_PEAK(i, x) { float _a = fabsf(x); if(_a > gAudioPeaks[i]) gAudioPeaks[i] = _a; }
-        GUI_PEAK(0,  in0)
-        GUI_PEAK(1,  in1)
-        GUI_PEAK(2,  in2)
-        GUI_PEAK(3,  in3)
+        GUI_PEAK(0,  in0L)
+        GUI_PEAK(1,  in1L)
+        GUI_PEAK(2,  in2L)
+        GUI_PEAK(3,  in3L)
         GUI_PEAK(4,  fxReturn)
         GUI_PEAK(5,  fxReturn2)
-        GUI_PEAK(6,  out)
+        GUI_PEAK(6,  outL)
         GUI_PEAK(7,  fxSend)
         GUI_PEAK(8,  fxSend2)
         GUI_PEAK(9,  vuSub)
@@ -1036,14 +1191,16 @@ void render(BelaContext* context, void* userData) {
         printChangedSwitches();
 
         // Siren trigger: log gate state with the active preset name
-        static bool prevSirenTrigger = false;
-        bool sirenTrigger = gHardwareManager.getSwitchState(SIREN_TRIGGER);
-        if(sirenTrigger != prevSirenTrigger) {
-            if(sirenTrigger)
-                rt_printf("[SW]  SIREN_TRIGGER      →  ON  [%s]\n", gDubSiren.getPresetName());
-            else
-                rt_printf("[SW]  SIREN_TRIGGER      →  off\n");
-            prevSirenTrigger = sirenTrigger;
+        if(gHardwareManager.isMcpConnected()) {
+            static bool prevSirenTrigger = false;
+            bool sirenTrigger = gHardwareManager.getSwitchState(SIREN_TRIGGER);
+            if(sirenTrigger != prevSirenTrigger) {
+                if(sirenTrigger)
+                    rt_printf("[SW]  SIREN_TRIGGER      →  ON  [%s]\n", gDubSiren.getPresetName());
+                else
+                    rt_printf("[SW]  SIREN_TRIGGER      →  off\n");
+                prevSirenTrigger = sirenTrigger;
+            }
         }
     }
 }

@@ -29,14 +29,21 @@ const ROUTING_OUT_KEYS = [
 ];
 
 /**
- * Reads the channel number from a routing.in value (legacy number or {channel, mic, hpf, gain}).
+ * Reads the channel(s) from a routing.in value (legacy number or {channel|channels, mic, hpf, gain}).
  * @param {*} val
- * @returns {number}
+ * @returns {number|number[]}
  */
 function routingInChannel(val) {
-    if(val != null && typeof val === 'object' && !Array.isArray(val))
-        return val.channel != null ? val.channel : 0;
-    if(Array.isArray(val)) return val[0] != null ? val[0] : 0;
+    if(val != null && typeof val === 'object' && !Array.isArray(val)) {
+        if(Array.isArray(val.channels)) return val.channels;
+        if(val.channel != null) {
+            if(val.channelR != null && val.channelR >= 0)
+                return [val.channel, val.channelR];
+            return val.channel;
+        }
+        return 0;
+    }
+    if(Array.isArray(val)) return val;
     return val != null ? val : 0;
 }
 
@@ -261,14 +268,15 @@ function buildRoutingTable(heading, dir, keys, values, withMic) {
     keys.forEach(key => {
         const raw = values[key];
         const isMaster = key === 'master';
+        const isStereoCapable = isMaster || key.startsWith('aux');
         const channelVal = withMic ? routingInChannel(raw) : routingOutChannel(raw);
-        const display = formatRoutingValue(channelVal, isMaster);
+        const display = formatRoutingValue(channelVal, isStereoCapable);
         const gainVal = routingGain(raw);
         const tr = document.createElement('tr');
         tr.dataset.routingDir = dir;
         tr.dataset.routingKey = key;
-        const inputType = isMaster ? 'text' : 'number';
-        const extraAttrs = isMaster
+        const inputType = isStereoCapable ? 'text' : 'number';
+        const extraAttrs = isStereoCapable
             ? 'placeholder="0 or 0,1" spellcheck="false"'
             : `min="${ROUTING_CH_MIN}" max="${ROUTING_CH_MAX}" step="1"`;
         let cells =
@@ -298,23 +306,22 @@ function buildRoutingTable(heading, dir, keys, values, withMic) {
 
 /** Formats a routing JSON value for the form input. */
 function formatRoutingValue(raw, asArray) {
-    if(asArray) {
+    if(asArray || Array.isArray(raw)) {
         const arr = Array.isArray(raw) ? raw : (raw != null ? [raw] : []);
         return arr.join(',');
     }
-    if(Array.isArray(raw)) return String(raw[0] != null ? raw[0] : 0);
     return String(raw != null ? raw : 0);
 }
 
 /**
- * Parses a channel field: scalar number, or comma-separated list for master.
+ * Parses a channel field: scalar number, or comma-separated list for stereo-capable signals.
  * @returns {number|number[]|null}
  */
 function parseRoutingInput(inp) {
     if(!inp) return null;
     const key = inp.dataset.key;
     const text = String(inp.value).trim();
-    if(key === 'master') {
+    if(key === 'master' || key.startsWith('aux')) {
         if(!text) return [];
         const parts = text.split(/[,\s]+/).filter(Boolean);
         const nums = parts.map(p => parseInt(p, 10));
@@ -340,19 +347,25 @@ export function fillRoutingFromConfigMeta() {
     if(masterCount > 0) masterOuts.push(Math.round(meta[M.MASTER_0]));
     if(masterCount > 1) masterOuts.push(Math.round(meta[M.MASTER_1]));
 
+    const getAuxIns = (leftIdx, rightIdx) => {
+        const l = Math.round(meta[leftIdx]);
+        const r = (meta.length > rightIdx) ? Math.round(meta[rightIdx]) : -1;
+        return (r >= 0) ? [l, r] : [l];
+    };
+
     const values = {
         in: {
-            fx1Return: Math.round(meta[M.FX1_RET]),
-            fx2Return: Math.round(meta[M.FX2_RET]),
-            aux1:      Math.round(meta[M.AUX1]),
-            aux2:      Math.round(meta[M.AUX2]),
-            aux3:      Math.round(meta[M.AUX3]),
-            aux4:      Math.round(meta[M.AUX4])
+            fx1Return: [Math.round(meta[M.FX1_RET])],
+            fx2Return: [Math.round(meta[M.FX2_RET])],
+            aux1:      getAuxIns(M.AUX1, M.AUX1_R),
+            aux2:      getAuxIns(M.AUX2, M.AUX2_R),
+            aux3:      getAuxIns(M.AUX3, M.AUX3_R),
+            aux4:      getAuxIns(M.AUX4, M.AUX4_R)
         },
         out: {
             master:  masterOuts,
-            fx1Send: Math.round(meta[M.FX1_SEND]),
-            fx2Send: Math.round(meta[M.FX2_SEND]),
+            fx1Send: [Math.round(meta[M.FX1_SEND])],
+            fx2Send: [Math.round(meta[M.FX2_SEND])],
             vuSub:   Math.round(meta[M.VU_SUB]),
             vuKick:  Math.round(meta[M.VU_KICK]),
             vuMid:   Math.round(meta[M.VU_MID]),
@@ -379,7 +392,7 @@ export function fillRoutingFromConfigMeta() {
         const key = inp.dataset.key;
         const raw = values[dir] && values[dir][key];
         if(raw === undefined) return;
-        inp.value = formatRoutingValue(raw, key === 'master');
+        inp.value = formatRoutingValue(raw, key === 'master' || key.startsWith('aux'));
     });
 
     document.querySelectorAll('.ri-mic').forEach(cb => {
@@ -401,7 +414,7 @@ function collectRoutingFromForm() {
         const inp = document.querySelector(`.ri[data-dir="${dir}"][data-key="${key}"]`);
         const parsed = parseRoutingInput(inp);
         if(parsed === null) return undefined;
-        if(key === 'master')
+        if(key === 'master' || key.startsWith('aux'))
             return Array.isArray(parsed) ? parsed : [parsed];
         return parsed;
     };
@@ -435,7 +448,7 @@ function collectRoutingFromForm() {
         const val = readChannel('out', key);
         if(val === undefined) return;
         const gain = readGain('out', key);
-        if(key === 'master')
+        if(key === 'master' || key.startsWith('fx'))
             out[key] = { channels: Array.isArray(val) ? val : [val], gain };
         else
             out[key] = { channel: val, gain };
@@ -446,7 +459,7 @@ function collectRoutingFromForm() {
         const ch = readChannel('in', key);
         if(ch === undefined) return;
         inn[key] = {
-            channel: ch,
+            channels: Array.isArray(ch) ? ch : [ch],
             mic: readMic(key),
             hpf: readHpf(key),
             gain: readGain('in', key)
@@ -592,7 +605,7 @@ function updateMappingConflicts() {
             const chans = Array.isArray(parsed) ? parsed : [parsed];
             const seenInField = new Set();
             chans.forEach(ch => {
-                if(typeof ch !== 'number' || isNaN(ch)) return;
+                if(typeof ch !== 'number' || isNaN(ch) || ch < 0) return;
                 if(seenInField.has(ch)) {
                     // Duplicate inside master list (e.g. "1,1")
                     messages.push('Routing ' + dir + ' channel ' + ch +

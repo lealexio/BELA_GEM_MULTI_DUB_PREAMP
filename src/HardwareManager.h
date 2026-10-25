@@ -90,8 +90,14 @@ public:
     // Switch accessors (MCP23017 — RT-safe, reads from cached mcpPortA_)
     // -----------------------------------------------------------------------
 
-    /** Opens the I2C bus and configures MCP23017 port A as inputs with pull-ups. */
-    bool initMcp23017();
+    /** Opens the I2C bus and configures MCP23017 ports A & B as inputs with pull-ups.
+     *  @param verbose If true, errors are logged to stderr on failure.
+     *  @return true on success, false if the chip is not detected or I2C write fails.
+     */
+    bool initMcp23017(bool verbose = true);
+
+    /** Returns true if MCP23017 was detected and is currently operational. */
+    bool isMcpConnected() const { return mcpConnected_; }
 
     /**
      * Reads GPIOA from the MCP23017 and caches the result in mcpPortA_.
@@ -118,8 +124,10 @@ public:
      * Dispatches to port A or B based on sw.portB, then applies the reversed flag:
      *   reversed = false → active when pin is LOW  (button pressed to GND)
      *   reversed = true  → active when pin is HIGH (normally-open wiring)
+     * Returns false if MCP23017 is disconnected (all switches inactive).
      */
     bool getSwitchState(const SwitchRef& sw) const {
+        if(!mcpConnected_) return false;
         bool raw = sw.portB ? getSwitchStateB(sw.pin) : getSwitchState(sw.pin);
         return sw.reversed ? raw : !raw;
     }
@@ -135,7 +143,10 @@ private:
 
     void setMuxAddress(BelaContext* context, int frame, int channel);
 
-    int     i2cFd_    = -1;
-    uint8_t mcpPortA_ = 0xFF; // cached GPIOA register (0xFF = all HIGH = all open)
-    uint8_t mcpPortB_ = 0xFF; // cached GPIOB register
+    int     i2cFd_                = -1;
+    bool    mcpConnected_         = false;
+    int     mcpConsecutiveErrors_ = 0;
+    uint8_t mcpPortA_             = 0xFF; // cached GPIOA register (0xFF = all HIGH = all open)
+    uint8_t mcpPortB_             = 0xFF; // cached GPIOB register
 };
+

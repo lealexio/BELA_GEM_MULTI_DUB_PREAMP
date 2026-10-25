@@ -3,16 +3,21 @@ export const ROUTING_CONFIG = {
   "out": {
     "master": {
       "channels": [
-        1
+        2,
+        3
       ],
       "gain": 0
     },
     "fx1Send": {
-      "channel": 2,
+      "channels": [
+        0
+      ],
       "gain": 0
     },
     "fx2Send": {
-      "channel": 3,
+      "channels": [
+        1
+      ],
       "gain": 0
     },
     "vuSub": {
@@ -34,40 +39,56 @@ export const ROUTING_CONFIG = {
   },
   "in": {
     "fx1Return": {
-      "channel": 6,
+      "channels": [
+        0
+      ],
       "mic": false,
       "hpf": 0,
       "gain": 0
     },
     "fx2Return": {
-      "channel": 7,
+      "channels": [
+        1
+      ],
       "mic": false,
       "hpf": 0,
-      "gain": 0
+      "gain": -3
     },
     "aux1": {
-      "channel": 0,
+      "channels": [
+        2,
+        3
+      ],
       "mic": false,
       "hpf": 0,
-      "gain": 0
+      "gain": -3
     },
     "aux2": {
-      "channel": 1,
+      "channels": [
+        4,
+        5
+      ],
       "mic": false,
       "hpf": 0,
-      "gain": 0
+      "gain": -3
     },
     "aux3": {
-      "channel": 3,
+      "channels": [
+        6,
+        7
+      ],
       "mic": false,
       "hpf": 0,
-      "gain": 0
+      "gain": -3
     },
     "aux4": {
-      "channel": 5,
+      "channels": [
+        8,
+        9
+      ],
       "mic": false,
       "hpf": 0,
-      "gain": 0
+      "gain": -3
     }
   }
 };

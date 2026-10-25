@@ -33,13 +33,13 @@ uint8_t     kMcpAddress = 0x20;
 // Audio routing
 // ---------------------------------------------------------------------------
 
-int MASTER_OUTS[kMasterOutsMax] = {1};
-int MASTER_OUTS_COUNT           = 1;
+int MASTER_OUTS[kMasterOutsMax] = {2, 3};
+int MASTER_OUTS_COUNT           = 2;
 
-int FX1_SEND_OUT  = 2;
-int FX1_RETURN_IN = 6;
-int FX2_SEND_OUT  = 3;
-int FX2_RETURN_IN = 7;
+int FX1_SEND_OUT  = 0;
+int FX1_RETURN_IN = 0;
+int FX2_SEND_OUT  = 1;
+int FX2_RETURN_IN = 1;
 
 int VU_SUB_OUT  = 9;
 int VU_KICK_OUT = 8;
@@ -50,10 +50,11 @@ int VU_TOP_OUT  = 6;
 float CODEC_INPUT_GAIN_DB[kCodecChannels] = {};
 float CODEC_OUTPUT_GAIN_DB[kCodecChannels] = {};
 
-ChannelConfig AUX1_CONFIG = { {0, -1}, false, 0.f };
-ChannelConfig AUX2_CONFIG = { {1, -1}, false, 0.f };
-ChannelConfig AUX3_CONFIG = { {3, -1}, false, 0.f };
-ChannelConfig AUX4_CONFIG = { {5, -1}, false, 0.f };
+// AUX1-4: stereo pairs IN2/3, IN4/5, IN6/7, IN8/9
+ChannelConfig AUX1_CONFIG = { {2, 3}, false, 0.f };
+ChannelConfig AUX2_CONFIG = { {4, 5}, false, 0.f };
+ChannelConfig AUX3_CONFIG = { {6, 7}, false, 0.f };
+ChannelConfig AUX4_CONFIG = { {8, 9}, false, 0.f };
 
 // ---------------------------------------------------------------------------
 // Switch mapping

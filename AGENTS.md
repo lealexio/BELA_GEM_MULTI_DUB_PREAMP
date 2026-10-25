@@ -83,7 +83,9 @@ IN9 (retour FX) ──► NoiseGate ────►┤
                             → KillSwitch (crossover parallèle 4 bandes)
                             → × masterGain
                                    │
-                            OUT0 + OUT1 (mono)
+                         gMasterFx (L)    gMasterFxR (R) [si MASTER_OUTS_COUNT ≥ 2]
+                                   │              │
+                             OUT0 (L)         OUT1 (R)  (mono si MASTER_OUTS_COUNT=1)
 
 VU meter (post-master, par bande) :
   OUT6 TOP  (> 1200 Hz)
@@ -91,6 +93,16 @@ VU meter (post-master, par bande) :
   OUT8 KICK (80–200 Hz)
   OUT9 SUB  (< 80 Hz)
 ```
+
+**Règles stéréo (entrées) :**
+- `audioIns = [N, -1]` → mono : même sample traité par gChannelStripX (L) et gChannelStripXR (R)
+- `audioIns = [L, R]` → stéréo : gChannelStripX traite IN_L, gChannelStripXR traite IN_R indépendamment
+- Dans `config.json` : `"aux1": { "channels": [2, 3], ... }` pour activer le mode stéréo (ou `[N]` / `[N, -1]` pour mono)
+
+**Règles stéréo (sortie master) :**
+- `MASTER_OUTS = [N]` ou `[N, -1]` → mono (1 seul bus MasterFx)
+- `MASTER_OUTS = [L, R]` → stéréo : MASTER_OUTS[0]=L, MASTER_OUTS[1]=R (2 buses MasterFx indépendants)
+- Dans `config.json` : `"master": { "channels": [2, 3], "gain": 0 }` pour activer le stéréo
 
 **Chaque ChannelStrip :**
 ```
@@ -104,14 +116,16 @@ IN → × inputGain_ → NoiseGate → EQ (low shelf / mid peak / high shelf) �
 
 | Signal | I/O Bela | Constante dans HardwareConfig.h |
 |---|---|---|
-| Source canal 1 | IN0 | `CH1_CONFIG.audioIns[0]` |
-| Source canal 2 | IN1 | `CH2_CONFIG.audioIns[0]` |
-| Source AUX 3 | IN2 | `AUX3_CONFIG.audioIns[0]` |
-| Source AUX 4 | IN3 | `AUX4_CONFIG.audioIns[0]` |
-| Retour FX | IN9 | `FX1_RETURN_IN` |
-| Sortie master L | OUT0 | `MASTER_OUT_L` |
-| Sortie master R | OUT1 | `MASTER_OUT_R` |
-| Départ FX | OUT2 | `FX1_SEND_OUT` |
+| Retour FX 1 | IN0 | `FX1_RETURN_IN` |
+| Retour FX 2 | IN1 | `FX2_RETURN_IN` |
+| Source AUX 1 (L/R) | IN2, IN3 | `AUX1_CONFIG.audioIns[0, 1]` |
+| Source AUX 2 (L/R) | IN4, IN5 | `AUX2_CONFIG.audioIns[0, 1]` |
+| Source AUX 3 (L/R) | IN6, IN7 | `AUX3_CONFIG.audioIns[0, 1]` |
+| Source AUX 4 (L/R) | IN8, IN9 | `AUX4_CONFIG.audioIns[0, 1]` |
+| Départ FX 1 | OUT0 | `FX1_SEND_OUT` |
+| Départ FX 2 | OUT1 | `FX2_SEND_OUT` |
+| Sortie master L | OUT2 | `MASTER_OUTS[0]` |
+| Sortie master R | OUT3 | `MASTER_OUTS[1]` (actif si `MASTER_OUTS_COUNT >= 2`) |
 | VU TOP | OUT6 | `VU_TOP_OUT` |
 | VU MID | OUT7 | `VU_MID_OUT` |
 | VU KICK | OUT8 | `VU_KICK_OUT` |

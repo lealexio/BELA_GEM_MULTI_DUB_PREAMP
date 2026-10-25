@@ -76,60 +76,98 @@ void HardwareManager::setMuxAddress(BelaContext* context, int frame, int channel
 // MCP23017
 // ---------------------------------------------------------------------------
 
-bool HardwareManager::initMcp23017() {
+bool HardwareManager::initMcp23017(bool verbose) {
+    if(i2cFd_ >= 0) {
+        close(i2cFd_);
+        i2cFd_ = -1;
+    }
+    mcpConnected_         = false;
+    mcpConsecutiveErrors_ = 0;
+
     i2cFd_ = open(kI2cBus, O_RDWR);
     if(i2cFd_ < 0) {
-        rt_fprintf(stderr, "HardwareManager: cannot open I2C bus %s\n", kI2cBus);
+        if(verbose)
+            rt_fprintf(stderr, "HardwareManager: cannot open I2C bus %s\n", kI2cBus);
         return false;
     }
     if(ioctl(i2cFd_, I2C_SLAVE, kMcpAddress) < 0) {
-        rt_fprintf(stderr, "HardwareManager: cannot set MCP23017 address 0x%02X\n", kMcpAddress);
+        if(verbose)
+            rt_fprintf(stderr, "HardwareManager: cannot set MCP23017 address 0x%02X\n", kMcpAddress);
+        close(i2cFd_);
+        i2cFd_ = -1;
         return false;
     }
 
     uint8_t buf[2] = {MCP_IODIRA, 0xFF};
     if(write(i2cFd_, buf, 2) != 2) {
-        rt_fprintf(stderr, "HardwareManager: IODIRA write failed\n");
+        if(verbose)
+            rt_fprintf(stderr, "HardwareManager: MCP23017 not detected at 0x%02X (IODIRA write failed)\n", kMcpAddress);
+        close(i2cFd_);
+        i2cFd_ = -1;
         return false;
     }
     buf[0] = MCP_IODIRB; buf[1] = 0xFF;
     if(write(i2cFd_, buf, 2) != 2) {
-        rt_fprintf(stderr, "HardwareManager: IODIRB write failed\n");
+        if(verbose)
+            rt_fprintf(stderr, "HardwareManager: IODIRB write failed\n");
+        close(i2cFd_);
+        i2cFd_ = -1;
         return false;
     }
     buf[0] = MCP_GPPUA; buf[1] = 0xFF;
     if(write(i2cFd_, buf, 2) != 2) {
-        rt_fprintf(stderr, "HardwareManager: GPPUA write failed\n");
+        if(verbose)
+            rt_fprintf(stderr, "HardwareManager: GPPUA write failed\n");
+        close(i2cFd_);
+        i2cFd_ = -1;
         return false;
     }
     buf[0] = MCP_GPPUB; buf[1] = 0xFF;
     if(write(i2cFd_, buf, 2) != 2) {
-        rt_fprintf(stderr, "HardwareManager: GPPUB write failed\n");
+        if(verbose)
+            rt_fprintf(stderr, "HardwareManager: GPPUB write failed\n");
+        close(i2cFd_);
+        i2cFd_ = -1;
         return false;
     }
 
+    mcpConnected_         = true;
+    mcpConsecutiveErrors_ = 0;
     rt_printf("HardwareManager: MCP23017 initialised at 0x%02X on %s\n",
               kMcpAddress, kI2cBus);
     return true;
 }
 
 void HardwareManager::readMcp23017() {
-    if(i2cFd_ < 0) return;
+    if(!mcpConnected_ || i2cFd_ < 0) return;
     uint8_t reg = MCP_GPIOA;
-    if(write(i2cFd_, &reg, 1) == 1)
-        read(i2cFd_, &mcpPortA_, 1);
+    bool ok = true;
+    if(write(i2cFd_, &reg, 1) != 1 || read(i2cFd_, &mcpPortA_, 1) != 1) {
+        ok = false;
+    }
     reg = MCP_GPIOB;
-    if(write(i2cFd_, &reg, 1) == 1)
-        read(i2cFd_, &mcpPortB_, 1);
+    if(ok && (write(i2cFd_, &reg, 1) != 1 || read(i2cFd_, &mcpPortB_, 1) != 1)) {
+        ok = false;
+    }
+
+    if(!ok) {
+        mcpConsecutiveErrors_++;
+        if(mcpConsecutiveErrors_ >= kMcpMaxConsecutiveErrors) {
+            rt_fprintf(stderr, "HardwareManager: MCP23017 connection lost\n");
+            closeMcp23017();
+        }
+    } else {
+        mcpConsecutiveErrors_ = 0;
+    }
 }
 
 bool HardwareManager::getSwitchState(int pin) const {
-    if(pin < 0 || pin > 7) return false;
+    if(!mcpConnected_ || pin < 0 || pin > 7) return false;
     return (mcpPortA_ >> pin) & 1;
 }
 
 bool HardwareManager::getSwitchStateB(int pin) const {
-    if(pin < 0 || pin > 7) return false;
+    if(!mcpConnected_ || pin < 0 || pin > 7) return false;
     return (mcpPortB_ >> pin) & 1;
 }
 
@@ -138,4 +176,9 @@ void HardwareManager::closeMcp23017() {
         close(i2cFd_);
         i2cFd_ = -1;
     }
+    mcpConnected_         = false;
+    mcpConsecutiveErrors_ = 0;
+    mcpPortA_             = 0xFF;
+    mcpPortB_             = 0xFF;
 }
+

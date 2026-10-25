@@ -204,8 +204,12 @@ var __belaPreampSketch = (() => {
     HPF_AUX2: 25,
     HPF_AUX3: 26,
     HPF_AUX4: 27,
-    IGNORED_COUNT: 28,
-    IGNORED_BASE: 29
+    AUX1_R: 28,
+    AUX2_R: 29,
+    AUX3_R: 30,
+    AUX4_R: 31,
+    IGNORED_COUNT: 32,
+    IGNORED_BASE: 33
   };
   var MIC_HPF_HZ_MIN = 0;
   var MIC_HPF_HZ_MAX = 300;
@@ -1377,16 +1381,21 @@ border-radius:6px;background:transparent;
     "out": {
       "master": {
         "channels": [
-          1
+          2,
+          3
         ],
         "gain": 0
       },
       "fx1Send": {
-        "channel": 2,
+        "channels": [
+          0
+        ],
         "gain": 0
       },
       "fx2Send": {
-        "channel": 3,
+        "channels": [
+          1
+        ],
         "gain": 0
       },
       "vuSub": {
@@ -1408,40 +1417,56 @@ border-radius:6px;background:transparent;
     },
     "in": {
       "fx1Return": {
-        "channel": 6,
+        "channels": [
+          0
+        ],
         "mic": false,
         "hpf": 0,
         "gain": 0
       },
       "fx2Return": {
-        "channel": 7,
+        "channels": [
+          1
+        ],
         "mic": false,
         "hpf": 0,
-        "gain": 0
+        "gain": -3
       },
       "aux1": {
-        "channel": 0,
+        "channels": [
+          2,
+          3
+        ],
         "mic": false,
         "hpf": 0,
-        "gain": 0
+        "gain": -3
       },
       "aux2": {
-        "channel": 1,
+        "channels": [
+          4,
+          5
+        ],
         "mic": false,
         "hpf": 0,
-        "gain": 0
+        "gain": -3
       },
       "aux3": {
-        "channel": 3,
+        "channels": [
+          6,
+          7
+        ],
         "mic": false,
         "hpf": 0,
-        "gain": 0
+        "gain": -3
       },
       "aux4": {
-        "channel": 5,
+        "channels": [
+          8,
+          9
+        ],
         "mic": false,
         "hpf": 0,
-        "gain": 0
+        "gain": -3
       }
     }
   };
@@ -1976,9 +2001,16 @@ border-radius:6px;background:transparent;
     "vuTop"
   ];
   function routingInChannel(val) {
-    if (val != null && typeof val === "object" && !Array.isArray(val))
-      return val.channel != null ? val.channel : 0;
-    if (Array.isArray(val)) return val[0] != null ? val[0] : 0;
+    if (val != null && typeof val === "object" && !Array.isArray(val)) {
+      if (Array.isArray(val.channels)) return val.channels;
+      if (val.channel != null) {
+        if (val.channelR != null && val.channelR >= 0)
+          return [val.channel, val.channelR];
+        return val.channel;
+      }
+      return 0;
+    }
+    if (Array.isArray(val)) return val;
     return val != null ? val : 0;
   }
   function routingOutChannel(val) {
@@ -2133,14 +2165,15 @@ border-radius:6px;background:transparent;
     keys.forEach((key) => {
       const raw = values[key];
       const isMaster = key === "master";
+      const isStereoCapable = isMaster || key.startsWith("aux");
       const channelVal = withMic ? routingInChannel(raw) : routingOutChannel(raw);
-      const display = formatRoutingValue(channelVal, isMaster);
+      const display = formatRoutingValue(channelVal, isStereoCapable);
       const gainVal = routingGain(raw);
       const tr = document.createElement("tr");
       tr.dataset.routingDir = dir;
       tr.dataset.routingKey = key;
-      const inputType = isMaster ? "text" : "number";
-      const extraAttrs = isMaster ? 'placeholder="0 or 0,1" spellcheck="false"' : `min="${ROUTING_CH_MIN}" max="${ROUTING_CH_MAX}" step="1"`;
+      const inputType = isStereoCapable ? "text" : "number";
+      const extraAttrs = isStereoCapable ? 'placeholder="0 or 0,1" spellcheck="false"' : `min="${ROUTING_CH_MIN}" max="${ROUTING_CH_MAX}" step="1"`;
       let cells = `<td class="pname" title="${key}">${key}</td><td><input type="${inputType}" value="${display}" data-dir="${dir}" data-key="${key}" class="ri" ${extraAttrs}></td><td><input type="number" class="ri-gain" data-dir="${dir}" data-key="${key}" value="${gainVal}" min="${gainMin}" max="${gainMax}" step="1" title="${gainTitle}"></td>`;
       if (withMic) {
         const micChecked = routingInMic(raw) ? "checked" : "";
@@ -2153,18 +2186,17 @@ border-radius:6px;background:transparent;
     return wrap;
   }
   function formatRoutingValue(raw, asArray) {
-    if (asArray) {
+    if (asArray || Array.isArray(raw)) {
       const arr = Array.isArray(raw) ? raw : raw != null ? [raw] : [];
       return arr.join(",");
     }
-    if (Array.isArray(raw)) return String(raw[0] != null ? raw[0] : 0);
     return String(raw != null ? raw : 0);
   }
   function parseRoutingInput(inp) {
     if (!inp) return null;
     const key = inp.dataset.key;
     const text = String(inp.value).trim();
-    if (key === "master") {
+    if (key === "master" || key.startsWith("aux")) {
       if (!text) return [];
       const parts = text.split(/[,\s]+/).filter(Boolean);
       const nums = parts.map((p) => parseInt(p, 10));
@@ -2183,19 +2215,24 @@ border-radius:6px;background:transparent;
     const masterOuts = [];
     if (masterCount > 0) masterOuts.push(Math.round(meta[M.MASTER_0]));
     if (masterCount > 1) masterOuts.push(Math.round(meta[M.MASTER_1]));
+    const getAuxIns = (leftIdx, rightIdx) => {
+      const l = Math.round(meta[leftIdx]);
+      const r = meta.length > rightIdx ? Math.round(meta[rightIdx]) : -1;
+      return r >= 0 ? [l, r] : [l];
+    };
     const values = {
       in: {
-        fx1Return: Math.round(meta[M.FX1_RET]),
-        fx2Return: Math.round(meta[M.FX2_RET]),
-        aux1: Math.round(meta[M.AUX1]),
-        aux2: Math.round(meta[M.AUX2]),
-        aux3: Math.round(meta[M.AUX3]),
-        aux4: Math.round(meta[M.AUX4])
+        fx1Return: [Math.round(meta[M.FX1_RET])],
+        fx2Return: [Math.round(meta[M.FX2_RET])],
+        aux1: getAuxIns(M.AUX1, M.AUX1_R),
+        aux2: getAuxIns(M.AUX2, M.AUX2_R),
+        aux3: getAuxIns(M.AUX3, M.AUX3_R),
+        aux4: getAuxIns(M.AUX4, M.AUX4_R)
       },
       out: {
         master: masterOuts,
-        fx1Send: Math.round(meta[M.FX1_SEND]),
-        fx2Send: Math.round(meta[M.FX2_SEND]),
+        fx1Send: [Math.round(meta[M.FX1_SEND])],
+        fx2Send: [Math.round(meta[M.FX2_SEND])],
         vuSub: Math.round(meta[M.VU_SUB]),
         vuKick: Math.round(meta[M.VU_KICK]),
         vuMid: Math.round(meta[M.VU_MID]),
@@ -2219,7 +2256,7 @@ border-radius:6px;background:transparent;
       const key = inp.dataset.key;
       const raw = values[dir] && values[dir][key];
       if (raw === void 0) return;
-      inp.value = formatRoutingValue(raw, key === "master");
+      inp.value = formatRoutingValue(raw, key === "master" || key.startsWith("aux"));
     });
     document.querySelectorAll(".ri-mic").forEach((cb) => {
       const key = cb.dataset.key;
@@ -2237,7 +2274,7 @@ border-radius:6px;background:transparent;
       const inp = document.querySelector(`.ri[data-dir="${dir}"][data-key="${key}"]`);
       const parsed = parseRoutingInput(inp);
       if (parsed === null) return void 0;
-      if (key === "master")
+      if (key === "master" || key.startsWith("aux"))
         return Array.isArray(parsed) ? parsed : [parsed];
       return parsed;
     };
@@ -2266,7 +2303,7 @@ border-radius:6px;background:transparent;
       const val = readChannel("out", key);
       if (val === void 0) return;
       const gain = readGain("out", key);
-      if (key === "master")
+      if (key === "master" || key.startsWith("fx"))
         out[key] = { channels: Array.isArray(val) ? val : [val], gain };
       else
         out[key] = { channel: val, gain };
@@ -2276,7 +2313,7 @@ border-radius:6px;background:transparent;
       const ch = readChannel("in", key);
       if (ch === void 0) return;
       inn[key] = {
-        channel: ch,
+        channels: Array.isArray(ch) ? ch : [ch],
         mic: readMic(key),
         hpf: readHpf(key),
         gain: readGain("in", key)
@@ -2385,7 +2422,7 @@ border-radius:6px;background:transparent;
         const chans = Array.isArray(parsed) ? parsed : [parsed];
         const seenInField = /* @__PURE__ */ new Set();
         chans.forEach((ch) => {
-          if (typeof ch !== "number" || isNaN(ch)) return;
+          if (typeof ch !== "number" || isNaN(ch) || ch < 0) return;
           if (seenInField.has(ch)) {
             messages.push("Routing " + dir + " channel " + ch + " : " + inp.dataset.key + " lists it more than once");
             const tr = inp.closest("tr");

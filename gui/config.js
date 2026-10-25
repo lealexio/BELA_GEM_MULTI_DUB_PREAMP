@@ -109,7 +109,8 @@ export const CONFIG_META = {
     AUX1: 16, AUX2: 17, AUX3: 18, AUX4: 19,
     MIC_AUX1: 20, MIC_AUX2: 21, MIC_AUX3: 22, MIC_AUX4: 23,
     HPF_AUX1: 24, HPF_AUX2: 25, HPF_AUX3: 26, HPF_AUX4: 27,
-    IGNORED_COUNT: 28, IGNORED_BASE: 29
+    AUX1_R: 28, AUX2_R: 29, AUX3_R: 30, AUX4_R: 31,
+    IGNORED_COUNT: 32, IGNORED_BASE: 33
 };
 
 /** Mic-mode HPF Hz range — must match kMicHpfFMin/FMax in SoftwareConfig.h. */

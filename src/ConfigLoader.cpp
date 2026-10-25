@@ -120,46 +120,88 @@ static void storeOutputGain(int ch, float gainDb) {
 }
 
 /**
- * Reads one routing.in entry as either a legacy number or {channel, mic, hpf, gain}.
+ * Reads one routing.in entry as either a legacy number or {channel, channelR, mic, hpf, gain}.
  * Also writes CODEC_INPUT_GAIN_DB[channel] when a channel is resolved.
- * @param inObj       Parent "in" object
- * @param key         Entry key (e.g. L"aux1")
- * @param channelOut  Receives the Bela channel index
- * @param micOut      Receives mic flag (false when legacy number or absent)
- * @param hpfOut      Receives HPF cutoff Hz (0 when legacy / absent); may be nullptr
- * @param channelDef  Default channel if key is missing
- * @param micDef      Default mic flag if key/field is missing
- * @param hpfDef      Default HPF Hz if key/field is missing
- * @param gainDef     Default codec gain dB if key/field is missing
+ * @param inObj        Parent "in" object
+ * @param key          Entry key (e.g. L"aux1")
+ * @param channelOut   Receives the Bela left/mono channel index
+ * @param channelROut  Receives the Bela right channel index (-1 = mono / unused)
+ * @param micOut       Receives mic flag (false when legacy number or absent)
+ * @param hpfOut       Receives HPF cutoff Hz (0 when legacy / absent); may be nullptr
+ * @param channelDef   Default left channel if key is missing
+ * @param channelRDef  Default right channel if key is missing
+ * @param micDef       Default mic flag if key/field is missing
+ * @param hpfDef       Default HPF Hz if key/field is missing
+ * @param gainDef      Default codec gain dB if key/field is missing
  */
 static void readInEntry(JSONValue* inObj, const wchar_t* key,
-                        int* channelOut, bool* micOut, float* hpfOut,
-                        int channelDef, bool micDef, float hpfDef,
+                        int* channelOut, int* channelROut,
+                        bool* micOut, float* hpfOut,
+                        int channelDef, int channelRDef,
+                        bool micDef, float hpfDef,
                         float gainDef = 0.f) {
-    *channelOut = channelDef;
-    *micOut     = micDef;
+    *channelOut  = channelDef;
+    *channelROut = channelRDef;
+    *micOut      = micDef;
     if(hpfOut) *hpfOut = hpfDef;
-    float gain  = gainDef;
+    float gain   = gainDef;
+
     JSONValue* v = child(inObj, key);
     if(!v) {
-        storeInputGain(*channelOut, gain);
+        if(*channelOut >= 0)  storeInputGain(*channelOut, gain);
+        if(*channelROut >= 0) storeInputGain(*channelROut, gain);
         return;
     }
     if(v->IsNumber()) {
-        *channelOut = (int)v->AsNumber();
-        *micOut     = false;
+        *channelOut  = (int)v->AsNumber();
+        *channelROut = -1;
+        *micOut      = false;
         if(hpfOut) *hpfOut = 0.f;
         storeInputGain(*channelOut, gainDef);
         return;
     }
+    if(v->IsArray()) {
+        const JSONArray& arr = v->AsArray();
+        if(arr.size() > 0 && arr[0] && arr[0]->IsNumber())
+            *channelOut = (int)arr[0]->AsNumber();
+        if(arr.size() > 1 && arr[1] && arr[1]->IsNumber())
+            *channelROut = (int)arr[1]->AsNumber();
+        else
+            *channelROut = -1;
+        *micOut = false;
+        if(hpfOut) *hpfOut = 0.f;
+        if(*channelOut >= 0)  storeInputGain(*channelOut, gainDef);
+        if(*channelROut >= 0) storeInputGain(*channelROut, gainDef);
+        return;
+    }
     if(v->IsObject()) {
-        *channelOut = (int)numOf(v, L"channel", channelDef);
-        *micOut     = boolOf(v, L"mic", micDef);
+        JSONValue* chans = child(v, L"channels");
+        if(chans) {
+            if(chans->IsArray()) {
+                const JSONArray& arr = chans->AsArray();
+                if(arr.size() > 0 && arr[0] && arr[0]->IsNumber())
+                    *channelOut = (int)arr[0]->AsNumber();
+                if(arr.size() > 1 && arr[1] && arr[1]->IsNumber())
+                    *channelROut = (int)arr[1]->AsNumber();
+                else
+                    *channelROut = -1;
+            } else if(chans->IsNumber()) {
+                *channelOut  = (int)chans->AsNumber();
+                *channelROut = -1;
+            }
+        } else if(child(v, L"channel")) {
+            *channelOut = (int)numOf(v, L"channel", channelDef);
+            JSONValue* chR = child(v, L"channelR");
+            *channelROut = (chR && chR->IsNumber()) ? (int)chR->AsNumber() : channelRDef;
+        }
+        *micOut = boolOf(v, L"mic", micDef);
         if(hpfOut) *hpfOut = (float)numOf(v, L"hpf", hpfDef);
         gain = (float)numOf(v, L"gain", gainDef);
     }
-    storeInputGain(*channelOut, gain);
+    if(*channelOut >= 0)  storeInputGain(*channelOut, gain);
+    if(*channelROut >= 0) storeInputGain(*channelROut, gain);
 }
+
 
 /**
  * Reads channel indices from a routing.out value.
@@ -187,6 +229,10 @@ static int readOutChannelList(JSONValue* v, int* channelsOut, int maxCount, int 
         JSONValue* chans = child(v, L"channels");
         if(chans && chans->IsArray())
             return readOutChannelList(chans, channelsOut, maxCount, channelDef);
+        if(chans && chans->IsNumber()) {
+            if(maxCount > 0) { channelsOut[0] = (int)chans->AsNumber(); return 1; }
+            return 0;
+        }
         if(maxCount > 0) {
             channelsOut[0] = (int)numOf(v, L"channel", channelDef);
             return 1;
@@ -203,7 +249,7 @@ static float readOutGain(JSONValue* v, float gainDef) {
 }
 
 /**
- * Reads one single-channel routing.out entry (legacy int or {channel, gain}).
+ * Reads one single-channel routing.out entry (legacy int or {channel|channels, gain}).
  * Updates *channelOut and CODEC_OUTPUT_GAIN_DB[*channelOut].
  */
 static void readOutEntry(JSONValue* outObj, const wchar_t* key,
@@ -230,13 +276,19 @@ static void readMasterOutEntry(JSONValue* outObj, float gainDef = 0.f) {
     int n = readOutChannelList(v, chans, kMasterOutsMax,
                                MASTER_OUTS_COUNT > 0 ? MASTER_OUTS[0] : 0);
     if(n > 0) {
-        for(int i = 0; i < n; ++i)
-            MASTER_OUTS[i] = chans[i];
-        MASTER_OUTS_COUNT = n;
+        int validCount = 0;
+        for(int i = 0; i < n; ++i) {
+            if(chans[i] >= 0)
+                MASTER_OUTS[validCount++] = chans[i];
+        }
+        if(validCount > 0)
+            MASTER_OUTS_COUNT = validCount;
     }
     float gain = readOutGain(v, gainDef);
-    for(int i = 0; i < MASTER_OUTS_COUNT; ++i)
-        storeOutputGain(MASTER_OUTS[i], gain);
+    for(int i = 0; i < MASTER_OUTS_COUNT; ++i) {
+        if(MASTER_OUTS[i] >= 0)
+            storeOutputGain(MASTER_OUTS[i], gain);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -306,28 +358,38 @@ bool ConfigLoader::load(const char* path) {
             readOutEntry(outObj, L"vuMid",   &VU_MID_OUT,   VU_MID_OUT);
             readOutEntry(outObj, L"vuTop",   &VU_TOP_OUT,   VU_TOP_OUT);
         }
-        // inputs — {channel, mic, hpf, gain} or legacy int; fills CODEC_INPUT_GAIN_DB
+        // inputs — {channel, channelR, mic, hpf, gain} or legacy int; fills CODEC_INPUT_GAIN_DB
         JSONValue* inObj = child(routObj, L"in");
         if(inObj) {
             bool  micIgnored = false;
             float hpfIgnored = 0.f;
-            readInEntry(inObj, L"fx1Return", &FX1_RETURN_IN, &micIgnored, &hpfIgnored,
-                        FX1_RETURN_IN, false, 0.f);
-            readInEntry(inObj, L"fx2Return", &FX2_RETURN_IN, &micIgnored, &hpfIgnored,
-                        FX2_RETURN_IN, false, 0.f);
+            int   chRIgnored = -1;
+            readInEntry(inObj, L"fx1Return", &FX1_RETURN_IN, &chRIgnored, &micIgnored, &hpfIgnored,
+                        FX1_RETURN_IN, -1, false, 0.f);
+            readInEntry(inObj, L"fx2Return", &FX2_RETURN_IN, &chRIgnored, &micIgnored, &hpfIgnored,
+                        FX2_RETURN_IN, -1, false, 0.f);
             readInEntry(inObj, L"aux1",
-                        &AUX1_CONFIG.audioIns[0], &AUX1_CONFIG.micMode, &AUX1_CONFIG.hpfHz,
-                        AUX1_CONFIG.audioIns[0], AUX1_CONFIG.micMode, AUX1_CONFIG.hpfHz);
+                        &AUX1_CONFIG.audioIns[0], &AUX1_CONFIG.audioIns[1],
+                        &AUX1_CONFIG.micMode, &AUX1_CONFIG.hpfHz,
+                        AUX1_CONFIG.audioIns[0], AUX1_CONFIG.audioIns[1],
+                        AUX1_CONFIG.micMode, AUX1_CONFIG.hpfHz);
             readInEntry(inObj, L"aux2",
-                        &AUX2_CONFIG.audioIns[0], &AUX2_CONFIG.micMode, &AUX2_CONFIG.hpfHz,
-                        AUX2_CONFIG.audioIns[0], AUX2_CONFIG.micMode, AUX2_CONFIG.hpfHz);
+                        &AUX2_CONFIG.audioIns[0], &AUX2_CONFIG.audioIns[1],
+                        &AUX2_CONFIG.micMode, &AUX2_CONFIG.hpfHz,
+                        AUX2_CONFIG.audioIns[0], AUX2_CONFIG.audioIns[1],
+                        AUX2_CONFIG.micMode, AUX2_CONFIG.hpfHz);
             readInEntry(inObj, L"aux3",
-                        &AUX3_CONFIG.audioIns[0], &AUX3_CONFIG.micMode, &AUX3_CONFIG.hpfHz,
-                        AUX3_CONFIG.audioIns[0], AUX3_CONFIG.micMode, AUX3_CONFIG.hpfHz);
+                        &AUX3_CONFIG.audioIns[0], &AUX3_CONFIG.audioIns[1],
+                        &AUX3_CONFIG.micMode, &AUX3_CONFIG.hpfHz,
+                        AUX3_CONFIG.audioIns[0], AUX3_CONFIG.audioIns[1],
+                        AUX3_CONFIG.micMode, AUX3_CONFIG.hpfHz);
             readInEntry(inObj, L"aux4",
-                        &AUX4_CONFIG.audioIns[0], &AUX4_CONFIG.micMode, &AUX4_CONFIG.hpfHz,
-                        AUX4_CONFIG.audioIns[0], AUX4_CONFIG.micMode, AUX4_CONFIG.hpfHz);
+                        &AUX4_CONFIG.audioIns[0], &AUX4_CONFIG.audioIns[1],
+                        &AUX4_CONFIG.micMode, &AUX4_CONFIG.hpfHz,
+                        AUX4_CONFIG.audioIns[0], AUX4_CONFIG.audioIns[1],
+                        AUX4_CONFIG.micMode, AUX4_CONFIG.hpfHz);
         }
+
     }
 
     // --- pots ---
