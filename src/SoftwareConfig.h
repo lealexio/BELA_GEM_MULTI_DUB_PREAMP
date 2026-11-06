@@ -345,7 +345,7 @@ constexpr int kGuiConfigMetaHeaderFloats = 33;
 constexpr int kGuiConfigMetaSize         = kGuiConfigMetaHeaderFloats + 32; // 16 ignored pairs max
 
 /// Raw MUX grid for GUI buffer 7: kNumMux × kPotsPerMux (must match HardwareConfig.h).
-constexpr int kGuiMuxRawBufSize = 64;
+constexpr int kGuiMuxRawBufSize = 80;
 
 /// CPU die temperature poll interval for the non-RT AuxTask (sysfs read).
 /// Keep slow — file I/O must never run in render().

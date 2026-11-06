@@ -1,6 +1,7 @@
 #include "HardwareManager.h"
 #include "SoftwareConfig.h"
 #include <cmath>
+#include <algorithm>
 #include <fcntl.h>
 #include <unistd.h>
 #include <sys/ioctl.h>
@@ -19,39 +20,79 @@ constexpr int HardwareManager::addressPins_[4];
 
 HardwareManager::HardwareManager() {
     for(int i = 0; i < kNumMux * kPotsPerMux; i++) potValues_[i] = 0.f;
+    currentChannel_ = 0;
+    sampleCount_    = 0;
 }
 
-HardwareManager::~HardwareManager() {}
+HardwareManager::~HardwareManager() {
+    closeMcp23017();
+}
 
 bool HardwareManager::setup(BelaContext* context) {
-    for(int i = 0; i < 4; i++)
+    if(context->analogInChannels < (unsigned int)kActiveMux) {
+        rt_printf("HardwareManager: WARNING: only %u analog input channels active, but kActiveMux is %d!\n",
+                  context->analogInChannels, kActiveMux);
+        rt_printf("                          Enable at least %d analog inputs in Bela IDE Project Settings (or pass -C 8).\n",
+                  kActiveMux);
+    }
+
+    for(int i = 0; i < 4; i++) {
         pinMode(context, 0, addressPins_[i], OUTPUT);
-    setMuxAddress(context, 0, currentChannel_);
+    }
+    currentChannel_ = 0;
+    sampleCount_    = 0;
+
+    rt_printf("HardwareManager: %d multiplexers configured (%d channels each, S0..S3 on D0..D3)\n",
+              kActiveMux, kPotsPerMux);
     return true;
 }
 
 void HardwareManager::scanStep(BelaContext* context) {
-    // Read all active MUX inputs for the channel address set in the previous render
-    for(int m = 0; m < kActiveMux; m++) {
-        float raw = analogRead(context, 0, m) * kPotScaleRecovery;
+    if(context->analogFrames == 0 || context->analogInChannels < 1) return;
+    int analogFrameRatio = context->audioFrames / context->analogFrames;
+    if(analogFrameRatio <= 0) analogFrameRatio = 1;
 
-        // Clamp with calibrated min/max
-        if(raw <= kPotMin) raw = 0.f;
-        raw = raw / kPotMax;
-        if(raw > 1.f) raw = 1.f;
+    unsigned int numFrames = context->audioFrames;
+    if(context->digitalFrames > 0 && context->digitalFrames < numFrames)
+        numFrames = context->digitalFrames;
 
-        // Snap to hard 0 / 1 at the ends of travel
-        if(raw <= kSnapRadiusEdge)        raw = 0.f;
-        else if(raw >= 1.f - kSnapRadiusEdge) raw = 1.f;
+    for(unsigned int n = 0; n < numFrames; n++) {
+        // Continuous driving of address lines S0..S3 with the current channel (0..9)
+        digitalWriteOnce(context, n, addressPins_[0], (currentChannel_ >> 0) & 1);
+        digitalWriteOnce(context, n, addressPins_[1], (currentChannel_ >> 1) & 1);
+        digitalWriteOnce(context, n, addressPins_[2], (currentChannel_ >> 2) & 1);
+        digitalWriteOnce(context, n, addressPins_[3], (currentChannel_ >> 3) & 1);
 
-        int idx = m * kPotsPerMux + currentChannel_;
-        if(fabsf(raw - potValues_[idx]) >= kJitterThreshold)
-            potValues_[idx] = raw;
+        sampleCount_++;
+
+        // Leave 16 audio frames (~0.36 ms) for the multiplexers to settle voltage
+        if(sampleCount_ >= 16 && (n % analogFrameRatio == 0)) {
+            unsigned int analogFrame = n / analogFrameRatio;
+            if(analogFrame >= context->analogFrames)
+                analogFrame = context->analogFrames - 1;
+
+            for(int m = 0; m < kActiveMux && m < (int)context->analogInChannels; m++) {
+                float raw = analogRead(context, analogFrame, m) * kPotScaleRecovery;
+
+                // Clamp with calibrated min/max
+                if(raw <= kPotMin) raw = 0.f;
+                raw = raw / kPotMax;
+                if(raw > 1.f) raw = 1.f;
+
+                // Snap to hard 0 / 1 at the ends of travel
+                if(raw <= kSnapRadiusEdge)            raw = 0.f;
+                else if(raw >= 1.f - kSnapRadiusEdge) raw = 1.f;
+
+                int idx = m * kPotsPerMux + currentChannel_;
+                if(fabsf(raw - potValues_[idx]) >= kJitterThreshold)
+                    potValues_[idx] = raw;
+            }
+
+            // Advance to next channel (0 to kPotsPerMux - 1)
+            currentChannel_ = (currentChannel_ + 1) % kPotsPerMux;
+            sampleCount_ = 0;
+        }
     }
-
-    // Advance channel and pre-load address for next render
-    currentChannel_ = (currentChannel_ + 1) % kPotsPerMux;
-    setMuxAddress(context, context->digitalFrames - 1, currentChannel_);
 }
 
 float HardwareManager::getPotValue(int muxId, int potId) const {
@@ -67,108 +108,121 @@ float HardwareManager::getCenteredPotValue(int muxId, int potId) const {
     return curved * 0.5f + 0.5f;
 }
 
-void HardwareManager::setMuxAddress(BelaContext* context, int frame, int channel) {
-    for(int bit = 0; bit < 4; bit++)
-        digitalWrite(context, frame, addressPins_[bit], (channel >> bit) & 1);
-}
-
 // ---------------------------------------------------------------------------
 // MCP23017
 // ---------------------------------------------------------------------------
 
-bool HardwareManager::initMcp23017(bool verbose) {
-    if(i2cFd_ >= 0) {
-        close(i2cFd_);
-        i2cFd_ = -1;
-    }
-    mcpConnected_         = false;
-    mcpConsecutiveErrors_ = 0;
+bool HardwareManager::probeAndInitMcp(uint8_t addr) {
+    if(i2cFd_ < 0) return false;
+    if(ioctl(i2cFd_, I2C_SLAVE, addr) < 0) return false;
 
-    i2cFd_ = open(kI2cBus, O_RDWR);
-    if(i2cFd_ < 0) {
-        if(verbose)
-            rt_fprintf(stderr, "HardwareManager: cannot open I2C bus %s\n", kI2cBus);
-        return false;
-    }
-    if(ioctl(i2cFd_, I2C_SLAVE, kMcpAddress) < 0) {
-        if(verbose)
-            rt_fprintf(stderr, "HardwareManager: cannot set MCP23017 address 0x%02X\n", kMcpAddress);
-        close(i2cFd_);
-        i2cFd_ = -1;
-        return false;
-    }
+    // Test writing IODIRA (all inputs = 0xFF)
+    uint8_t buf[2];
+    buf[0] = MCP_IODIRA; buf[1] = 0xFF;
+    if(write(i2cFd_, buf, 2) != 2) return false;
 
-    uint8_t buf[2] = {MCP_IODIRA, 0xFF};
-    if(write(i2cFd_, buf, 2) != 2) {
-        if(verbose)
-            rt_fprintf(stderr, "HardwareManager: MCP23017 not detected at 0x%02X (IODIRA write failed)\n", kMcpAddress);
-        close(i2cFd_);
-        i2cFd_ = -1;
-        return false;
-    }
+    // IODIRB: all inputs
     buf[0] = MCP_IODIRB; buf[1] = 0xFF;
-    if(write(i2cFd_, buf, 2) != 2) {
-        if(verbose)
-            rt_fprintf(stderr, "HardwareManager: IODIRB write failed\n");
-        close(i2cFd_);
-        i2cFd_ = -1;
-        return false;
-    }
+    if(write(i2cFd_, buf, 2) != 2) return false;
+
+    // GPPUA: enable internal pull-ups on Port A
     buf[0] = MCP_GPPUA; buf[1] = 0xFF;
-    if(write(i2cFd_, buf, 2) != 2) {
-        if(verbose)
-            rt_fprintf(stderr, "HardwareManager: GPPUA write failed\n");
-        close(i2cFd_);
-        i2cFd_ = -1;
-        return false;
-    }
+    if(write(i2cFd_, buf, 2) != 2) return false;
+
+    // GPPUB: enable internal pull-ups on Port B
     buf[0] = MCP_GPPUB; buf[1] = 0xFF;
-    if(write(i2cFd_, buf, 2) != 2) {
-        if(verbose)
-            rt_fprintf(stderr, "HardwareManager: GPPUB write failed\n");
+    if(write(i2cFd_, buf, 2) != 2) return false;
+
+    return true;
+}
+
+bool HardwareManager::initMcp23017(bool verbose) {
+    if(i2cFd_ < 0) {
+        i2cFd_ = open(kI2cBus, O_RDWR);
+        if(i2cFd_ < 0) {
+            if(verbose)
+                rt_fprintf(stderr, "HardwareManager: cannot open I2C bus %s\n", kI2cBus);
+            return false;
+        }
+    }
+
+    mcpConnected_.store(false);
+    mcpConsecutiveErrors_ = 0;
+
+    // First try the configured or previously active address
+    uint8_t target = activeAddress_ ? activeAddress_ : kMcpAddress;
+    bool found = false;
+    if(probeAndInitMcp(target)) {
+        activeAddress_ = target;
+        kMcpAddress    = target;
+        found = true;
+    } else {
+        if(verbose) {
+            rt_printf("HardwareManager: MCP23017 not detected at 0x%02X, scanning 0x20..0x27...\n", target);
+        }
+        for(uint8_t a = 0x20; a <= 0x27; ++a) {
+            if(a == target) continue;
+            if(probeAndInitMcp(a)) {
+                activeAddress_ = a;
+                kMcpAddress    = a;
+                found = true;
+                break;
+            }
+        }
+    }
+
+    if(!found) {
+        if(verbose) {
+            rt_fprintf(stderr, "HardwareManager: MCP23017 not detected on %s (tested 0x20..0x27)\n", kI2cBus);
+        }
         close(i2cFd_);
         i2cFd_ = -1;
         return false;
     }
 
-    mcpConnected_         = true;
+    mcpConnected_.store(true);
     mcpConsecutiveErrors_ = 0;
-    rt_printf("HardwareManager: MCP23017 initialised at 0x%02X on %s\n",
-              kMcpAddress, kI2cBus);
+    rt_printf("HardwareManager: MCP23017 initialised at 0x%02X on %s (pull-ups enabled on ports A & B)\n",
+              activeAddress_, kI2cBus);
     return true;
 }
 
 void HardwareManager::readMcp23017() {
-    if(!mcpConnected_ || i2cFd_ < 0) return;
-    uint8_t reg = MCP_GPIOA;
+    if(!mcpConnected_.load() || i2cFd_ < 0) return;
+    uint8_t regA = MCP_GPIOA;
+    uint8_t valA = 0xFF;
+    uint8_t regB = MCP_GPIOB;
+    uint8_t valB = 0xFF;
+
     bool ok = true;
-    if(write(i2cFd_, &reg, 1) != 1 || read(i2cFd_, &mcpPortA_, 1) != 1) {
+    if(write(i2cFd_, &regA, 1) != 1 || read(i2cFd_, &valA, 1) != 1) {
         ok = false;
     }
-    reg = MCP_GPIOB;
-    if(ok && (write(i2cFd_, &reg, 1) != 1 || read(i2cFd_, &mcpPortB_, 1) != 1)) {
+    if(ok && (write(i2cFd_, &regB, 1) != 1 || read(i2cFd_, &valB, 1) != 1)) {
         ok = false;
     }
 
-    if(!ok) {
+    if(ok) {
+        mcpPortA_.store(valA);
+        mcpPortB_.store(valB);
+        mcpConsecutiveErrors_ = 0;
+    } else {
         mcpConsecutiveErrors_++;
         if(mcpConsecutiveErrors_ >= kMcpMaxConsecutiveErrors) {
             rt_fprintf(stderr, "HardwareManager: MCP23017 connection lost\n");
             closeMcp23017();
         }
-    } else {
-        mcpConsecutiveErrors_ = 0;
     }
 }
 
 bool HardwareManager::getSwitchState(int pin) const {
-    if(!mcpConnected_ || pin < 0 || pin > 7) return false;
-    return (mcpPortA_ >> pin) & 1;
+    if(!mcpConnected_.load() || pin < 0 || pin > 7) return false;
+    return (mcpPortA_.load() >> pin) & 1;
 }
 
 bool HardwareManager::getSwitchStateB(int pin) const {
-    if(!mcpConnected_ || pin < 0 || pin > 7) return false;
-    return (mcpPortB_ >> pin) & 1;
+    if(!mcpConnected_.load() || pin < 0 || pin > 7) return false;
+    return (mcpPortB_.load() >> pin) & 1;
 }
 
 void HardwareManager::closeMcp23017() {
@@ -176,9 +230,8 @@ void HardwareManager::closeMcp23017() {
         close(i2cFd_);
         i2cFd_ = -1;
     }
-    mcpConnected_         = false;
+    mcpConnected_.store(false);
     mcpConsecutiveErrors_ = 0;
-    mcpPortA_             = 0xFF;
-    mcpPortB_             = 0xFF;
+    mcpPortA_.store(0xFF);
+    mcpPortB_.store(0xFF);
 }
-

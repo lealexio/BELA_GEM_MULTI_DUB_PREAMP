@@ -27,10 +27,10 @@
 // ---------------------------------------------------------------------------
 
 /// Maximum number of MUX chips the firmware can handle (sets array sizes).
-constexpr int kNumMux     = 4;
+constexpr int kNumMux     = 8;
 
-/// Number of channels per MUX chip (CD74HC4067 = 16).
-constexpr int kPotsPerMux = 16;
+/// Number of channels per MUX chip (10 channels: 0..9).
+constexpr int kPotsPerMux = 10;
 
 // ---------------------------------------------------------------------------
 // MUX topology — runtime (loaded from JSON "mux" object)
@@ -244,7 +244,7 @@ extern PotRef MASTER_LPF_FREQ;
 // Defined in HardwareConfigData.cpp; size tracked by kAllNamedPotsCount.
 // ---------------------------------------------------------------------------
 
-constexpr int kAllNamedPotsMax = 64; ///< Upper bound — increase if more pots are added.
+constexpr int kAllNamedPotsMax = 80; ///< Upper bound — increase if more pots are added.
 extern PotRef kAllNamedPots[kAllNamedPotsMax];
 extern int    kAllNamedPotsCount;
 

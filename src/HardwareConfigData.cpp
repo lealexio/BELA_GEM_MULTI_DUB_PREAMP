@@ -2,17 +2,16 @@
 
 /**
  * Default definitions for every runtime hardware config variable declared in
- * HardwareConfig.h.  These values are identical to the former compile-time
- * constexpr constants and serve as the fallback when config.json is absent or
- * malformed.  ConfigLoader::load() overwrites them at startup when a valid
- * JSON file is found.
+ * HardwareConfig.h.  These values serve as the fallback when config.json is
+ * absent or malformed.  ConfigLoader::load() overwrites them at startup when a
+ * valid JSON file is found.
  */
 
 // ---------------------------------------------------------------------------
 // MUX topology
 // ---------------------------------------------------------------------------
 
-int kActiveMux = 4;
+int kActiveMux = 8;
 
 // ---------------------------------------------------------------------------
 // Potentiometer calibration
@@ -26,7 +25,7 @@ float kPotMin           = 0.005f;
 // MCP23017 I2C configuration
 // ---------------------------------------------------------------------------
 
-const char* kI2cBus    = "/dev/i2c-1";
+const char* kI2cBus     = "/dev/i2c-1";
 uint8_t     kMcpAddress = 0x20;
 
 // ---------------------------------------------------------------------------
@@ -73,91 +72,82 @@ SwitchRef FX2_FILTER_MIDS = {7, false, false};
 SwitchRef SIREN_TRIGGER = {0, false, true};
 
 // ---------------------------------------------------------------------------
-// Potentiometer mapping
+// Potentiometer mapping (7 MUX x 10 channels)
 // ---------------------------------------------------------------------------
 
-// MUX 0
-PotRef MASTER_GAIN     = {0,  1, true, "MASTER_GAIN"};
-PotRef SIREN_TYPE      = {0, 10, true, "SIREN_TYPE"};
-PotRef SIREN_MOD       = {0,  9, true, "SIREN_MOD"};
+// --- MUX 0: AUX 1 (IN2/3) & FX Return Gains ---
+PotRef AUX1_INPUT_GAIN = {0, 0, true, "AUX1_INPUT_GAIN"};
+PotRef AUX1_EQ_LOW     = {0, 1, true, "AUX1_EQ_LOW",  true};
+PotRef AUX1_EQ_MID     = {0, 2, true, "AUX1_EQ_MID",  true};
+PotRef AUX1_EQ_HIGH    = {0, 3, true, "AUX1_EQ_HIGH", true};
+PotRef AUX1_FX_SEND    = {0, 4, true, "AUX1_FX_SEND"};
+PotRef AUX1_FX2_SEND   = {0, 5, true, "AUX1_FX2_SEND"};
+PotRef FX1_RETURN_GAIN = {0, 6, true, "FX1_RETURN_GAIN", false};
+PotRef FX2_RETURN_GAIN = {0, 7, true, "FX2_RETURN_GAIN", true};
 
-// FX return input gains — reversed: pot at max physical position = unity gain (1.0),
-// pot at min physical position = mute (0.0). Useful to silence a noisy external effect.
-PotRef FX1_RETURN_GAIN = {3,  9, true, "FX1_RETURN_GAIN", false};
-PotRef FX2_RETURN_GAIN = {3,  8, true, "FX2_RETURN_GAIN", true};
+// --- MUX 1: AUX 2 (IN4/5) & GEQ High ---
+PotRef AUX2_INPUT_GAIN = {1, 0, true, "AUX2_INPUT_GAIN"};
+PotRef AUX2_EQ_LOW     = {1, 1, true, "AUX2_EQ_LOW",  true};
+PotRef AUX2_EQ_MID     = {1, 2, true, "AUX2_EQ_MID",  true};
+PotRef AUX2_EQ_HIGH    = {1, 3, true, "AUX2_EQ_HIGH", true};
+PotRef AUX2_FX_SEND    = {1, 4, true, "AUX2_FX_SEND"};
+PotRef AUX2_FX2_SEND   = {1, 5, true, "AUX2_FX2_SEND"};
+PotRef GEQ_1KHZ        = {1, 6, true, "GEQ_1KHZ",     true};
+PotRef GEQ_2KHZ        = {1, 7, true, "GEQ_2KHZ",     true};
 
-// MUX 3 — siren + channel gain/send
-PotRef SIREN_GAIN     = {3,  0, true,  "SIREN_GAIN"};
-PotRef SIREN_FX_SEND  = {3, 11, true,  "SIREN_FX_SEND"};
-PotRef SIREN_FX2_SEND = {3, 10, true,  "SIREN_FX2_SEND"};
+// --- MUX 2: AUX 3 (IN6/7) & GEQ Very High ---
+PotRef AUX3_INPUT_GAIN = {2, 0, true, "AUX3_INPUT_GAIN"};
+PotRef AUX3_EQ_LOW     = {2, 1, true, "AUX3_EQ_LOW",  true};
+PotRef AUX3_EQ_MID     = {2, 2, true, "AUX3_EQ_MID",  true};
+PotRef AUX3_EQ_HIGH    = {2, 3, true, "AUX3_EQ_HIGH", true};
+PotRef AUX3_FX_SEND    = {2, 4, true, "AUX3_FX_SEND"};
+PotRef AUX3_FX2_SEND   = {2, 5, true, "AUX3_FX2_SEND"};
+PotRef GEQ_4KHZ        = {2, 6, true, "GEQ_4KHZ",     true};
+PotRef GEQ_8KHZ        = {2, 7, true, "GEQ_8KHZ",     true};
 
-// AUX 1
-PotRef AUX1_INPUT_GAIN = {3,  2, true,  "AUX1_INPUT_GAIN"};
-PotRef AUX1_EQ_MID     = {0,  5, true,  "AUX1_EQ_MID",  true};
-PotRef AUX1_EQ_LOW     = {0, 14, true,  "AUX1_EQ_LOW",  true};
-PotRef AUX1_EQ_HIGH    = {0,  3, true,  "AUX1_EQ_HIGH", true};
-PotRef AUX1_FX_SEND    = {3,  3, true,  "AUX1_FX_SEND"};
-PotRef AUX1_FX2_SEND   = {3,  4, true,  "AUX1_FX2_SEND"};
+// --- MUX 3: AUX 4 (IN8/9) & GEQ Extreme ---
+PotRef AUX4_INPUT_GAIN = {3, 0, true, "AUX4_INPUT_GAIN"};
+PotRef AUX4_EQ_LOW     = {3, 1, true, "AUX4_EQ_LOW",  true};
+PotRef AUX4_EQ_MID     = {3, 2, true, "AUX4_EQ_MID",  true};
+PotRef AUX4_EQ_HIGH    = {3, 3, true, "AUX4_EQ_HIGH", true};
+PotRef AUX4_FX_SEND    = {3, 4, true, "AUX4_FX_SEND"};
+PotRef AUX4_FX2_SEND   = {3, 5, true, "AUX4_FX2_SEND"};
+PotRef GEQ_16KHZ       = {3, 6, true, "GEQ_16KHZ",    true};
 
-// AUX 2
-PotRef AUX2_INPUT_GAIN = {3,  7, true,  "AUX2_INPUT_GAIN"};
-PotRef AUX2_EQ_MID     = {0,  6, true,  "AUX2_EQ_MID",  true};
-PotRef AUX2_EQ_HIGH    = {1, 12, true,  "AUX2_EQ_HIGH", true};
-PotRef AUX2_EQ_LOW     = {0, 13, true,  "AUX2_EQ_LOW",  true};
-PotRef AUX2_FX_SEND    = {3,  6, true,  "AUX2_FX_SEND"};
-PotRef AUX2_FX2_SEND   = {3,  5, true,  "AUX2_FX2_SEND"};
+// --- MUX 4: Master Parametric EQ & HPF ---
+PotRef MASTER_EQ_SUB_FREQ  = {4, 0, true,  "MASTER_EQ_SUB_FREQ"};
+PotRef MASTER_EQ_SUB_GAIN  = {4, 1, true,  "MASTER_EQ_SUB_GAIN",  true};
+PotRef MASTER_EQ_KICK_FREQ = {4, 2, true,  "MASTER_EQ_KICK_FREQ"};
+PotRef MASTER_EQ_KICK_GAIN = {4, 3, true,  "MASTER_EQ_KICK_GAIN", true};
+PotRef MASTER_EQ_MID_FREQ  = {4, 4, false, "MASTER_EQ_MID_FREQ"};
+PotRef MASTER_EQ_MID_GAIN  = {4, 5, true,  "MASTER_EQ_MID_GAIN",  true};
+PotRef MASTER_EQ_TOP_FREQ  = {4, 6, true,  "MASTER_EQ_TOP_FREQ"};
+PotRef MASTER_EQ_TOP_GAIN  = {4, 7, true,  "MASTER_EQ_TOP_GAIN",  true};
+PotRef MASTER_HPF_FREQ     = {4, 8, true,  "MASTER_HPF_FREQ"};
+PotRef MASTER_HPF_RES      = {4, 9, true,  "MASTER_HPF_RES"};
 
-// AUX 3
-PotRef AUX3_INPUT_GAIN = {3,  8, true,  "AUX3_INPUT_GAIN"};
-PotRef AUX3_EQ_LOW     = {0, 12, true,  "AUX3_EQ_LOW",  true};
-PotRef AUX3_EQ_MID     = {0,  7, true,  "AUX3_EQ_MID",  true};
-PotRef AUX3_EQ_HIGH    = {1, 13, true,  "AUX3_EQ_HIGH", true};
-PotRef AUX3_FX_SEND    = {3,  9, true,  "AUX3_FX_SEND"};
-PotRef AUX3_FX2_SEND   = {3, 13, true,  "AUX3_FX2_SEND"};
+// --- MUX 5: Master Filters, Band Trim, Master Gain ---
+PotRef MASTER_LPF_FREQ = {5, 0, false, "MASTER_LPF_FREQ"};
+PotRef MASTER_LPF_RES  = {5, 1, false, "MASTER_LPF_RES"};
+PotRef BTRIM_SUB       = {5, 2, true,  "BTRIM_SUB",  true};
+PotRef BTRIM_KICK      = {5, 3, true,  "BTRIM_KICK", true};
+PotRef BTRIM_MID       = {5, 4, true,  "BTRIM_MID",  true};
+PotRef BTRIM_TOP       = {5, 5, true,  "BTRIM_TOP",  true};
+PotRef MASTER_GAIN     = {5, 6, true,  "MASTER_GAIN"};
+PotRef GEQ_250HZ       = {5, 7, true,  "GEQ_250HZ",  true};
+PotRef GEQ_500HZ       = {5, 8, true,  "GEQ_500HZ",  true};
 
-// AUX 4
-PotRef AUX4_INPUT_GAIN = {3, 15, true,  "AUX4_INPUT_GAIN"};
-PotRef AUX4_EQ_LOW     = {0, 11, true,  "AUX4_EQ_LOW",  true};
-PotRef AUX4_EQ_MID     = {0,  8, true,  "AUX4_EQ_MID",  true};
-PotRef AUX4_EQ_HIGH    = {1, 14, true,  "AUX4_EQ_HIGH", true};
-PotRef AUX4_FX_SEND    = {3, 14, true,  "AUX4_FX_SEND"};
-PotRef AUX4_FX2_SEND   = {3, 12, true,  "AUX4_FX2_SEND"};
-
-// Master parametric EQ
-PotRef MASTER_EQ_SUB_FREQ  = {2, 14, true,  "MASTER_EQ_SUB_FREQ"};
-PotRef MASTER_EQ_SUB_GAIN  = {2, 13, true,  "MASTER_EQ_SUB_GAIN",  true};
-PotRef MASTER_EQ_KICK_FREQ = {2,  8, true,  "MASTER_EQ_KICK_FREQ"};
-PotRef MASTER_EQ_KICK_GAIN = {2,  9, true,  "MASTER_EQ_KICK_GAIN", true};
-PotRef MASTER_EQ_MID_FREQ  = {3,  1, false, "MASTER_EQ_MID_FREQ"};
-PotRef MASTER_EQ_MID_GAIN  = {2,  7, true,  "MASTER_EQ_MID_GAIN",  true};
-PotRef MASTER_EQ_TOP_FREQ  = {2,  3, true,  "MASTER_EQ_TOP_FREQ"};
-PotRef MASTER_EQ_TOP_GAIN  = {2,  6, true,  "MASTER_EQ_TOP_GAIN",  true};
-
-// Band Trim
-PotRef BTRIM_TOP  = {1, 2, true, "BTRIM_TOP",  true};
-PotRef BTRIM_MID  = {1, 3, true, "BTRIM_MID",  true};
-PotRef BTRIM_KICK = {1, 4, true, "BTRIM_KICK", true};
-PotRef BTRIM_SUB  = {1, 5, true, "BTRIM_SUB",  true};
-
-// Graphic EQ (12 bands)
-PotRef GEQ_2KHZ  = {1,  0, true, "GEQ_2KHZ",  true};
-PotRef GEQ_8KHZ  = {1,  1, true, "GEQ_8KHZ",  true};
-PotRef GEQ_60HZ  = {1,  6, true, "GEQ_60HZ",  true};
-PotRef GEQ_40HZ  = {1,  7, true, "GEQ_40HZ",  true};
-PotRef GEQ_80HZ  = {1,  8, true, "GEQ_80HZ",  true};
-PotRef GEQ_100HZ = {1,  9, true, "GEQ_100HZ", true};
-PotRef GEQ_250HZ = {1, 10, true, "GEQ_250HZ", true};
-PotRef GEQ_125HZ = {1, 11, true, "GEQ_125HZ", true};
-PotRef GEQ_500HZ = {1, 15, true, "GEQ_500HZ", true};
-PotRef GEQ_4KHZ  = {2,  0, true, "GEQ_4KHZ",  true};
-PotRef GEQ_1KHZ  = {2, 15, true, "GEQ_1KHZ",  true};
-PotRef GEQ_16KHZ = {2,  1, true, "GEQ_16KHZ", true};
-
-// Master filter section
-PotRef MASTER_HPF_FREQ = {2, 11, true,  "MASTER_HPF_FREQ"};
-PotRef MASTER_HPF_RES  = {2, 12, true,  "MASTER_HPF_RES"};
-PotRef MASTER_LPF_RES  = {2, 10, true,  "MASTER_LPF_RES"};
-PotRef MASTER_LPF_FREQ = {2,  5, false, "MASTER_LPF_FREQ"};
+// --- MUX 6: Dub Siren & Graphic EQ Low Bands ---
+PotRef SIREN_TYPE      = {6, 0, true, "SIREN_TYPE"};
+PotRef SIREN_MOD       = {6, 1, true, "SIREN_MOD"};
+PotRef SIREN_GAIN      = {6, 2, true, "SIREN_GAIN"};
+PotRef SIREN_FX_SEND   = {6, 3, true, "SIREN_FX_SEND"};
+PotRef SIREN_FX2_SEND  = {6, 4, true, "SIREN_FX2_SEND"};
+PotRef GEQ_40HZ        = {6, 5, true, "GEQ_40HZ",  true};
+PotRef GEQ_60HZ        = {6, 6, true, "GEQ_60HZ",  true};
+PotRef GEQ_80HZ        = {6, 7, true, "GEQ_80HZ",  true};
+PotRef GEQ_100HZ       = {6, 8, true, "GEQ_100HZ", true};
+PotRef GEQ_125HZ       = {6, 9, true, "GEQ_125HZ", true};
 
 // ---------------------------------------------------------------------------
 // All named pots — single registration point for debug name lookup.

@@ -12,7 +12,7 @@
  *   [4] Float32[60×4]    — pot mapping [mux,pot,rev,cen]×60
  *   [5] Float32[9×3]     — switch mapping [pin,portB,rev]×9
  *   [6] Float32[N]       — config metadata (mux, routing, ignoredPots)
- *   [7] Float32[64]      — raw MUX grid [mux×16+pot], normalised 0–1 (unmapped discovery)
+ *   [7] Float32[80]      — raw MUX grid [mux×10+pot], normalised 0–1 (unmapped discovery)
  *   [8] Float32[20]      — codec gains: [0..9]=ADC input by physical ch, [10..19]=DAC out by physical ch
  *   [9] Float32[1]       — CPU temperature °C (sysfs thermal_zone0, ~2 s poll)
  *   [10] Float32[5]      — sampler: [folderOk, count, playingSlot, isPlaying, playhead]
@@ -76,8 +76,8 @@ var __belaPreampSketch = (() => {
   var LIVE_LAYOUT_STORAGE_KEY_V1 = "belaDubPreamp.liveLayout.v1";
   var LIVE_LAYOUT_STORAGE_KEY = "belaDubPreamp.liveLayout.v2";
   var DETECT_POT_MIN_DELTA = 0.25;
-  var MUX_POTS_PER_MUX = 16;
-  var MUX_RAW_SIZE = 64;
+  var MUX_POTS_PER_MUX = 10;
+  var MUX_RAW_SIZE = 80;
   var CONSOLE_POT_MIN_DELTA_DETAILED = 3e-3;
   var CONSOLE_POT_MIN_DELTA_NORMAL = 0.02;
   var BELA_OFFLINE_TIMEOUT_MS = 1e3;
@@ -1470,24 +1470,7 @@ border-radius:6px;background:transparent;
       }
     }
   };
-  var IGNORED_POTS_DEFAULT = [
-    {
-      "mux": 3,
-      "pot": 0
-    },
-    {
-      "mux": 3,
-      "pot": 1
-    },
-    {
-      "mux": 3,
-      "pot": 14
-    },
-    {
-      "mux": 3,
-      "pot": 15
-    }
-  ];
+  var IGNORED_POTS_DEFAULT = [];
 
   // gui/dom/meters.js
   var INPUT_GAIN_MIN = -12;
@@ -2335,7 +2318,7 @@ border-radius:6px;background:transparent;
         const tr = document.createElement("tr");
         tr.dataset.mapTable = "pot";
         tr.dataset.mapIndex = String(i);
-        tr.innerHTML = `<td class="pname" title="${name}">${name}</td><td><input type="number" min="0" max="3"  value="${mux}" data-i="${i}" data-f="mux" class="pi"></td><td><input type="number" min="0" max="15" value="${pot}" data-i="${i}" data-f="pot" class="pi"></td><td class="col-check"><input type="checkbox" ${rev ? "checked" : ""} data-i="${i}" data-f="rev" class="pi"></td><td class="col-check"><input type="checkbox" ${cen ? "checked" : ""} data-i="${i}" data-f="cen" class="pi"></td><td class="detect-cell"></td>`;
+        tr.innerHTML = `<td class="pname" title="${name}">${name}</td><td><input type="number" min="0" max="7"  value="${mux}" data-i="${i}" data-f="mux" class="pi"></td><td><input type="number" min="0" max="9"  value="${pot}" data-i="${i}" data-f="pot" class="pi"></td><td class="col-check"><input type="checkbox" ${rev ? "checked" : ""} data-i="${i}" data-f="rev" class="pi"></td><td class="col-check"><input type="checkbox" ${cen ? "checked" : ""} data-i="${i}" data-f="cen" class="pi"></td><td class="detect-cell"></td>`;
         tr.querySelector(".detect-cell").appendChild(createDetectButton("pot", i));
         ptbody.appendChild(tr);
       });
@@ -2355,9 +2338,37 @@ border-radius:6px;background:transparent;
         stbody.appendChild(tr);
       });
     }
-    document.querySelectorAll(".pi, .si").forEach((inp) => {
-      inp.addEventListener("input", updateMappingConflicts);
-      inp.addEventListener("change", updateMappingConflicts);
+    document.querySelectorAll(".pi").forEach((inp) => {
+      const handler = () => {
+        getContext().mappingUserEdited = true;
+        if (getContext().potMapping) {
+          const i = parseInt(inp.dataset.i, 10);
+          const f = inp.dataset.f;
+          if (f === "mux") getContext().potMapping[i * 4 + 0] = parseFloat(inp.value) || 0;
+          if (f === "pot") getContext().potMapping[i * 4 + 1] = parseFloat(inp.value) || 0;
+          if (f === "rev") getContext().potMapping[i * 4 + 2] = inp.checked ? 1 : 0;
+          if (f === "cen") getContext().potMapping[i * 4 + 3] = inp.checked ? 1 : 0;
+        }
+        cleanConsoleOfIgnored();
+        updateMappingConflicts();
+      };
+      inp.addEventListener("input", handler);
+      inp.addEventListener("change", handler);
+    });
+    document.querySelectorAll(".si").forEach((inp) => {
+      const handler = () => {
+        getContext().mappingUserEdited = true;
+        if (getContext().switchMapping) {
+          const i = parseInt(inp.dataset.i, 10);
+          const f = inp.dataset.f;
+          if (f === "pin") getContext().switchMapping[i * 3 + 0] = parseFloat(inp.value) || 0;
+          if (f === "port") getContext().switchMapping[i * 3 + 1] = parseFloat(inp.value);
+          if (f === "rev") getContext().switchMapping[i * 3 + 2] = inp.checked ? 1 : 0;
+        }
+        updateMappingConflicts();
+      };
+      inp.addEventListener("input", handler);
+      inp.addEventListener("change", handler);
     });
     renderIgnoredPotsTable();
     updateMappingConflicts();
@@ -2533,7 +2544,7 @@ border-radius:6px;background:transparent;
   function getActiveMuxCount() {
     if (getContext().configMeta && getContext().configMeta.length > CONFIG_META.ACTIVE_MUX)
       return Math.max(1, Math.round(getContext().configMeta[CONFIG_META.ACTIVE_MUX]));
-    return 4;
+    return 8;
   }
   function isPotIgnored(mux, pot) {
     if (Array.isArray(getContext().ignoredPotsList)) {
@@ -2642,7 +2653,7 @@ border-radius:6px;background:transparent;
       tr.dataset.ignIndex = String(idx);
       const mappedName = getMappedPotName(item.mux, item.pot);
       const statusHtml = mappedName ? `<span class="pname" title="${mappedName}">${mappedName}</span> <span style="font-size:10px; color:#e67e22; font-weight:600;">(Mapped)</span>` : `<span style="color:#7f8c8d; font-size:11px; font-style:italic;">Unassigned / Floating</span>`;
-      tr.innerHTML = `<td><input type="number" min="0" max="3" value="${item.mux}" data-idx="${idx}" data-f="mux" class="ii" style="width:100%; padding:3px 4px; border:1px solid #ddd; border-radius:4px; font-size:12px;"></td><td><input type="number" min="0" max="15" value="${item.pot}" data-idx="${idx}" data-f="pot" class="ii" style="width:100%; padding:3px 4px; border:1px solid #ddd; border-radius:4px; font-size:12px;"></td><td class="ign-status">${statusHtml}</td><td style="text-align:center;"><button type="button" class="btn-del-ign" data-idx="${idx}" title="Remove ignored pot">\u2715</button></td>`;
+      tr.innerHTML = `<td><input type="number" min="0" max="7" value="${item.mux}" data-idx="${idx}" data-f="mux" class="ii" style="width:100%; padding:3px 4px; border:1px solid #ddd; border-radius:4px; font-size:12px;"></td><td><input type="number" min="0" max="9" value="${item.pot}" data-idx="${idx}" data-f="pot" class="ii" style="width:100%; padding:3px 4px; border:1px solid #ddd; border-radius:4px; font-size:12px;"></td><td class="ign-status">${statusHtml}</td><td style="text-align:center;"><button type="button" class="btn-del-ign" data-idx="${idx}" title="Remove ignored pot">\u2715</button></td>`;
       tr.querySelector(".btn-del-ign").addEventListener("click", () => {
         removeIgnoredPotRow(idx);
       });
@@ -2652,8 +2663,8 @@ border-radius:6px;background:transparent;
           const i = parseInt(e.target.dataset.idx, 10);
           let val = parseInt(e.target.value, 10);
           if (isNaN(val)) val = 0;
-          if (field === "mux") val = Math.max(0, Math.min(3, val));
-          if (field === "pot") val = Math.max(0, Math.min(15, val));
+          if (field === "mux") val = Math.max(0, Math.min(7, val));
+          if (field === "pot") val = Math.max(0, Math.min(9, val));
           e.target.value = val;
           list[i][field] = val;
           getContext().ignoredPotsUserEdited = true;
@@ -2707,7 +2718,7 @@ border-radius:6px;background:transparent;
       if (match) {
         const m = parseInt(match[1], 10);
         const p = parseInt(match[2], 10);
-        if (isPotIgnored(m, p)) return false;
+        if (isPotIgnored(m, p) || isPotMapped(m, p)) return false;
       }
       return true;
     });
@@ -2730,9 +2741,9 @@ border-radius:6px;background:transparent;
     renderIgnoredPotsTable();
   }
   function isPotMapped(mux, pot) {
-    if (!getContext().potMapping) return false;
     for (let i = 0; i < POT_NAMES.length; i++) {
-      if (Math.round(getContext().potMapping[i * 4]) === mux && Math.round(getContext().potMapping[i * 4 + 1]) === pot)
+      const coords = getPotMuxChannel(i);
+      if (coords && coords.mux === mux && coords.pot === pot)
         return true;
     }
     return false;
@@ -2940,8 +2951,8 @@ border-radius:6px;background:transparent;
     let ignoredPots = [];
     if (Array.isArray(getContext().ignoredPotsList)) {
       ignoredPots = getContext().ignoredPotsList.map((item) => ({
-        mux: Math.max(0, Math.min(3, Math.round(item.mux))),
-        pot: Math.max(0, Math.min(15, Math.round(item.pot)))
+        mux: Math.max(0, Math.min(7, Math.round(item.mux))),
+        pot: Math.max(0, Math.min(9, Math.round(item.pot)))
       }));
     } else {
       const ignoredCount = Math.round(getContext().configMeta[M.IGNORED_COUNT]);
@@ -3139,12 +3150,20 @@ border-radius:6px;background:transparent;
     const isNormal = getContext().consoleFilterMode === "normal";
     const potDelta = isNormal ? CONSOLE_POT_MIN_DELTA_NORMAL : CONSOLE_POT_MIN_DELTA_DETAILED;
     const potPrev = isNormal ? getContext().prevPotValuesNormal : getContext().prevPotValues;
+    const mappedChannels = /* @__PURE__ */ new Set();
     for (let i = 0; i < POT_NAMES.length; i++) {
       const coords = getPotMuxChannel(i);
+      if (coords) {
+        mappedChannels.add(`${coords.mux}:${coords.pot}`);
+      }
       if (coords && isPotIgnored(coords.mux, coords.pot)) continue;
       const v = getContext().potValues[i];
       if (Math.abs(v - potPrev[i]) >= potDelta) {
         potPrev[i] = v;
+        if (coords) {
+          const unmappedName = formatUnmappedPotLabel(coords.mux, coords.pot);
+          getContext().recentChanges = getContext().recentChanges.filter((e) => e.name !== unmappedName);
+        }
         pushConsoleEntry({ name: POT_NAMES[i], value: v, type: "pot", ts: now });
         dirty = true;
       }
@@ -3162,7 +3181,7 @@ border-radius:6px;background:transparent;
       const activeMux = getActiveMuxCount();
       for (let m = 0; m < activeMux; m++) {
         for (let p = 0; p < MUX_POTS_PER_MUX; p++) {
-          if (isPotIgnored(m, p) || isPotMapped(m, p)) continue;
+          if (isPotIgnored(m, p) || mappedChannels.has(`${m}:${p}`) || isPotMapped(m, p)) continue;
           const idx = muxRawIndex(m, p);
           const v = getContext().muxRawValues[idx];
           if (Math.abs(v - muxPrev[idx]) >= potDelta) {
@@ -4298,13 +4317,25 @@ border-radius:6px;background:transparent;
         }
         ctx.muxRawValues = b[7];
       }
-      if (b[4] && !ctx.potMapping) {
-        ctx.potMapping = Float32Array.from(b[4]);
-        tryBuildMappingTable();
+      if (b[4]) {
+        if (!ctx.potMapping) {
+          ctx.potMapping = Float32Array.from(b[4]);
+          tryBuildMappingTable();
+        } else if (!ctx.mappingUserEdited) {
+          for (let i = 0; i < Math.min(b[4].length, ctx.potMapping.length); ++i) {
+            ctx.potMapping[i] = b[4][i];
+          }
+        }
       }
-      if (b[5] && !ctx.switchMapping) {
-        ctx.switchMapping = Float32Array.from(b[5]);
-        tryBuildMappingTable();
+      if (b[5]) {
+        if (!ctx.switchMapping) {
+          ctx.switchMapping = Float32Array.from(b[5]);
+          tryBuildMappingTable();
+        } else if (!ctx.mappingUserEdited) {
+          for (let i = 0; i < Math.min(b[5].length, ctx.switchMapping.length); ++i) {
+            ctx.switchMapping[i] = b[5][i];
+          }
+        }
       }
       if (b[6] && !ctx.configMeta) {
         ctx.configMeta = Float32Array.from(b[6]);

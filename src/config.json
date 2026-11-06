@@ -1,7 +1,7 @@
 {
-  "_comment": "Dub Preamp BELA GEM MULTI -- hardware mapping config. Stereo support: for inputs and outputs, use 'channels': [L, R] (e.g. aux1: {channels: [2, 3], ...}, master: {channels: [2, 3], ...}). For mono, use 'channels': [N] or 'channels': [N, -1]. Edit this file to remap pots/switches without recompiling. Restart the Bela project to apply changes.",
+  "_comment": "Dub Preamp BELA GEM MULTI -- hardware mapping config. Edit this file to remap pots/switches without recompiling. Restart the Bela project to apply changes.",
   "mux": {
-    "activeMux": 4
+    "activeMux": 8
   },
   "calibration": {
     "potScaleRecovery": 1.2412,
@@ -108,85 +108,85 @@
   "pots": [
     {
       "name": "AUX1_INPUT_GAIN",
-      "mux": 0,
-      "pot": 11,
+      "mux": 3,
+      "pot": 5,
       "reversed": true,
-      "centered": true
+      "centered": false
     },
     {
       "name": "AUX1_EQ_MID",
-      "mux": 0,
-      "pot": 14,
+      "mux": 3,
+      "pot": 8,
       "reversed": true,
       "centered": true
     },
     {
       "name": "AUX1_EQ_LOW",
-      "mux": 0,
-      "pot": 10,
+      "mux": 3,
+      "pot": 4,
       "reversed": true,
       "centered": false
     },
     {
       "name": "AUX1_EQ_HIGH",
-      "mux": 0,
-      "pot": 15,
+      "mux": 3,
+      "pot": 9,
       "reversed": true,
-      "centered": false
+      "centered": true
     },
     {
       "name": "AUX1_FX_SEND",
-      "mux": 0,
-      "pot": 12,
+      "mux": 3,
+      "pot": 6,
       "reversed": true,
       "centered": true
     },
     {
       "name": "AUX1_FX2_SEND",
-      "mux": 0,
-      "pot": 13,
+      "mux": 3,
+      "pot": 7,
       "reversed": true,
-      "centered": true
+      "centered": false
     },
     {
       "name": "AUX2_INPUT_GAIN",
-      "mux": 1,
-      "pot": 11,
+      "mux": 2,
+      "pot": 5,
       "reversed": true,
-      "centered": true
+      "centered": false
     },
     {
       "name": "AUX2_EQ_MID",
-      "mux": 1,
-      "pot": 14,
+      "mux": 2,
+      "pot": 8,
       "reversed": true,
       "centered": true
     },
     {
       "name": "AUX2_EQ_HIGH",
-      "mux": 1,
-      "pot": 15,
+      "mux": 2,
+      "pot": 9,
       "reversed": true,
       "centered": true
     },
     {
       "name": "AUX2_EQ_LOW",
-      "mux": 1,
-      "pot": 10,
+      "mux": 2,
+      "pot": 4,
       "reversed": true,
-      "centered": true
+      "centered": false
     },
     {
       "name": "AUX2_FX_SEND",
-      "mux": 1,
-      "pot": 12,
+      "mux": 2,
+      "pot": 6,
       "reversed": true,
       "centered": true
     },
     {
       "name": "AUX2_FX2_SEND",
-      "mux": 1,
-      "pot": 13,
+      "mux": 2,
+      "pot": 7,
       "reversed": true,
       "centered": true
     },
@@ -200,42 +200,42 @@
     {
       "name": "AUX3_EQ_LOW",
       "mux": 1,
-      "pot": 2,
+      "pot": 4,
       "reversed": true,
       "centered": true
     },
     {
       "name": "AUX3_EQ_MID",
       "mux": 1,
-      "pot": 6,
+      "pot": 8,
       "reversed": true,
       "centered": true
     },
     {
       "name": "AUX3_EQ_HIGH",
       "mux": 1,
-      "pot": 7,
+      "pot": 9,
       "reversed": true,
       "centered": true
     },
     {
       "name": "AUX3_FX_SEND",
       "mux": 1,
-      "pot": 4,
+      "pot": 6,
       "reversed": true,
       "centered": true
     },
     {
       "name": "AUX3_FX2_SEND",
       "mux": 1,
-      "pot": 5,
+      "pot": 7,
       "reversed": true,
       "centered": true
     },
     {
       "name": "AUX4_INPUT_GAIN",
       "mux": 0,
-      "pot": 3,
+      "pot": 5,
       "reversed": true,
       "centered": false
     },
@@ -249,223 +249,223 @@
     {
       "name": "AUX4_EQ_MID",
       "mux": 0,
-      "pot": 6,
+      "pot": 8,
       "reversed": true,
       "centered": true
     },
     {
       "name": "AUX4_EQ_HIGH",
       "mux": 0,
-      "pot": 7,
+      "pot": 9,
       "reversed": true,
       "centered": true
     },
     {
       "name": "AUX4_FX_SEND",
       "mux": 0,
-      "pot": 4,
+      "pot": 6,
       "reversed": true,
       "centered": false
     },
     {
       "name": "AUX4_FX2_SEND",
       "mux": 0,
-      "pot": 5,
+      "pot": 7,
       "reversed": true,
       "centered": true
     },
     {
       "name": "MASTER_GAIN",
-      "mux": 3,
-      "pot": 10,
+      "mux": 7,
+      "pot": 5,
       "reversed": true,
       "centered": false
     },
     {
       "name": "MASTER_EQ_SUB_FREQ",
-      "mux": 2,
-      "pot": 6,
+      "mux": 5,
+      "pot": 4,
       "reversed": true,
       "centered": true
     },
     {
       "name": "MASTER_EQ_SUB_GAIN",
-      "mux": 2,
-      "pot": 10,
+      "mux": 4,
+      "pot": 8,
       "reversed": true,
       "centered": false
     },
     {
       "name": "MASTER_EQ_KICK_FREQ",
-      "mux": 2,
-      "pot": 7,
+      "mux": 5,
+      "pot": 5,
       "reversed": true,
       "centered": true
     },
     {
       "name": "MASTER_EQ_KICK_GAIN",
-      "mux": 2,
-      "pot": 11,
-      "reversed": true,
-      "centered": false
-    },
-    {
-      "name": "MASTER_EQ_MID_FREQ",
-      "mux": 2,
-      "pot": 8,
-      "reversed": true,
-      "centered": true
-    },
-    {
-      "name": "MASTER_EQ_MID_GAIN",
-      "mux": 2,
-      "pot": 12,
-      "reversed": true,
-      "centered": false
-    },
-    {
-      "name": "MASTER_EQ_TOP_FREQ",
-      "mux": 2,
+      "mux": 4,
       "pot": 9,
       "reversed": true,
       "centered": false
     },
     {
-      "name": "MASTER_EQ_TOP_GAIN",
-      "mux": 2,
-      "pot": 13,
+      "name": "MASTER_EQ_MID_FREQ",
+      "mux": 5,
+      "pot": 6,
       "reversed": true,
       "centered": false
     },
     {
-      "name": "MASTER_HPF_FREQ",
-      "mux": 2,
-      "pot": 2,
-      "reversed": true,
-      "centered": false
-    },
-    {
-      "name": "MASTER_HPF_RES",
-      "mux": 2,
-      "pot": 3,
-      "reversed": true,
-      "centered": false
-    },
-    {
-      "name": "MASTER_LPF_FREQ",
-      "mux": 2,
-      "pot": 5,
-      "reversed": false,
-      "centered": false
-    },
-    {
-      "name": "MASTER_LPF_RES",
-      "mux": 2,
-      "pot": 4,
-      "reversed": false,
-      "centered": false
-    },
-    {
-      "name": "BTRIM_SUB",
-      "mux": 2,
-      "pot": 14,
-      "reversed": true,
-      "centered": true
-    },
-    {
-      "name": "BTRIM_KICK",
-      "mux": 2,
-      "pot": 15,
-      "reversed": true,
-      "centered": true
-    },
-    {
-      "name": "BTRIM_MID",
-      "mux": 2,
+      "name": "MASTER_EQ_MID_GAIN",
+      "mux": 4,
       "pot": 0,
       "reversed": true,
       "centered": true
     },
     {
-      "name": "BTRIM_TOP",
-      "mux": 2,
-      "pot": 1,
-      "reversed": true,
-      "centered": true
-    },
-    {
-      "name": "SIREN_TYPE",
-      "mux": 3,
+      "name": "MASTER_EQ_TOP_FREQ",
+      "mux": 5,
       "pot": 7,
-      "reversed": true,
-      "centered": true
-    },
-    {
-      "name": "SIREN_MOD",
-      "mux": 3,
-      "pot": 6,
-      "reversed": true,
-      "centered": true
-    },
-    {
-      "name": "SIREN_GAIN",
-      "mux": 3,
-      "pot": 13,
-      "reversed": true,
-      "centered": true
-    },
-    {
-      "name": "SIREN_FX_SEND",
-      "mux": 3,
-      "pot": 11,
       "reversed": true,
       "centered": false
     },
     {
-      "name": "SIREN_FX2_SEND",
-      "mux": 3,
-      "pot": 12,
+      "name": "MASTER_EQ_TOP_GAIN",
+      "mux": 4,
+      "pot": 1,
       "reversed": true,
-      "centered": true
+      "centered": false
     },
     {
-      "name": "GEQ_40HZ",
-      "mux": 3,
+      "name": "MASTER_HPF_FREQ",
+      "mux": 4,
+      "pot": 4,
+      "reversed": true,
+      "centered": false
+    },
+    {
+      "name": "MASTER_HPF_RES",
+      "mux": 4,
       "pot": 5,
       "reversed": true,
       "centered": true
     },
     {
-      "name": "GEQ_60HZ",
-      "mux": 3,
+      "name": "MASTER_LPF_FREQ",
+      "mux": 4,
+      "pot": 7,
+      "reversed": true,
+      "centered": false
+    },
+    {
+      "name": "MASTER_LPF_RES",
+      "mux": 4,
+      "pot": 6,
+      "reversed": true,
+      "centered": false
+    },
+    {
+      "name": "BTRIM_SUB",
+      "mux": 5,
+      "pot": 8,
+      "reversed": true,
+      "centered": true
+    },
+    {
+      "name": "BTRIM_KICK",
+      "mux": 5,
+      "pot": 9,
+      "reversed": true,
+      "centered": true
+    },
+    {
+      "name": "BTRIM_MID",
+      "mux": 5,
+      "pot": 0,
+      "reversed": true,
+      "centered": false
+    },
+    {
+      "name": "BTRIM_TOP",
+      "mux": 5,
+      "pot": 1,
+      "reversed": true,
+      "centered": false
+    },
+    {
+      "name": "SIREN_TYPE",
+      "mux": 6,
+      "pot": 8,
+      "reversed": true,
+      "centered": true
+    },
+    {
+      "name": "SIREN_MOD",
+      "mux": 6,
+      "pot": 9,
+      "reversed": true,
+      "centered": true
+    },
+    {
+      "name": "SIREN_GAIN",
+      "mux": 6,
+      "pot": 0,
+      "reversed": true,
+      "centered": true
+    },
+    {
+      "name": "SIREN_FX_SEND",
+      "mux": 6,
+      "pot": 1,
+      "reversed": true,
+      "centered": true
+    },
+    {
+      "name": "SIREN_FX2_SEND",
+      "mux": 7,
       "pot": 4,
       "reversed": true,
       "centered": true
     },
     {
+      "name": "GEQ_40HZ",
+      "mux": 6,
+      "pot": 6,
+      "reversed": true,
+      "centered": true
+    },
+    {
+      "name": "GEQ_60HZ",
+      "mux": 6,
+      "pot": 7,
+      "reversed": true,
+      "centered": true
+    },
+    {
       "name": "GEQ_80HZ",
-      "mux": 0,
+      "mux": 3,
       "pot": 0,
       "reversed": true,
       "centered": false
     },
     {
       "name": "GEQ_100HZ",
-      "mux": 0,
+      "mux": 3,
       "pot": 1,
       "reversed": true,
-      "centered": false
+      "centered": true
     },
     {
       "name": "GEQ_125HZ",
-      "mux": 1,
+      "mux": 2,
       "pot": 0,
       "reversed": true,
       "centered": true
     },
     {
       "name": "GEQ_250HZ",
-      "mux": 1,
+      "mux": 2,
       "pot": 1,
       "reversed": true,
       "centered": true
@@ -473,56 +473,56 @@
     {
       "name": "GEQ_500HZ",
       "mux": 1,
-      "pot": 8,
+      "pot": 0,
       "reversed": true,
       "centered": false
     },
     {
       "name": "GEQ_1KHZ",
       "mux": 1,
-      "pot": 9,
+      "pot": 1,
       "reversed": true,
       "centered": false
     },
     {
       "name": "GEQ_2KHZ",
       "mux": 0,
-      "pot": 8,
+      "pot": 0,
       "reversed": true,
-      "centered": true
+      "centered": false
     },
     {
       "name": "GEQ_4KHZ",
       "mux": 0,
-      "pot": 9,
+      "pot": 1,
       "reversed": true,
-      "centered": true
+      "centered": false
     },
     {
       "name": "GEQ_8KHZ",
-      "mux": 3,
-      "pot": 3,
+      "mux": 6,
+      "pot": 4,
       "reversed": true,
       "centered": true
     },
     {
       "name": "GEQ_16KHZ",
-      "mux": 3,
-      "pot": 2,
+      "mux": 6,
+      "pot": 5,
       "reversed": true,
       "centered": true
     },
     {
       "name": "FX1_RETURN_GAIN",
-      "mux": 3,
-      "pot": 9,
+      "mux": 7,
+      "pot": 6,
       "reversed": true,
       "centered": false
     },
     {
       "name": "FX2_RETURN_GAIN",
-      "mux": 3,
-      "pot": 8,
+      "mux": 7,
+      "pot": 7,
       "reversed": true,
       "centered": true
     }
@@ -536,19 +536,19 @@
     },
     {
       "name": "KILL_KICK",
-      "pin": 1,
+      "pin": 0,
       "reversed": false,
-      "port": "A"
+      "port": "B"
     },
     {
       "name": "KILL_MID",
-      "pin": 2,
+      "pin": 1,
       "reversed": true,
-      "port": "A"
+      "port": "B"
     },
     {
       "name": "KILL_TOP",
-      "pin": 3,
+      "pin": 1,
       "reversed": false,
       "port": "A"
     },
@@ -578,27 +578,10 @@
     },
     {
       "name": "SIREN_TRIGGER",
-      "pin": 0,
+      "pin": 2,
       "reversed": false,
       "port": "B"
     }
   ],
-  "ignoredPots": [
-    {
-      "mux": 3,
-      "pot": 0
-    },
-    {
-      "mux": 3,
-      "pot": 1
-    },
-    {
-      "mux": 3,
-      "pot": 14
-    },
-    {
-      "mux": 3,
-      "pot": 15
-    }
-  ]
+  "ignoredPots": []
 }

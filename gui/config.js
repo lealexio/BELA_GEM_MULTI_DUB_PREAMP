@@ -34,8 +34,8 @@ export const LIVE_LAYOUT_STORAGE_KEY = 'belaDubPreamp.liveLayout.v2';
 export const DETECT_POT_MIN_DELTA = 0.25;
 
 /** MUX grid layout — must match kNumMux × kPotsPerMux in HardwareConfig.h. */
-export const MUX_POTS_PER_MUX = 16;
-export const MUX_RAW_SIZE     = 64;
+export const MUX_POTS_PER_MUX = 10;
+export const MUX_RAW_SIZE     = 80;
 
 /** Console pot change thresholds — detailed catches ADC jitter, normal filters it. */
 export const CONSOLE_POT_MIN_DELTA_DETAILED = 0.003;

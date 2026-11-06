@@ -135,19 +135,24 @@ IN → × inputGain_ → NoiseGate → EQ (low shelf / mid peak / high shelf) �
 
 ## Mapping hardware actuel
 
-`kActiveMux = 4`. La liste exhaustive des `PotRef` et `SwitchRef` est dans `HardwareConfig.h` — c'est la source de vérité pour les numéros de MUX/canal. Ne pas dupliquer ici.
+`kActiveMux = 8` (8 multiplexeurs 10 voies, canaux 0 à 9). La liste exhaustive des `PotRef` et `SwitchRef` est dans `HardwareConfig.h` — c'est la source de vérité pour les numéros de MUX/canal. Ne pas dupliquer ici.
 
 **Groupes fonctionnels par MUX (vue d'ensemble) :**
-- MUX 0 : channel strips 1 & 2 (EQ, siren mod/type)
-- MUX 1 : graphic EQ (12 bandes) + band trim (4 bandes)
-- MUX 2 : EQ paramétrique master (freq + gain × 4) + HPF/LPF (freq + res × 2)
-- MUX 3 : gains d'entrée + FX sends (CH1, CH2, AUX3, AUX4, siren) + master gain
+- MUX 0 : AUX 1 (Gain, EQ 3 bandes, FX Send 1 & 2) + Gains retour FX 1 & 2
+- MUX 1 : AUX 2 (Gain, EQ 3 bandes, FX Send 1 & 2) + Graphic EQ 1 kHz & 2 kHz
+- MUX 2 : AUX 3 (Gain, EQ 3 bandes, FX Send 1 & 2) + Graphic EQ 4 kHz & 8 kHz
+- MUX 3 : AUX 4 (Gain, EQ 3 bandes, FX Send 1 & 2) + Graphic EQ 16 kHz
+- MUX 4 : EQ paramétrique master (freq + gain × 4) + HPF master (freq + res)
+- MUX 5 : LPF master (freq + res) + Band Trim (4 bandes) + Master Gain + Graphic EQ 250 Hz & 500 Hz
+- MUX 6 : Dub Siren (Type, Mod, Gain, FX Send 1 & 2) + Graphic EQ 40 Hz à 125 Hz
+- MUX 7 : Extension / canaux additionnels (0 à 9)
 
 > Les `PotRef` avec le flag `centered = true` passent automatiquement par la courbe de puissance (`kCenteredPotExponent`). Pots ignorés : voir `kIgnoredPots` dans `HardwareConfig.h`.
 
-**Switches (MCP23017 port A, 0x20) — 7 switches actifs :**
+**Switches (MCP23017 ports A & B, auto-détection d'adresse 0x20..0x27) :**
 - 4 kills (SUB/KICK/MID/TOP)
-- 2 modes FX send (MIDS only, TOPS only)
+- 2 modes FX send 1 (MIDS only, TOPS only)
+- 2 modes FX send 2 (MIDS only, TOPS only)
 - 1 gate sirène (SIREN_TRIGGER)
 
 ---

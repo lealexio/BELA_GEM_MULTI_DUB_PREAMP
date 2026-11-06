@@ -15,13 +15,13 @@ import {
  * @param {string} [listId='console-list']
  */
 export function buildConsoleCard(listId) {
-    const card = el('div', {className: 'card live-tile'});
+    const card = el('div', { className: 'card live-tile' });
     card.dataset.tile = 'console';
-    const consoleHdr = el('div', {className: 'console-header'});
+    const consoleHdr = el('div', { className: 'console-header' });
     consoleHdr.appendChild(cardTitle('Console — last change'));
-    const filterBar = el('div', {className: 'console-filter'});
+    const filterBar = el('div', { className: 'console-filter' });
     [
-        { mode: 'normal',   label: 'Normal'   },
+        { mode: 'normal', label: 'Normal' },
         { mode: 'detailed', label: 'Détaillé' }
     ].forEach(({ mode, label }) => {
         const btn = el('button', {
@@ -36,7 +36,7 @@ export function buildConsoleCard(listId) {
     });
     consoleHdr.appendChild(filterBar);
     card.appendChild(consoleHdr);
-    const list = el('ul', {id: listId || 'console-list', className: 'console-list'});
+    const list = el('ul', { id: listId || 'console-list', className: 'console-list' });
     card.appendChild(list);
     if (!getContext().consoleLists)
         getContext().consoleLists = [];
@@ -47,18 +47,18 @@ export function buildConsoleCard(listId) {
 
 /** Builds the switches status card. */
 export function buildSwitchesCard() {
-    const swCard = el('div', {className: 'card live-tile'});
+    const swCard = el('div', { className: 'card live-tile' });
     swCard.dataset.tile = 'switches';
     swCard.appendChild(cardTitle('Switches'));
-    const swGrid = el('div', {className: 'sw-grid'});
+    const swGrid = el('div', { className: 'sw-grid' });
 
     SWITCH_GROUPS.forEach(group => {
-        const grp = el('div', {className: 'sw-group sw-group-' + group.type});
-        const gtitle = el('div', {className: 'sw-group-title'});
+        const grp = el('div', { className: 'sw-group sw-group-' + group.type });
+        const gtitle = el('div', { className: 'sw-group-title' });
         gtitle.textContent = group.label;
         grp.appendChild(gtitle);
 
-        const items = el('div', {className: 'sw-group-items'});
+        const items = el('div', { className: 'sw-group-items' });
         group.indices.forEach(i => {
             items.appendChild(buildSwitchTile(i, SWITCH_NAMES[i], group.type));
         });
@@ -73,20 +73,20 @@ export function buildSwitchesCard() {
 /** Returns a short display label for a switch name. */
 function switchDisplayName(name) {
     if (name.indexOf('KILL_') === 0) return name.slice(5);
-    if (name === 'FX_FILTER_MIDS')  return 'FX1 MIDS';
-    if (name === 'FX_FILTER_TOPS')  return 'FX1 TOPS';
+    if (name === 'FX_FILTER_MIDS') return 'FX1 MIDS';
+    if (name === 'FX_FILTER_TOPS') return 'FX1 TOPS';
     if (name === 'FX2_FILTER_TOPS') return 'FX2 TOPS';
     if (name === 'FX2_FILTER_MIDS') return 'FX2 MIDS';
-    if (name === 'SIREN_TRIGGER')   return 'GATE';
+    if (name === 'SIREN_TRIGGER') return 'GATE';
     return name.replace(/_/g, ' ');
 }
 
 /** Builds one switch status tile with LED indicator. */
 function buildSwitchTile(index, name, type) {
-    const tile = el('div', {className: 'sw-tile sw-tile-' + type});
+    const tile = el('div', { className: 'sw-tile sw-tile-' + type });
     tile.dataset.swIndex = String(index);
-    const led  = el('div', {className: 'sw-led'});
-    const lbl  = el('span', {className: 'sw-tile-name'});
+    const led = el('div', { className: 'sw-led' });
+    const lbl = el('span', { className: 'sw-tile-name' });
     lbl.textContent = switchDisplayName(name);
     tile.appendChild(led);
     tile.appendChild(lbl);
@@ -118,11 +118,11 @@ function setConsoleFilterMode(mode) {
 
 /** Builds one console row — filled from entry or empty placeholder slot. */
 function buildConsoleRow(entry, slot) {
-    const isSw    = entry && entry.type === 'sw';
+    const isSw = entry && entry.type === 'sw';
     const isEmpty = !entry;
-    const li = el('li', {className: 'crow' + (isEmpty ? ' empty' : (isSw ? ' sw' : ''))});
+    const li = el('li', { className: 'crow' + (isEmpty ? ' empty' : (isSw ? ' sw' : '')) });
     if (isEmpty) li.style.setProperty('--slot', String(slot));
-    const pct  = entry ? Math.min(100, Math.max(0, entry.value * 100)).toFixed(1) : '0';
+    const pct = entry ? Math.min(100, Math.max(0, entry.value * 100)).toFixed(1) : '0';
     const cval = entry ? entry.value.toFixed(3) : '\u00a0';
     const cname = entry ? entry.name : '\u00a0';
     const fillCls = isEmpty ? 'cfill cfill-loading' : 'cfill';
@@ -140,16 +140,27 @@ export function updateConsole() {
     let dirty = false;
     const isNormal = getContext().consoleFilterMode === 'normal';
     const potDelta = isNormal ? CONSOLE_POT_MIN_DELTA_NORMAL : CONSOLE_POT_MIN_DELTA_DETAILED;
-    const potPrev  = isNormal ? getContext().prevPotValuesNormal : getContext().prevPotValues;
+    const potPrev = isNormal ? getContext().prevPotValuesNormal : getContext().prevPotValues;
 
+    // Cache current pot channel coordinates and track all mapped MUX channels
+    const mappedChannels = new Set();
     for (let i = 0; i < POT_NAMES.length; i++) {
         const coords = getPotMuxChannel(i);
+        if (coords) {
+            mappedChannels.add(`${coords.mux}:${coords.pot}`);
+        }
+
         if (coords && isPotIgnored(coords.mux, coords.pot)) continue;
 
         const v = getContext().potValues[i];
         if (Math.abs(v - potPrev[i]) >= potDelta) {
             potPrev[i] = v;
-            pushConsoleEntry({name: POT_NAMES[i], value: v, type: 'pot', ts: now});
+            if (coords) {
+                const unmappedName = formatUnmappedPotLabel(coords.mux, coords.pot);
+                getContext().recentChanges =
+                    getContext().recentChanges.filter(e => e.name !== unmappedName);
+            }
+            pushConsoleEntry({ name: POT_NAMES[i], value: v, type: 'pot', ts: now });
             dirty = true;
         }
     }
@@ -157,7 +168,7 @@ export function updateConsole() {
         const v = getContext().switchStates[i];
         if (v !== getContext().prevSwitchStates[i]) {
             getContext().prevSwitchStates[i] = v;
-            pushConsoleEntry({name: SWITCH_NAMES[i], value: v, type: 'sw', ts: now});
+            pushConsoleEntry({ name: SWITCH_NAMES[i], value: v, type: 'sw', ts: now });
             dirty = true;
         }
     }
@@ -165,13 +176,13 @@ export function updateConsole() {
     if (getContext().muxRawValues && getContext().prevMuxRawValues &&
         getContext().prevMuxRawValuesNormal) {
         const muxPrev = isNormal ? getContext().prevMuxRawValuesNormal
-                                 : getContext().prevMuxRawValues;
+            : getContext().prevMuxRawValues;
         const activeMux = getActiveMuxCount();
         for (let m = 0; m < activeMux; m++) {
             for (let p = 0; p < MUX_POTS_PER_MUX; p++) {
-                if (isPotIgnored(m, p) || isPotMapped(m, p)) continue;
+                if (isPotIgnored(m, p) || mappedChannels.has(`${m}:${p}`) || isPotMapped(m, p)) continue;
                 const idx = muxRawIndex(m, p);
-                const v   = getContext().muxRawValues[idx];
+                const v = getContext().muxRawValues[idx];
                 if (Math.abs(v - muxPrev[idx]) >= potDelta) {
                     muxPrev[idx] = v;
                     pushConsoleEntry({

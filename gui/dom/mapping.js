@@ -13,8 +13,8 @@ const ROUTING_CH_MIN = 0;
 const ROUTING_CH_MAX = 9;
 
 /** Codec gain ranges — must match SoftwareConfig.h / meters.js. */
-const INPUT_GAIN_MIN  = -12;
-const INPUT_GAIN_MAX  = 10;
+const INPUT_GAIN_MIN = -12;
+const INPUT_GAIN_MAX = 10;
 const OUTPUT_GAIN_MIN = -63;
 const OUTPUT_GAIN_MAX = 0;
 
@@ -34,16 +34,16 @@ const ROUTING_OUT_KEYS = [
  * @returns {number|number[]}
  */
 function routingInChannel(val) {
-    if(val != null && typeof val === 'object' && !Array.isArray(val)) {
-        if(Array.isArray(val.channels)) return val.channels;
-        if(val.channel != null) {
-            if(val.channelR != null && val.channelR >= 0)
+    if (val != null && typeof val === 'object' && !Array.isArray(val)) {
+        if (Array.isArray(val.channels)) return val.channels;
+        if (val.channel != null) {
+            if (val.channelR != null && val.channelR >= 0)
                 return [val.channel, val.channelR];
             return val.channel;
         }
         return 0;
     }
-    if(Array.isArray(val)) return val;
+    if (Array.isArray(val)) return val;
     return val != null ? val : 0;
 }
 
@@ -53,8 +53,8 @@ function routingInChannel(val) {
  * @returns {number|number[]}
  */
 function routingOutChannel(val) {
-    if(val != null && typeof val === 'object' && !Array.isArray(val)) {
-        if(Array.isArray(val.channels)) return val.channels;
+    if (val != null && typeof val === 'object' && !Array.isArray(val)) {
+        if (Array.isArray(val.channels)) return val.channels;
         return val.channel != null ? val.channel : 0;
     }
     return val;
@@ -66,7 +66,7 @@ function routingOutChannel(val) {
  * @returns {boolean}
  */
 function routingInMic(val) {
-    if(val != null && typeof val === 'object' && !Array.isArray(val))
+    if (val != null && typeof val === 'object' && !Array.isArray(val))
         return !!val.mic;
     return false;
 }
@@ -77,7 +77,7 @@ function routingInMic(val) {
  * @returns {number}
  */
 function routingInHpf(val) {
-    if(val != null && typeof val === 'object' && !Array.isArray(val)) {
+    if (val != null && typeof val === 'object' && !Array.isArray(val)) {
         const h = Number(val.hpf);
         return isNaN(h) ? 0 : h;
     }
@@ -90,7 +90,7 @@ function routingInHpf(val) {
  * @returns {number}
  */
 function routingGain(val) {
-    if(val != null && typeof val === 'object' && !Array.isArray(val)) {
+    if (val != null && typeof val === 'object' && !Array.isArray(val)) {
         const g = Number(val.gain);
         return isNaN(g) ? 0 : g;
     }
@@ -98,9 +98,9 @@ function routingGain(val) {
 }
 
 export function buildMappingPane() {
-    const pane = el('div', {id:'pane-mapping', className:'tab-pane'});
+    const pane = el('div', { id: 'pane-mapping', className: 'tab-pane' });
 
-    const note = el('div', {id:'mapping-note'});
+    const note = el('div', { id: 'mapping-note' });
     note.innerHTML =
         'Current mapping loaded from config.json on the Bela. ' +
         'Edit the values below, then download the file — ' +
@@ -108,20 +108,20 @@ export function buildMappingPane() {
         '<a href="http://bela.local/" target="_blank" rel="noopener noreferrer">Open Bela IDE</a>';
     pane.appendChild(note);
 
-    const conflicts = el('div', {id:'mapping-conflicts'});
+    const conflicts = el('div', { id: 'mapping-conflicts' });
     conflicts.innerHTML = '<strong>Mapping conflicts</strong><ul id="mapping-conflicts-list"></ul>';
     pane.appendChild(conflicts);
 
-    const detectBanner = el('div', {id:'detect-status'});
+    const detectBanner = el('div', { id: 'detect-status' });
     pane.appendChild(detectBanner);
 
-    const toolbar = el('div', {id:'mapping-toolbar'});
-    const btn = el('button', {id:'btn-download'});
+    const toolbar = el('div', { id: 'mapping-toolbar' });
+    const btn = el('button', { id: 'btn-download' });
     btn.textContent = 'Download config.json';
     btn.addEventListener('click', downloadConfigJson);
     toolbar.appendChild(btn);
 
-    getContext().downloadStatusEl = el('span', {id:'download-status'});
+    getContext().downloadStatusEl = el('span', { id: 'download-status' });
     toolbar.appendChild(getContext().downloadStatusEl);
     getContext().detectStatusEl = detectBanner;
     pane.appendChild(toolbar);
@@ -130,12 +130,12 @@ export function buildMappingPane() {
     pane.appendChild(buildRoutingSection());
 
     // Pots table
-    const potTitle = el('div', {className:'msec-title'});
+    const potTitle = el('div', { className: 'msec-title' });
     potTitle.textContent = 'Potentiometers';
     pane.appendChild(potTitle);
 
-    const potWrap = el('div', {className:'mtable-wrap'});
-    const potTbl = el('table', {className:'mtable', id:'pot-table'});
+    const potWrap = el('div', { className: 'mtable-wrap' });
+    const potTbl = el('table', { className: 'mtable', id: 'pot-table' });
     potTbl.innerHTML = `
         <colgroup>
             <col class="col-name">
@@ -155,12 +155,12 @@ export function buildMappingPane() {
     pane.appendChild(potWrap);
 
     // Switches table
-    const swTitle = el('div', {className:'msec-title'});
+    const swTitle = el('div', { className: 'msec-title' });
     swTitle.textContent = 'Switches (MCP23017)';
     pane.appendChild(swTitle);
 
-    const swWrap = el('div', {className:'mtable-wrap'});
-    const swTbl = el('table', {className:'mtable', id:'sw-table'});
+    const swWrap = el('div', { className: 'mtable-wrap' });
+    const swTbl = el('table', { className: 'mtable', id: 'sw-table' });
     swTbl.innerHTML = `
         <colgroup>
             <col class="col-name">
@@ -190,13 +190,13 @@ export function buildMappingPane() {
  * Prefills from the bundled ROUTING_CONFIG; live Bela values overwrite once via fillRoutingFromConfigMeta().
  */
 function buildRoutingSection() {
-    const section = el('div', {id: 'routing-section'});
+    const section = el('div', { id: 'routing-section' });
 
-    const title = el('div', {className: 'msec-title'});
+    const title = el('div', { className: 'msec-title' });
     title.textContent = 'Audio I/O Routing';
     section.appendChild(title);
 
-    const hint = el('div', {className: 'routing-hint'});
+    const hint = el('div', { className: 'routing-hint' });
     hint.textContent =
         'Physical Bela channel numbers (0–9). Master may list one or two outputs, e.g. 0 or 0,1. ' +
         'Gain (dB): codec default at boot (ADC −12…10, DAC −63…0). ' +
@@ -204,7 +204,7 @@ function buildRoutingSection() {
         'HPF (Hz): mic dry high-pass (0 = off, 20–300); DSP only when Mic is on.';
     section.appendChild(hint);
 
-    const grid = el('div', {className: 'routing-grid'});
+    const grid = el('div', { className: 'routing-grid' });
     grid.appendChild(buildRoutingTable(
         'Inputs (routing.in)', 'in', ROUTING_IN_KEYS, ROUTING_CONFIG.in || {}, true
     ));
@@ -214,7 +214,7 @@ function buildRoutingSection() {
     section.appendChild(grid);
 
     section.querySelectorAll('.ri').forEach(inp => {
-        inp.addEventListener('input',  updateMappingConflicts);
+        inp.addEventListener('input', updateMappingConflicts);
         inp.addEventListener('change', updateMappingConflicts);
     });
     updateMappingConflicts();
@@ -231,8 +231,8 @@ function buildRoutingSection() {
  * @param {boolean} withMic  When true, adds Mic + HPF columns (inputs only)
  */
 function buildRoutingTable(heading, dir, keys, values, withMic) {
-    const wrap = el('div', {className: 'mtable-wrap routing-table-wrap'});
-    const sub = el('div', {className: 'msec-subtitle'});
+    const wrap = el('div', { className: 'mtable-wrap routing-table-wrap' });
+    const sub = el('div', { className: 'msec-subtitle' });
     sub.textContent = heading;
     wrap.appendChild(sub);
 
@@ -242,13 +242,13 @@ function buildRoutingTable(heading, dir, keys, values, withMic) {
         ? `ADC gain at boot (${INPUT_GAIN_MIN}…${INPUT_GAIN_MAX} dB)`
         : `DAC gain at boot (${OUTPUT_GAIN_MIN}…${OUTPUT_GAIN_MAX} dB)`;
 
-    const tbl = el('table', {className: 'mtable routing-table', id: `routing-${dir}-table`});
+    const tbl = el('table', { className: 'mtable routing-table', id: `routing-${dir}-table` });
     const micCols = withMic
         ? '<col class="col-check"><col class="col-num">'
         : '';
     const micHead = withMic
         ? '<th class="col-check" title="Bypass ParamEQ / HPF-LPF / kills">Mic</th>' +
-          '<th title="Mic dry HPF cutoff in Hz (0 = off)">HPF (Hz)</th>'
+        '<th title="Mic dry HPF cutoff in Hz (0 = off)">HPF (Hz)</th>'
         : '';
     tbl.innerHTML = `
         <colgroup>
@@ -286,7 +286,7 @@ function buildRoutingTable(heading, dir, keys, values, withMic) {
             `<td><input type="number" class="ri-gain" data-dir="${dir}" data-key="${key}" ` +
             `value="${gainVal}" min="${gainMin}" max="${gainMax}" step="1" ` +
             `title="${gainTitle}"></td>`;
-        if(withMic) {
+        if (withMic) {
             const micChecked = routingInMic(raw) ? 'checked' : '';
             const hpfVal = routingInHpf(raw);
             cells +=
@@ -306,7 +306,7 @@ function buildRoutingTable(heading, dir, keys, values, withMic) {
 
 /** Formats a routing JSON value for the form input. */
 function formatRoutingValue(raw, asArray) {
-    if(asArray || Array.isArray(raw)) {
+    if (asArray || Array.isArray(raw)) {
         const arr = Array.isArray(raw) ? raw : (raw != null ? [raw] : []);
         return arr.join(',');
     }
@@ -318,14 +318,14 @@ function formatRoutingValue(raw, asArray) {
  * @returns {number|number[]|null}
  */
 function parseRoutingInput(inp) {
-    if(!inp) return null;
+    if (!inp) return null;
     const key = inp.dataset.key;
     const text = String(inp.value).trim();
-    if(key === 'master' || key.startsWith('aux')) {
-        if(!text) return [];
+    if (key === 'master' || key.startsWith('aux')) {
+        if (!text) return [];
         const parts = text.split(/[,\s]+/).filter(Boolean);
         const nums = parts.map(p => parseInt(p, 10));
-        if(nums.some(n => isNaN(n))) return null;
+        if (nums.some(n => isNaN(n))) return null;
         return nums;
     }
     const n = parseInt(text, 10);
@@ -337,15 +337,15 @@ function parseRoutingInput(inp) {
  * Called when buffer 6 arrives so the download matches the running project.
  */
 export function fillRoutingFromConfigMeta() {
-    if(getContext().routingFilledFromMeta || !getContext().configMeta) return;
+    if (getContext().routingFilledFromMeta || !getContext().configMeta) return;
     getContext().routingFilledFromMeta = true;
 
     const M = CONFIG_META;
     const meta = getContext().configMeta;
     const masterCount = Math.round(meta[M.MASTER_COUNT]);
     const masterOuts = [];
-    if(masterCount > 0) masterOuts.push(Math.round(meta[M.MASTER_0]));
-    if(masterCount > 1) masterOuts.push(Math.round(meta[M.MASTER_1]));
+    if (masterCount > 0) masterOuts.push(Math.round(meta[M.MASTER_0]));
+    if (masterCount > 1) masterOuts.push(Math.round(meta[M.MASTER_1]));
 
     const getAuxIns = (leftIdx, rightIdx) => {
         const l = Math.round(meta[leftIdx]);
@@ -357,19 +357,19 @@ export function fillRoutingFromConfigMeta() {
         in: {
             fx1Return: [Math.round(meta[M.FX1_RET])],
             fx2Return: [Math.round(meta[M.FX2_RET])],
-            aux1:      getAuxIns(M.AUX1, M.AUX1_R),
-            aux2:      getAuxIns(M.AUX2, M.AUX2_R),
-            aux3:      getAuxIns(M.AUX3, M.AUX3_R),
-            aux4:      getAuxIns(M.AUX4, M.AUX4_R)
+            aux1: getAuxIns(M.AUX1, M.AUX1_R),
+            aux2: getAuxIns(M.AUX2, M.AUX2_R),
+            aux3: getAuxIns(M.AUX3, M.AUX3_R),
+            aux4: getAuxIns(M.AUX4, M.AUX4_R)
         },
         out: {
-            master:  masterOuts,
+            master: masterOuts,
             fx1Send: [Math.round(meta[M.FX1_SEND])],
             fx2Send: [Math.round(meta[M.FX2_SEND])],
-            vuSub:   Math.round(meta[M.VU_SUB]),
-            vuKick:  Math.round(meta[M.VU_KICK]),
-            vuMid:   Math.round(meta[M.VU_MID]),
-            vuTop:   Math.round(meta[M.VU_TOP])
+            vuSub: Math.round(meta[M.VU_SUB]),
+            vuKick: Math.round(meta[M.VU_KICK]),
+            vuMid: Math.round(meta[M.VU_MID]),
+            vuTop: Math.round(meta[M.VU_TOP])
         }
     };
 
@@ -391,7 +391,7 @@ export function fillRoutingFromConfigMeta() {
         const dir = inp.dataset.dir;
         const key = inp.dataset.key;
         const raw = values[dir] && values[dir][key];
-        if(raw === undefined) return;
+        if (raw === undefined) return;
         inp.value = formatRoutingValue(raw, key === 'master' || key.startsWith('aux'));
     });
 
@@ -413,8 +413,8 @@ function collectRoutingFromForm() {
     const readChannel = (dir, key) => {
         const inp = document.querySelector(`.ri[data-dir="${dir}"][data-key="${key}"]`);
         const parsed = parseRoutingInput(inp);
-        if(parsed === null) return undefined;
-        if(key === 'master' || key.startsWith('aux'))
+        if (parsed === null) return undefined;
+        if (key === 'master' || key.startsWith('aux'))
             return Array.isArray(parsed) ? parsed : [parsed];
         return parsed;
     };
@@ -426,19 +426,19 @@ function collectRoutingFromForm() {
 
     const readHpf = (key) => {
         const inp = document.querySelector(`.ri-hpf[data-key="${key}"]`);
-        if(!inp) return 0;
+        if (!inp) return 0;
         const n = parseFloat(inp.value);
-        if(isNaN(n) || n < 0) return 0;
+        if (isNaN(n) || n < 0) return 0;
         return Math.min(MIC_HPF_HZ_MAX, Math.max(MIC_HPF_HZ_MIN, Math.round(n)));
     };
 
     /** Reads codec gain dB for one routing row (clamped to input or HP range). */
     const readGain = (dir, key) => {
         const inp = document.querySelector(`.ri-gain[data-dir="${dir}"][data-key="${key}"]`);
-        if(!inp) return 0;
+        if (!inp) return 0;
         const n = parseFloat(inp.value);
-        if(isNaN(n)) return 0;
-        if(dir === 'in')
+        if (isNaN(n)) return 0;
+        if (dir === 'in')
             return Math.min(INPUT_GAIN_MAX, Math.max(INPUT_GAIN_MIN, Math.round(n)));
         return Math.min(OUTPUT_GAIN_MAX, Math.max(OUTPUT_GAIN_MIN, Math.round(n)));
     };
@@ -446,9 +446,9 @@ function collectRoutingFromForm() {
     const out = {};
     ROUTING_OUT_KEYS.forEach(key => {
         const val = readChannel('out', key);
-        if(val === undefined) return;
+        if (val === undefined) return;
         const gain = readGain('out', key);
-        if(key === 'master' || key.startsWith('fx'))
+        if (key === 'master' || key.startsWith('fx'))
             out[key] = { channels: Array.isArray(val) ? val : [val], gain };
         else
             out[key] = { channel: val, gain };
@@ -457,7 +457,7 @@ function collectRoutingFromForm() {
     const inn = {};
     ROUTING_IN_KEYS.forEach(key => {
         const ch = readChannel('in', key);
-        if(ch === undefined) return;
+        if (ch === undefined) return;
         inn[key] = {
             channels: Array.isArray(ch) ? ch : [ch],
             mic: readMic(key),
@@ -470,29 +470,29 @@ function collectRoutingFromForm() {
 }
 
 export function tryBuildMappingTable() {
-    if(getContext().mappingBuilt || !getContext().potMapping || !getContext().switchMapping) return;
+    if (getContext().mappingBuilt || !getContext().potMapping || !getContext().switchMapping) return;
     getContext().mappingBuilt = true;
 
     const ptbody = document.getElementById('pot-tbody');
-    if(ptbody) {
+    if (ptbody) {
         ptbody.innerHTML = '';
         POT_NAMES.forEach((name, i) => {
-            const mux = Math.round(getContext().potMapping[i*4+0]);
-            const pot = Math.round(getContext().potMapping[i*4+1]);
-            const rev = getContext().potMapping[i*4+2] > 0.5;
-            const cen = getContext().potMapping[i*4+3] > 0.5;
+            const mux = Math.round(getContext().potMapping[i * 4 + 0]);
+            const pot = Math.round(getContext().potMapping[i * 4 + 1]);
+            const rev = getContext().potMapping[i * 4 + 2] > 0.5;
+            const cen = getContext().potMapping[i * 4 + 3] > 0.5;
             const tr = document.createElement('tr');
             tr.dataset.mapTable = 'pot';
             tr.dataset.mapIndex = String(i);
             tr.innerHTML =
                 `<td class="pname" title="${name}">${name}</td>` +
-                `<td><input type="number" min="0" max="3"  value="${mux}" ` +
+                `<td><input type="number" min="0" max="7"  value="${mux}" ` +
                 `data-i="${i}" data-f="mux" class="pi"></td>` +
-                `<td><input type="number" min="0" max="15" value="${pot}" ` +
+                `<td><input type="number" min="0" max="9"  value="${pot}" ` +
                 `data-i="${i}" data-f="pot" class="pi"></td>` +
-                `<td class="col-check"><input type="checkbox" ${rev?'checked':''} ` +
+                `<td class="col-check"><input type="checkbox" ${rev ? 'checked' : ''} ` +
                 `data-i="${i}" data-f="rev" class="pi"></td>` +
-                `<td class="col-check"><input type="checkbox" ${cen?'checked':''} ` +
+                `<td class="col-check"><input type="checkbox" ${cen ? 'checked' : ''} ` +
                 `data-i="${i}" data-f="cen" class="pi"></td>` +
                 `<td class="detect-cell"></td>`;
             tr.querySelector('.detect-cell').appendChild(createDetectButton('pot', i));
@@ -501,12 +501,12 @@ export function tryBuildMappingTable() {
     }
 
     const stbody = document.getElementById('sw-tbody');
-    if(stbody) {
+    if (stbody) {
         stbody.innerHTML = '';
         SWITCH_NAMES.forEach((name, i) => {
-            const pin   = Math.round(getContext().switchMapping[i*3+0]);
-            const portB = getContext().switchMapping[i*3+1] > 0.5;
-            const rev   = getContext().switchMapping[i*3+2] > 0.5;
+            const pin = Math.round(getContext().switchMapping[i * 3 + 0]);
+            const portB = getContext().switchMapping[i * 3 + 1] > 0.5;
+            const rev = getContext().switchMapping[i * 3 + 2] > 0.5;
             const tr = document.createElement('tr');
             tr.dataset.mapTable = 'sw';
             tr.dataset.mapIndex = String(i);
@@ -515,9 +515,9 @@ export function tryBuildMappingTable() {
                 `<td><input type="number" min="0" max="7" value="${pin}" ` +
                 `data-i="${i}" data-f="pin" class="si"></td>` +
                 `<td><select data-i="${i}" data-f="port" class="si">` +
-                `<option value="0"${!portB?' selected':''}>A</option>` +
-                `<option value="1"${portB?' selected':''}>B</option></select></td>` +
-                `<td class="col-check"><input type="checkbox" ${rev?'checked':''} ` +
+                `<option value="0"${!portB ? ' selected' : ''}>A</option>` +
+                `<option value="1"${portB ? ' selected' : ''}>B</option></select></td>` +
+                `<td class="col-check"><input type="checkbox" ${rev ? 'checked' : ''} ` +
                 `data-i="${i}" data-f="rev" class="si"></td>` +
                 `<td class="detect-cell"></td>`;
             tr.querySelector('.detect-cell').appendChild(createDetectButton('sw', i));
@@ -525,9 +525,38 @@ export function tryBuildMappingTable() {
         });
     }
 
-    document.querySelectorAll('.pi, .si').forEach(inp => {
-        inp.addEventListener('input',  updateMappingConflicts);
-        inp.addEventListener('change', updateMappingConflicts);
+    document.querySelectorAll('.pi').forEach(inp => {
+        const handler = () => {
+            getContext().mappingUserEdited = true;
+            if (getContext().potMapping) {
+                const i = parseInt(inp.dataset.i, 10);
+                const f = inp.dataset.f;
+                if (f === 'mux') getContext().potMapping[i * 4 + 0] = parseFloat(inp.value) || 0;
+                if (f === 'pot') getContext().potMapping[i * 4 + 1] = parseFloat(inp.value) || 0;
+                if (f === 'rev') getContext().potMapping[i * 4 + 2] = inp.checked ? 1.0 : 0.0;
+                if (f === 'cen') getContext().potMapping[i * 4 + 3] = inp.checked ? 1.0 : 0.0;
+            }
+            cleanConsoleOfIgnored();
+            updateMappingConflicts();
+        };
+        inp.addEventListener('input', handler);
+        inp.addEventListener('change', handler);
+    });
+
+    document.querySelectorAll('.si').forEach(inp => {
+        const handler = () => {
+            getContext().mappingUserEdited = true;
+            if (getContext().switchMapping) {
+                const i = parseInt(inp.dataset.i, 10);
+                const f = inp.dataset.f;
+                if (f === 'pin') getContext().switchMapping[i * 3 + 0] = parseFloat(inp.value) || 0;
+                if (f === 'port') getContext().switchMapping[i * 3 + 1] = parseFloat(inp.value);
+                if (f === 'rev') getContext().switchMapping[i * 3 + 2] = inp.checked ? 1.0 : 0.0;
+            }
+            updateMappingConflicts();
+        };
+        inp.addEventListener('input', handler);
+        inp.addEventListener('change', handler);
     });
     renderIgnoredPotsTable();
     updateMappingConflicts();
@@ -543,55 +572,55 @@ function updateMappingConflicts() {
     document.querySelectorAll('#pot-tbody tr, #sw-tbody tr, #ign-tbody tr, #routing-in-tbody tr, #routing-out-tbody tr')
         .forEach(tr => tr.classList.remove('dup-conflict'));
 
-    if(getContext().mappingBuilt) {
+    if (getContext().mappingBuilt) {
         // Pots — duplicate MUX + channel
         const potGroups = new Map();
-        for(let i = 0; i < POT_NAMES.length; i++) {
+        for (let i = 0; i < POT_NAMES.length; i++) {
             const muxInp = document.querySelector(`.pi[data-i="${i}"][data-f="mux"]`);
             const potInp = document.querySelector(`.pi[data-i="${i}"][data-f="pot"]`);
-            if(!muxInp || !potInp) continue;
+            if (!muxInp || !potInp) continue;
             const mux = parseInt(muxInp.value, 10);
             const pot = parseInt(potInp.value, 10);
-            if(isNaN(mux) || isNaN(pot)) continue;
+            if (isNaN(mux) || isNaN(pot)) continue;
             const key = mux + ':' + pot;
-            if(!potGroups.has(key)) potGroups.set(key, []);
+            if (!potGroups.has(key)) potGroups.set(key, []);
             potGroups.get(key).push(i);
         }
         potGroups.forEach((indices, key) => {
-            if(indices.length < 2) return;
+            if (indices.length < 2) return;
             const parts = key.split(':');
             const names = indices.map(i => POT_NAMES[i]).join(', ');
             messages.push('Pot MUX ' + parts[0] + ' / channel ' + parts[1] + ' : ' + names);
             indices.forEach(i => {
                 const inp = document.querySelector(`.pi[data-i="${i}"][data-f="mux"]`);
-                const tr  = inp && inp.closest('tr');
-                if(tr) tr.classList.add('dup-conflict');
+                const tr = inp && inp.closest('tr');
+                if (tr) tr.classList.add('dup-conflict');
             });
         });
 
         // Switches — duplicate port + pin
         const swGroups = new Map();
-        for(let i = 0; i < SWITCH_NAMES.length; i++) {
-            const pinInp  = document.querySelector(`.si[data-i="${i}"][data-f="pin"]`);
+        for (let i = 0; i < SWITCH_NAMES.length; i++) {
+            const pinInp = document.querySelector(`.si[data-i="${i}"][data-f="pin"]`);
             const portInp = document.querySelector(`.si[data-i="${i}"][data-f="port"]`);
-            if(!pinInp || !portInp) continue;
-            const pin  = parseInt(pinInp.value, 10);
+            if (!pinInp || !portInp) continue;
+            const pin = parseInt(pinInp.value, 10);
             const port = parseInt(portInp.value, 10);
-            if(isNaN(pin) || isNaN(port)) continue;
+            if (isNaN(pin) || isNaN(port)) continue;
             const key = port + ':' + pin;
-            if(!swGroups.has(key)) swGroups.set(key, []);
+            if (!swGroups.has(key)) swGroups.set(key, []);
             swGroups.get(key).push(i);
         }
         swGroups.forEach((indices, key) => {
-            if(indices.length < 2) return;
+            if (indices.length < 2) return;
             const parts = key.split(':');
             const portLabel = parts[0] === '1' ? 'B' : 'A';
             const names = indices.map(i => SWITCH_NAMES[i]).join(', ');
             messages.push('Switch port ' + portLabel + ' / pin ' + parts[1] + ' : ' + names);
             indices.forEach(i => {
                 const inp = document.querySelector(`.si[data-i="${i}"][data-f="pin"]`);
-                const tr  = inp && inp.closest('tr');
-                if(tr) tr.classList.add('dup-conflict');
+                const tr = inp && inp.closest('tr');
+                if (tr) tr.classList.add('dup-conflict');
             });
         });
     }
@@ -601,50 +630,50 @@ function updateMappingConflicts() {
         const groups = new Map(); // ch → [{key, inp}]
         document.querySelectorAll(`.ri[data-dir="${dir}"]`).forEach(inp => {
             const parsed = parseRoutingInput(inp);
-            if(parsed === null) return;
+            if (parsed === null) return;
             const chans = Array.isArray(parsed) ? parsed : [parsed];
             const seenInField = new Set();
             chans.forEach(ch => {
-                if(typeof ch !== 'number' || isNaN(ch) || ch < 0) return;
-                if(seenInField.has(ch)) {
+                if (typeof ch !== 'number' || isNaN(ch) || ch < 0) return;
+                if (seenInField.has(ch)) {
                     // Duplicate inside master list (e.g. "1,1")
                     messages.push('Routing ' + dir + ' channel ' + ch +
                         ' : ' + inp.dataset.key + ' lists it more than once');
                     const tr = inp.closest('tr');
-                    if(tr) tr.classList.add('dup-conflict');
+                    if (tr) tr.classList.add('dup-conflict');
                     return;
                 }
                 seenInField.add(ch);
-                if(!groups.has(ch)) groups.set(ch, []);
-                groups.get(ch).push({key: inp.dataset.key, inp});
+                if (!groups.has(ch)) groups.set(ch, []);
+                groups.get(ch).push({ key: inp.dataset.key, inp });
             });
         });
         groups.forEach((entries, ch) => {
             const keys = [...new Set(entries.map(e => e.key))];
-            if(keys.length < 2) return;
+            if (keys.length < 2) return;
             messages.push('Routing ' + dir + ' channel ' + ch + ' : ' + keys.join(', '));
             entries.forEach(e => {
                 const tr = e.inp.closest('tr');
-                if(tr) tr.classList.add('dup-conflict');
+                if (tr) tr.classList.add('dup-conflict');
             });
         });
     });
 
     // Ignored pots — duplicate MUX + channel
-    if(Array.isArray(getContext().ignoredPotsList)) {
+    if (Array.isArray(getContext().ignoredPotsList)) {
         const ignGroups = new Map();
         getContext().ignoredPotsList.forEach((item, idx) => {
             const key = item.mux + ':' + item.pot;
-            if(!ignGroups.has(key)) ignGroups.set(key, []);
+            if (!ignGroups.has(key)) ignGroups.set(key, []);
             ignGroups.get(key).push(idx);
         });
         ignGroups.forEach((indices, key) => {
-            if(indices.length < 2) return;
+            if (indices.length < 2) return;
             const parts = key.split(':');
             messages.push('Ignored pots duplicate MUX ' + parts[0] + ' / channel ' + parts[1]);
             indices.forEach(idx => {
                 const tr = document.querySelector(`#ign-tbody tr[data-ign-index="${idx}"]`);
-                if(tr) tr.classList.add('dup-conflict');
+                if (tr) tr.classList.add('dup-conflict');
             });
         });
     }
@@ -652,11 +681,11 @@ function updateMappingConflicts() {
     // Refresh status labels in ignored pots table
     document.querySelectorAll('#ign-tbody tr[data-ign-index]').forEach(tr => {
         const idx = parseInt(tr.dataset.ignIndex, 10);
-        if(getContext().ignoredPotsList && getContext().ignoredPotsList[idx]) {
+        if (getContext().ignoredPotsList && getContext().ignoredPotsList[idx]) {
             const item = getContext().ignoredPotsList[idx];
             const name = getMappedPotName(item.mux, item.pot);
             const statusCell = tr.querySelector('.ign-status');
-            if(statusCell) {
+            if (statusCell) {
                 statusCell.innerHTML = name
                     ? `<span class="pname" title="${name}">${name}</span> <span style="font-size:10px; color:#e67e22; font-weight:600;">(Mapped)</span>`
                     : `<span style="color:#7f8c8d; font-size:11px; font-style:italic;">Unassigned / Floating</span>`;
@@ -665,10 +694,10 @@ function updateMappingConflicts() {
     });
 
     const banner = document.getElementById('mapping-conflicts');
-    const list   = document.getElementById('mapping-conflicts-list');
-    if(!banner || !list) return;
+    const list = document.getElementById('mapping-conflicts-list');
+    if (!banner || !list) return;
 
-    if(messages.length === 0) {
+    if (messages.length === 0) {
         banner.classList.remove('show');
         list.innerHTML = '';
         return;
@@ -680,16 +709,16 @@ function updateMappingConflicts() {
 
 /** Creates a per-row Detect / Cancel button. */
 function createDetectButton(table, index) {
-    const btn = el('button', {className: 'btn-detect-row', type: 'button'});
+    const btn = el('button', { className: 'btn-detect-row', type: 'button' });
     btn.textContent = 'Map';
-    btn.title       = 'Detect control';
+    btn.title = 'Detect control';
     btn.dataset.table = table;
     btn.dataset.index = String(index);
     btn.addEventListener('click', (e) => {
         e.stopPropagation();
-        if(getContext().detectMode &&
-           getContext().detectMode.table === table &&
-           getContext().detectMode.targetIndex === index)
+        if (getContext().detectMode &&
+            getContext().detectMode.table === table &&
+            getContext().detectMode.targetIndex === index)
             cancelDetect();
         else
             startDetect(table, index);
@@ -698,15 +727,15 @@ function createDetectButton(table, index) {
 }
 
 function showDetectStatus(msg, isError) {
-    if(!getContext().detectStatusEl) return;
+    if (!getContext().detectStatusEl) return;
     getContext().detectStatusEl.textContent = msg;
-    getContext().detectStatusEl.className     = isError ? 'show err' : 'show';
+    getContext().detectStatusEl.className = isError ? 'show err' : 'show';
 }
 
 function hideDetectStatus() {
-    if(!getContext().detectStatusEl) return;
+    if (!getContext().detectStatusEl) return;
     getContext().detectStatusEl.textContent = '';
-    getContext().detectStatusEl.className   = '';
+    getContext().detectStatusEl.className = '';
 }
 
 function setDetectUiActive(active) {
@@ -714,20 +743,20 @@ function setDetectUiActive(active) {
         const t = btn.dataset.table;
         const i = parseInt(btn.dataset.index, 10);
         const isTarget = active && getContext().detectMode &&
-                         getContext().detectMode.table === t &&
-                         getContext().detectMode.targetIndex === i;
+            getContext().detectMode.table === t &&
+            getContext().detectMode.targetIndex === i;
         btn.textContent = isTarget ? '\u00d7' : 'Det';
-        btn.title       = isTarget ? 'Cancel detect' : 'Detect control';
+        btn.title = isTarget ? 'Cancel detect' : 'Detect control';
         btn.classList.toggle('detect-active', isTarget);
-        btn.disabled    = active && !isTarget;
+        btn.disabled = active && !isTarget;
     });
     document.querySelectorAll('#pot-tbody tr, #sw-tbody tr').forEach(row =>
         row.classList.remove('row-detecting'));
-    if(active && getContext().detectMode) {
+    if (active && getContext().detectMode) {
         const tbody = getContext().detectMode.table === 'pot' ? '#pot-tbody' : '#sw-tbody';
         const tr = document.querySelector(
             `${tbody} tr[data-map-index="${getContext().detectMode.targetIndex}"]`);
-        if(tr) tr.classList.add('row-detecting');
+        if (tr) tr.classList.add('row-detecting');
     }
 }
 
@@ -736,26 +765,26 @@ export function muxRawIndex(mux, pot) {
     return mux * MUX_POTS_PER_MUX + pot;
 }
 
-/** Returns active MUX count from config metadata (fallback: 4). */
+/** Returns active MUX count from config metadata (fallback: 8). */
 export function getActiveMuxCount() {
-    if(getContext().configMeta && getContext().configMeta.length > CONFIG_META.ACTIVE_MUX)
+    if (getContext().configMeta && getContext().configMeta.length > CONFIG_META.ACTIVE_MUX)
         return Math.max(1, Math.round(getContext().configMeta[CONFIG_META.ACTIVE_MUX]));
-    return 4;
+    return 8;
 }
 
 /** Returns true when a physical MUX channel is in the ignored-pots list. */
 export function isPotIgnored(mux, pot) {
-    if(Array.isArray(getContext().ignoredPotsList)) {
+    if (Array.isArray(getContext().ignoredPotsList)) {
         return getContext().ignoredPotsList.some(
             p => Math.round(p.mux) === mux && Math.round(p.pot) === pot
         );
     }
-    if(!getContext().configMeta) return false;
+    if (!getContext().configMeta) return false;
     const count = Math.round(getContext().configMeta[CONFIG_META.IGNORED_COUNT]);
-    for(let i = 0; i < count; i++) {
+    for (let i = 0; i < count; i++) {
         const base = CONFIG_META.IGNORED_BASE + i * 2;
-        if(Math.round(getContext().configMeta[base]) === mux &&
-           Math.round(getContext().configMeta[base + 1]) === pot)
+        if (Math.round(getContext().configMeta[base]) === mux &&
+            Math.round(getContext().configMeta[base + 1]) === pot)
             return true;
     }
     return false;
@@ -765,12 +794,12 @@ export function isPotIgnored(mux, pot) {
 export function getPotMuxChannel(potIndex) {
     const muxInp = document.querySelector(`.pi[data-i="${potIndex}"][data-f="mux"]`);
     const potInp = document.querySelector(`.pi[data-i="${potIndex}"][data-f="pot"]`);
-    if(muxInp && potInp) {
+    if (muxInp && potInp) {
         const m = parseInt(muxInp.value, 10);
         const p = parseInt(potInp.value, 10);
-        if(!isNaN(m) && !isNaN(p)) return { mux: m, pot: p };
+        if (!isNaN(m) && !isNaN(p)) return { mux: m, pot: p };
     }
-    if(getContext().potMapping && getContext().potMapping.length > potIndex * 4 + 1) {
+    if (getContext().potMapping && getContext().potMapping.length > potIndex * 4 + 1) {
         return {
             mux: Math.round(getContext().potMapping[potIndex * 4 + 0]),
             pot: Math.round(getContext().potMapping[potIndex * 4 + 1])
@@ -781,9 +810,9 @@ export function getPotMuxChannel(potIndex) {
 
 /** Returns the name of a mapped pot at (mux, pot), or null if unassigned. */
 export function getMappedPotName(mux, pot) {
-    for(let i = 0; i < POT_NAMES.length; i++) {
+    for (let i = 0; i < POT_NAMES.length; i++) {
         const coords = getPotMuxChannel(i);
-        if(coords && coords.mux === mux && coords.pot === pot)
+        if (coords && coords.mux === mux && coords.pot === pot)
             return POT_NAMES[i];
     }
     return null;
@@ -791,8 +820,8 @@ export function getMappedPotName(mux, pot) {
 
 /** Ensures getContext().ignoredPotsList is initialized as an array. */
 function ensureIgnoredPotsList() {
-    if(!Array.isArray(getContext().ignoredPotsList)) {
-        if(Array.isArray(IGNORED_POTS_DEFAULT) && IGNORED_POTS_DEFAULT.length > 0) {
+    if (!Array.isArray(getContext().ignoredPotsList)) {
+        if (Array.isArray(IGNORED_POTS_DEFAULT) && IGNORED_POTS_DEFAULT.length > 0) {
             getContext().ignoredPotsList = IGNORED_POTS_DEFAULT.map(p => ({
                 mux: Math.max(0, Math.min(3, Math.round(p.mux))),
                 pot: Math.max(0, Math.min(15, Math.round(p.pot)))
@@ -853,16 +882,16 @@ function buildIgnoredPotsSection() {
 /** Renders the rows in the Ignored Potentiometers table. */
 export function renderIgnoredPotsTable() {
     const tbody = document.getElementById('ign-tbody');
-    if(!tbody) return;
+    if (!tbody) return;
 
     const list = ensureIgnoredPotsList();
     const countLabel = document.getElementById('ign-count-label');
-    if(countLabel) countLabel.textContent = `${list.length} / 16 ignored`;
+    if (countLabel) countLabel.textContent = `${list.length} / 16 ignored`;
 
     const btnAdd = document.getElementById('btn-add-ignored');
-    if(btnAdd) btnAdd.disabled = list.length >= 16;
+    if (btnAdd) btnAdd.disabled = list.length >= 16;
 
-    if(list.length === 0) {
+    if (list.length === 0) {
         tbody.innerHTML = '<tr><td colspan="4" class="loading-cell">No ignored pots configured. Click "+ Add Ignored Pot" to exclude a channel.</td></tr>';
         return;
     }
@@ -878,8 +907,8 @@ export function renderIgnoredPotsTable() {
             : `<span style="color:#7f8c8d; font-size:11px; font-style:italic;">Unassigned / Floating</span>`;
 
         tr.innerHTML =
-            `<td><input type="number" min="0" max="3" value="${item.mux}" data-idx="${idx}" data-f="mux" class="ii" style="width:100%; padding:3px 4px; border:1px solid #ddd; border-radius:4px; font-size:12px;"></td>` +
-            `<td><input type="number" min="0" max="15" value="${item.pot}" data-idx="${idx}" data-f="pot" class="ii" style="width:100%; padding:3px 4px; border:1px solid #ddd; border-radius:4px; font-size:12px;"></td>` +
+            `<td><input type="number" min="0" max="7" value="${item.mux}" data-idx="${idx}" data-f="mux" class="ii" style="width:100%; padding:3px 4px; border:1px solid #ddd; border-radius:4px; font-size:12px;"></td>` +
+            `<td><input type="number" min="0" max="9" value="${item.pot}" data-idx="${idx}" data-f="pot" class="ii" style="width:100%; padding:3px 4px; border:1px solid #ddd; border-radius:4px; font-size:12px;"></td>` +
             `<td class="ign-status">${statusHtml}</td>` +
             `<td style="text-align:center;"><button type="button" class="btn-del-ign" data-idx="${idx}" title="Remove ignored pot">✕</button></td>`;
 
@@ -892,9 +921,9 @@ export function renderIgnoredPotsTable() {
                 const field = e.target.dataset.f;
                 const i = parseInt(e.target.dataset.idx, 10);
                 let val = parseInt(e.target.value, 10);
-                if(isNaN(val)) val = 0;
-                if(field === 'mux') val = Math.max(0, Math.min(3, val));
-                if(field === 'pot') val = Math.max(0, Math.min(15, val));
+                if (isNaN(val)) val = 0;
+                if (field === 'mux') val = Math.max(0, Math.min(7, val));
+                if (field === 'pot') val = Math.max(0, Math.min(9, val));
                 e.target.value = val;
                 list[i][field] = val;
                 getContext().ignoredPotsUserEdited = true;
@@ -911,13 +940,13 @@ export function renderIgnoredPotsTable() {
 /** Adds a new row to the ignored pots list. */
 export function addIgnoredPotRow(mux, pot) {
     const list = ensureIgnoredPotsList();
-    if(list.length >= 16) return;
+    if (list.length >= 16) return;
 
     let m = (mux !== undefined) ? mux : 3;
     let p = (pot !== undefined) ? pot : 0;
-    if(mux === undefined && pot === undefined) {
-        for(let tryP = 0; tryP < 16; tryP++) {
-            if(!list.some(item => item.mux === m && item.pot === tryP)) {
+    if (mux === undefined && pot === undefined) {
+        for (let tryP = 0; tryP < 16; tryP++) {
+            if (!list.some(item => item.mux === m && item.pot === tryP)) {
                 p = tryP;
                 break;
             }
@@ -934,7 +963,7 @@ export function addIgnoredPotRow(mux, pot) {
 /** Removes a row from the ignored pots list. */
 export function removeIgnoredPotRow(idx) {
     const list = ensureIgnoredPotsList();
-    if(idx >= 0 && idx < list.length) {
+    if (idx >= 0 && idx < list.length) {
         list.splice(idx, 1);
         getContext().ignoredPotsUserEdited = true;
         cleanConsoleOfIgnored();
@@ -943,21 +972,21 @@ export function removeIgnoredPotRow(idx) {
     }
 }
 
-/** Purges any console entries for pots that are currently ignored. */
+/** Purges any console entries for pots that are currently ignored or already mapped. */
 export function cleanConsoleOfIgnored() {
-    if(!Array.isArray(getContext().recentChanges)) return;
+    if (!Array.isArray(getContext().recentChanges)) return;
     getContext().recentChanges = getContext().recentChanges.filter(entry => {
-        if(entry.type !== 'pot') return true;
+        if (entry.type !== 'pot') return true;
         const potIdx = POT_NAMES.indexOf(entry.name);
-        if(potIdx >= 0) {
+        if (potIdx >= 0) {
             const coords = getPotMuxChannel(potIdx);
-            if(coords && isPotIgnored(coords.mux, coords.pot)) return false;
+            if (coords && isPotIgnored(coords.mux, coords.pot)) return false;
         }
         const match = entry.name.match(/MUX(\d+)\s+CH(\d+)/i);
-        if(match) {
+        if (match) {
             const m = parseInt(match[1], 10);
             const p = parseInt(match[2], 10);
-            if(isPotIgnored(m, p)) return false;
+            if (isPotIgnored(m, p) || isPotMapped(m, p)) return false;
         }
         return true;
     });
@@ -965,15 +994,15 @@ export function cleanConsoleOfIgnored() {
 
 /** Syncs ignored pots from Bela configMeta (buffer 6) once at boot. */
 export function fillIgnoredPotsFromConfigMeta() {
-    if(getContext().ignoredPotsFilledFromMeta || !getContext().configMeta) return;
+    if (getContext().ignoredPotsFilledFromMeta || !getContext().configMeta) return;
     getContext().ignoredPotsFilledFromMeta = true;
-    if(getContext().ignoredPotsUserEdited) return;
+    if (getContext().ignoredPotsUserEdited) return;
 
     const M = CONFIG_META;
     const meta = getContext().configMeta;
     const count = Math.round(meta[M.IGNORED_COUNT]);
     const list = [];
-    for(let i = 0; i < count; i++) {
+    for (let i = 0; i < count; i++) {
         list.push({
             mux: Math.round(meta[M.IGNORED_BASE + i * 2 + 0]),
             pot: Math.round(meta[M.IGNORED_BASE + i * 2 + 1])
@@ -985,10 +1014,9 @@ export function fillIgnoredPotsFromConfigMeta() {
 
 /** Returns true when a MUX channel is already assigned to a named pot. */
 export function isPotMapped(mux, pot) {
-    if(!getContext().potMapping) return false;
-    for(let i = 0; i < POT_NAMES.length; i++) {
-        if(Math.round(getContext().potMapping[i * 4]) === mux &&
-           Math.round(getContext().potMapping[i * 4 + 1]) === pot)
+    for (let i = 0; i < POT_NAMES.length; i++) {
+        const coords = getPotMuxChannel(i);
+        if (coords && coords.mux === mux && coords.pot === pot)
             return true;
     }
     return false;
@@ -1002,35 +1030,35 @@ export function formatUnmappedPotLabel(mux, pot) {
 /** Snapshots live pot/switch values for movement detection. */
 function snapshotControlValues() {
     const snapPot = new Float32Array(POT_NAMES.length);
-    const snapSw  = new Float32Array(SWITCH_NAMES.length);
+    const snapSw = new Float32Array(SWITCH_NAMES.length);
     const snapMuxRaw = new Float32Array(MUX_RAW_SIZE);
-    for(let i = 0; i < POT_NAMES.length; i++)
+    for (let i = 0; i < POT_NAMES.length; i++)
         snapPot[i] = getContext().potValues[i] != null ? getContext().potValues[i] : 0;
-    for(let i = 0; i < SWITCH_NAMES.length; i++)
+    for (let i = 0; i < SWITCH_NAMES.length; i++)
         snapSw[i] = getContext().switchStates[i] != null ? getContext().switchStates[i] : 0;
-    for(let i = 0; i < MUX_RAW_SIZE; i++)
+    for (let i = 0; i < MUX_RAW_SIZE; i++)
         snapMuxRaw[i] = getContext().muxRawValues ? getContext().muxRawValues[i] : 0;
-    return {snapPot, snapSw, snapMuxRaw};
+    return { snapPot, snapSw, snapMuxRaw };
 }
 
 /** Starts listening for a pot move (≥25%) or switch toggle for one row. */
 function startDetect(table, index) {
-    if(getContext().detectMode) cancelDetect();
-    if(!getContext().mappingBuilt) {
+    if (getContext().detectMode) cancelDetect();
+    if (!getContext().mappingBuilt) {
         showDetectStatus('Waiting for Bela mapping…', true);
         return;
     }
-    if(typeof Bela === 'undefined') {
+    if (typeof Bela === 'undefined') {
         showDetectStatus('Bela not connected', true);
         return;
     }
 
-    const {snapPot, snapSw, snapMuxRaw} = snapshotControlValues();
-    getContext().detectMode = {table, targetIndex: index, snapPot, snapSw, snapMuxRaw};
+    const { snapPot, snapSw, snapMuxRaw } = snapshotControlValues();
+    getContext().detectMode = { table, targetIndex: index, snapPot, snapSw, snapMuxRaw };
 
     setDetectUiActive(true);
     const targetName = table === 'pot' ? POT_NAMES[index] : SWITCH_NAMES[index];
-    if(table === 'pot') {
+    if (table === 'pot') {
         showDetectStatus(
             'Move any pot at least 25% for ' + targetName + ' — ' +
             'MUX/channel will be detected automatically.'
@@ -1045,7 +1073,7 @@ function startDetect(table, index) {
 
 /** Aborts an active detect session. */
 export function cancelDetect() {
-    if(!getContext().detectMode) return;
+    if (!getContext().detectMode) return;
     getContext().detectMode = null;
     setDetectUiActive(false);
     hideDetectStatus();
@@ -1055,43 +1083,43 @@ export function cancelDetect() {
 function setMappingField(table, rowIndex, field, value) {
     const cls = table === 'pot' ? 'pi' : 'si';
     const inp = document.querySelector(`.${cls}[data-i="${rowIndex}"][data-f="${field}"]`);
-    if(!inp) return;
-    if(inp.type === 'checkbox')
+    if (!inp) return;
+    if (inp.type === 'checkbox')
         inp.checked = !!value;
     else
         inp.value = value;
-    inp.dispatchEvent(new Event('input', {bubbles: true}));
+    inp.dispatchEvent(new Event('input', { bubbles: true }));
 }
 
 /** Finds the MUX channel with the largest raw change since the detect snapshot. */
 function findMovedMuxPot(snapMuxRaw) {
-    if(!getContext().muxRawValues) return null;
+    if (!getContext().muxRawValues) return null;
     const activeMux = getActiveMuxCount();
     let bestMux = -1;
     let bestPot = -1;
     let bestDelta = 0;
-    for(let m = 0; m < activeMux; m++) {
-        for(let p = 0; p < MUX_POTS_PER_MUX; p++) {
-            if(isPotIgnored(m, p)) continue;
-            const idx   = muxRawIndex(m, p);
-            const cur   = getContext().muxRawValues[idx] != null ? getContext().muxRawValues[idx] : 0;
+    for (let m = 0; m < activeMux; m++) {
+        for (let p = 0; p < MUX_POTS_PER_MUX; p++) {
+            if (isPotIgnored(m, p)) continue;
+            const idx = muxRawIndex(m, p);
+            const cur = getContext().muxRawValues[idx] != null ? getContext().muxRawValues[idx] : 0;
             const delta = Math.abs(cur - snapMuxRaw[idx]);
-            if(delta > bestDelta) {
+            if (delta > bestDelta) {
                 bestDelta = delta;
-                bestMux   = m;
-                bestPot   = p;
+                bestMux = m;
+                bestPot = p;
             }
         }
     }
-    if(bestMux < 0 || bestDelta < DETECT_POT_MIN_DELTA) return null;
-    return {mux: bestMux, pot: bestPot, label: formatUnmappedPotLabel(bestMux, bestPot)};
+    if (bestMux < 0 || bestDelta < DETECT_POT_MIN_DELTA) return null;
+    return { mux: bestMux, pot: bestPot, label: formatUnmappedPotLabel(bestMux, bestPot) };
 }
 
 /** Finds a switch that toggled since the detect snapshot. */
 function findToggledSwitchIndex(snapSw) {
-    for(let i = 0; i < SWITCH_NAMES.length; i++) {
+    for (let i = 0; i < SWITCH_NAMES.length; i++) {
         const cur = getContext().switchStates[i] != null ? getContext().switchStates[i] : 0;
-        if((cur > 0.5) !== (snapSw[i] > 0.5)) return i;
+        if ((cur > 0.5) !== (snapSw[i] > 0.5)) return i;
     }
     return -1;
 }
@@ -1102,7 +1130,7 @@ function readPotMappingRow(i) {
     const potInp = document.querySelector(`.pi[data-i="${i}"][data-f="pot"]`);
     const revInp = document.querySelector(`.pi[data-i="${i}"][data-f="rev"]`);
     const cenInp = document.querySelector(`.pi[data-i="${i}"][data-f="cen"]`);
-    if(!muxInp || !potInp) return null;
+    if (!muxInp || !potInp) return null;
     return {
         mux: parseInt(muxInp.value, 10) || 0,
         pot: parseInt(potInp.value, 10) || 0,
@@ -1113,14 +1141,14 @@ function readPotMappingRow(i) {
 
 /** Reads pin/port/rev for one switch row from the mapping table. */
 function readSwitchMappingRow(i) {
-    const pinInp  = document.querySelector(`.si[data-i="${i}"][data-f="pin"]`);
+    const pinInp = document.querySelector(`.si[data-i="${i}"][data-f="pin"]`);
     const portInp = document.querySelector(`.si[data-i="${i}"][data-f="port"]`);
-    const revInp  = document.querySelector(`.si[data-i="${i}"][data-f="rev"]`);
-    if(!pinInp || !portInp) return null;
+    const revInp = document.querySelector(`.si[data-i="${i}"][data-f="rev"]`);
+    if (!pinInp || !portInp) return null;
     return {
-        pin:  parseInt(pinInp.value, 10) || 0,
+        pin: parseInt(pinInp.value, 10) || 0,
         port: parseInt(portInp.value, 10) || 0,
-        rev:  revInp ? revInp.checked : false
+        rev: revInp ? revInp.checked : false
     };
 }
 
@@ -1130,12 +1158,12 @@ function finishDetectPotFromPhysical(mux, pot, label) {
     setMappingField('pot', dst, 'mux', mux);
     setMappingField('pot', dst, 'pot', pot);
 
-    if(getContext().potMapping) {
-        for(let i = 0; i < POT_NAMES.length; i++) {
-            if(Math.round(getContext().potMapping[i * 4]) === mux &&
-               Math.round(getContext().potMapping[i * 4 + 1]) === pot) {
+    if (getContext().potMapping) {
+        for (let i = 0; i < POT_NAMES.length; i++) {
+            if (Math.round(getContext().potMapping[i * 4]) === mux &&
+                Math.round(getContext().potMapping[i * 4 + 1]) === pot) {
                 const src = readPotMappingRow(i);
-                if(src) {
+                if (src) {
                     setMappingField('pot', dst, 'rev', src.rev);
                     setMappingField('pot', dst, 'cen', src.cen);
                 }
@@ -1155,9 +1183,9 @@ function finishDetect(sourceIndex, sourceName) {
     const dst = getContext().detectMode.targetIndex;
     const table = getContext().detectMode.table;
 
-    if(table === 'pot') {
+    if (table === 'pot') {
         const src = readPotMappingRow(sourceIndex);
-        if(!src) { cancelDetect(); return; }
+        if (!src) { cancelDetect(); return; }
         setMappingField('pot', dst, 'mux', src.mux);
         setMappingField('pot', dst, 'pot', src.pot);
         setMappingField('pot', dst, 'rev', src.rev);
@@ -1167,7 +1195,7 @@ function finishDetect(sourceIndex, sourceName) {
         );
     } else {
         const src = readSwitchMappingRow(sourceIndex);
-        if(!src) { cancelDetect(); return; }
+        if (!src) { cancelDetect(); return; }
         setMappingField('sw', dst, 'pin', src.pin);
         setMappingField('sw', dst, 'port', src.port);
         setMappingField('sw', dst, 'rev', src.rev);
@@ -1183,15 +1211,15 @@ function finishDetect(sourceIndex, sourceName) {
 
 /** Polls live buffers while detect mode is active. */
 export function updateDetectMode() {
-    if(!getContext().detectMode) return;
+    if (!getContext().detectMode) return;
 
-    if(getContext().detectMode.table === 'pot') {
+    if (getContext().detectMode.table === 'pot') {
         const hit = findMovedMuxPot(getContext().detectMode.snapMuxRaw);
-        if(hit)
+        if (hit)
             finishDetectPotFromPhysical(hit.mux, hit.pot, hit.label);
     } else {
         const srcIdx = findToggledSwitchIndex(getContext().detectMode.snapSw);
-        if(srcIdx >= 0)
+        if (srcIdx >= 0)
             finishDetect(srcIdx, SWITCH_NAMES[srcIdx]);
     }
 }
@@ -1201,59 +1229,59 @@ function collectMappingFromForm() {
     document.querySelectorAll('.pi').forEach(inp => {
         const i = parseInt(inp.dataset.i, 10);
         const f = inp.dataset.f;
-        if(f === 'mux') pm[i*4+0] = parseFloat(inp.value) || 0;
-        if(f === 'pot') pm[i*4+1] = parseFloat(inp.value) || 0;
-        if(f === 'rev') pm[i*4+2] = inp.checked ? 1.0 : 0.0;
-        if(f === 'cen') pm[i*4+3] = inp.checked ? 1.0 : 0.0;
+        if (f === 'mux') pm[i * 4 + 0] = parseFloat(inp.value) || 0;
+        if (f === 'pot') pm[i * 4 + 1] = parseFloat(inp.value) || 0;
+        if (f === 'rev') pm[i * 4 + 2] = inp.checked ? 1.0 : 0.0;
+        if (f === 'cen') pm[i * 4 + 3] = inp.checked ? 1.0 : 0.0;
     });
 
     const sm = new Float32Array(SWITCH_NAMES.length * 3);
     document.querySelectorAll('.si').forEach(inp => {
         const i = parseInt(inp.dataset.i, 10);
         const f = inp.dataset.f;
-        if(f === 'pin')  sm[i*3+0] = parseFloat(inp.value) || 0;
-        if(f === 'port') sm[i*3+1] = parseFloat(inp.value);
-        if(f === 'rev')  sm[i*3+2] = inp.checked ? 1.0 : 0.0;
+        if (f === 'pin') sm[i * 3 + 0] = parseFloat(inp.value) || 0;
+        if (f === 'port') sm[i * 3 + 1] = parseFloat(inp.value);
+        if (f === 'rev') sm[i * 3 + 2] = inp.checked ? 1.0 : 0.0;
     });
 
-    return {pm, sm};
+    return { pm, sm };
 }
 
 /** Builds a config.json string from form data and Bela metadata buffer. */
 function buildConfigJsonText(pm, sm) {
-    if(!getContext().configMeta) return null;
+    if (!getContext().configMeta) return null;
 
     const M = CONFIG_META;
 
     let ignoredPots = [];
-    if(Array.isArray(getContext().ignoredPotsList)) {
+    if (Array.isArray(getContext().ignoredPotsList)) {
         ignoredPots = getContext().ignoredPotsList.map(item => ({
-            mux: Math.max(0, Math.min(3, Math.round(item.mux))),
-            pot: Math.max(0, Math.min(15, Math.round(item.pot)))
+            mux: Math.max(0, Math.min(7, Math.round(item.mux))),
+            pot: Math.max(0, Math.min(9, Math.round(item.pot)))
         }));
     } else {
         const ignoredCount = Math.round(getContext().configMeta[M.IGNORED_COUNT]);
-        for(let i = 0; i < ignoredCount; i++) {
+        for (let i = 0; i < ignoredCount; i++) {
             ignoredPots.push({
-                mux: Math.round(getContext().configMeta[M.IGNORED_BASE + i*2 + 0]),
-                pot: Math.round(getContext().configMeta[M.IGNORED_BASE + i*2 + 1])
+                mux: Math.round(getContext().configMeta[M.IGNORED_BASE + i * 2 + 0]),
+                pot: Math.round(getContext().configMeta[M.IGNORED_BASE + i * 2 + 1])
             });
         }
     }
 
     const pots = POT_NAMES.map((name, i) => ({
         name,
-        mux:      Math.round(pm[i*4+0]),
-        pot:      Math.round(pm[i*4+1]),
-        reversed: pm[i*4+2] > 0.5,
-        centered: pm[i*4+3] > 0.5
+        mux: Math.round(pm[i * 4 + 0]),
+        pot: Math.round(pm[i * 4 + 1]),
+        reversed: pm[i * 4 + 2] > 0.5,
+        centered: pm[i * 4 + 3] > 0.5
     }));
 
     const switches = SWITCH_NAMES.map((name, i) => ({
         name,
-        pin:      Math.round(sm[i*3+0]),
-        reversed: sm[i*3+2] > 0.5,
-        port:     sm[i*3+1] > 0.5 ? 'B' : 'A'
+        pin: Math.round(sm[i * 3 + 0]),
+        reversed: sm[i * 3 + 2] > 0.5,
+        port: sm[i * 3 + 1] > 0.5 ? 'B' : 'A'
     }));
 
     const routing = collectRoutingFromForm();
@@ -1263,11 +1291,11 @@ function buildConfigJsonText(pm, sm) {
         mux: { activeMux: Math.round(getContext().configMeta[M.ACTIVE_MUX]) },
         calibration: {
             potScaleRecovery: +getContext().configMeta[M.SCALE].toFixed(4),
-            potMax:           +getContext().configMeta[M.POT_MAX].toFixed(3),
-            potMin:           +getContext().configMeta[M.POT_MIN].toFixed(3)
+            potMax: +getContext().configMeta[M.POT_MAX].toFixed(3),
+            potMin: +getContext().configMeta[M.POT_MIN].toFixed(3)
         },
         i2c: {
-            bus:        I2C_BUS,
+            bus: I2C_BUS,
             mcpAddress: Math.round(getContext().configMeta[M.MCP_ADDR])
         },
         routing,
@@ -1281,40 +1309,40 @@ function buildConfigJsonText(pm, sm) {
 
 /** Triggers a browser download of config.json built from the mapping tables. */
 function downloadConfigJson() {
-    if(!getContext().mappingBuilt) {
+    if (!getContext().mappingBuilt) {
         showDownloadStatus('Waiting for Bela mapping…', true);
         return;
     }
-    if(!getContext().configMeta) {
+    if (!getContext().configMeta) {
         showDownloadStatus('Config metadata not received', true);
         return;
     }
 
     const routing = collectRoutingFromForm();
-    const expectedIn  = ROUTING_IN_KEYS.length;
+    const expectedIn = ROUTING_IN_KEYS.length;
     const expectedOut = ROUTING_OUT_KEYS.length;
-    if(Object.keys(routing.in).length !== expectedIn ||
-       Object.keys(routing.out).length !== expectedOut) {
+    if (Object.keys(routing.in).length !== expectedIn ||
+        Object.keys(routing.out).length !== expectedOut) {
         showDownloadStatus('Invalid routing channels — check the form', true);
         return;
     }
     const masterChans = routing.out.master && routing.out.master.channels;
-    if(!Array.isArray(masterChans) || masterChans.length < 1) {
+    if (!Array.isArray(masterChans) || masterChans.length < 1) {
         showDownloadStatus('Master needs at least one output channel', true);
         return;
     }
 
-    const {pm, sm} = collectMappingFromForm();
-    const text     = buildConfigJsonText(pm, sm);
-    if(!text) {
+    const { pm, sm } = collectMappingFromForm();
+    const text = buildConfigJsonText(pm, sm);
+    if (!text) {
         showDownloadStatus('JSON generation error', true);
         return;
     }
 
-    const blob = new Blob([text], {type: 'application/json'});
-    const url  = URL.createObjectURL(blob);
-    const a    = document.createElement('a');
-    a.href     = url;
+    const blob = new Blob([text], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
     a.download = 'config.json';
     document.body.appendChild(a);
     a.click();
@@ -1324,8 +1352,8 @@ function downloadConfigJson() {
 }
 
 function showDownloadStatus(msg, isError) {
-    if(!getContext().downloadStatusEl) return;
+    if (!getContext().downloadStatusEl) return;
     getContext().downloadStatusEl.textContent = msg;
-    getContext().downloadStatusEl.className   = isError ? 'err' : '';
-    setTimeout(() => { if(getContext().downloadStatusEl) getContext().downloadStatusEl.textContent = ''; }, 4000);
+    getContext().downloadStatusEl.className = isError ? 'err' : '';
+    setTimeout(() => { if (getContext().downloadStatusEl) getContext().downloadStatusEl.textContent = ''; }, 4000);
 }
