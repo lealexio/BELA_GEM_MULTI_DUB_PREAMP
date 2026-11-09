@@ -14,12 +14,18 @@ static constexpr uint8_t MCP_GPPUA  = 0x0C; // Pull-up resistors port A
 static constexpr uint8_t MCP_GPPUB  = 0x0D; // Pull-up resistors port B
 static constexpr uint8_t MCP_GPIOA  = 0x12; // GPIO read port A
 static constexpr uint8_t MCP_GPIOB  = 0x13; // GPIO read port B
+static constexpr uint8_t MCP_OLATA  = 0x14; // Output Latch port A
+static constexpr uint8_t MCP_OLATB  = 0x15; // Output Latch port B
 
 // Required for constexpr static array members (ODR-used)
 constexpr int HardwareManager::addressPins_[4];
 
 HardwareManager::HardwareManager() {
     for(int i = 0; i < kNumMux * kPotsPerMux; i++) potValues_[i] = 0.f;
+    for(int i = 0; i < kNumClipChannels; i++) {
+        clipPending_[i].store(false);
+        clipHoldTicks_[i] = 0;
+    }
     currentChannel_ = 0;
     sampleCount_    = 0;
 }
@@ -116,22 +122,61 @@ bool HardwareManager::probeAndInitMcp(uint8_t addr) {
     if(i2cFd_ < 0) return false;
     if(ioctl(i2cFd_, I2C_SLAVE, addr) < 0) return false;
 
-    // Test writing IODIRA (all inputs = 0xFF)
+    // By default, ALL 16 pins are inputs (1 = input) with pull-up enabled (1 = pull-up).
+    // Pins are ONLY configured as outputs (0 = output) if explicitly defined in config.json.
+    uint8_t iodirA    = 0xFF;
+    uint8_t iodirB    = 0xFF;
+    uint8_t initOlatA = 0x00;
+    uint8_t initOlatB = 0x00;
+
+    const ClipLedRef* refs[kNumClipChannels] = {
+        &CLIP_LED_MASTER, &CLIP_LED_AUX1, &CLIP_LED_AUX2, &CLIP_LED_AUX3, &CLIP_LED_AUX4
+    };
+
+    hasClipOutputs_ = false;
+    for(int i = 0; i < kNumClipChannels; ++i) {
+        const ClipLedRef* r = refs[i];
+        if(r && r->enabled && r->pin >= 0 && r->pin <= 7) {
+            hasClipOutputs_ = true;
+            uint8_t bit = (1 << r->pin);
+            if(!r->portB) {
+                iodirA &= ~bit;       // 0 = output
+                if(r->activeLow) initOlatA |= bit; // inactive = HIGH
+            } else {
+                iodirB &= ~bit;       // 0 = output
+                if(r->activeLow) initOlatB |= bit; // inactive = HIGH
+            }
+        }
+    }
+
+    uint8_t gppuA = iodirA; // Only enable pull-up on inputs
+    uint8_t gppuB = iodirB;
+
+    // Set IODIRA & IODIRB
     uint8_t buf[2];
-    buf[0] = MCP_IODIRA; buf[1] = 0xFF;
+    buf[0] = MCP_IODIRA; buf[1] = iodirA;
     if(write(i2cFd_, buf, 2) != 2) return false;
 
-    // IODIRB: all inputs
-    buf[0] = MCP_IODIRB; buf[1] = 0xFF;
+    buf[0] = MCP_IODIRB; buf[1] = iodirB;
     if(write(i2cFd_, buf, 2) != 2) return false;
 
-    // GPPUA: enable internal pull-ups on Port A
-    buf[0] = MCP_GPPUA; buf[1] = 0xFF;
+    // Set GPPUA & GPPUB
+    buf[0] = MCP_GPPUA; buf[1] = gppuA;
     if(write(i2cFd_, buf, 2) != 2) return false;
 
-    // GPPUB: enable internal pull-ups on Port B
-    buf[0] = MCP_GPPUB; buf[1] = 0xFF;
+    buf[0] = MCP_GPPUB; buf[1] = gppuB;
     if(write(i2cFd_, buf, 2) != 2) return false;
+
+    // If any output is active, initialise OLATA and OLATB to inactive (LEDs off)
+    if(hasClipOutputs_) {
+        buf[0] = MCP_OLATA; buf[1] = initOlatA;
+        if(write(i2cFd_, buf, 2) != 2) return false;
+        currentOlatA_ = initOlatA;
+
+        buf[0] = MCP_OLATB; buf[1] = initOlatB;
+        if(write(i2cFd_, buf, 2) != 2) return false;
+        currentOlatB_ = initOlatB;
+    }
 
     return true;
 }
@@ -206,6 +251,55 @@ void HardwareManager::readMcp23017() {
         mcpPortA_.store(valA);
         mcpPortB_.store(valB);
         mcpConsecutiveErrors_ = 0;
+
+        // Process clip LED outputs if any are configured
+        if(hasClipOutputs_) {
+            const int holdTicks = (int)(kClipLedHoldMs / 5.0f > 1.0f ? kClipLedHoldMs / 5.0f : 1.0f);
+
+            const ClipLedRef* refs[kNumClipChannels] = {
+                &CLIP_LED_MASTER, &CLIP_LED_AUX1, &CLIP_LED_AUX2, &CLIP_LED_AUX3, &CLIP_LED_AUX4
+            };
+
+            uint8_t newOlatA = currentOlatA_;
+            uint8_t newOlatB = currentOlatB_;
+
+            for(int i = 0; i < kNumClipChannels; ++i) {
+                const ClipLedRef* r = refs[i];
+                if(!r || !r->enabled || r->pin < 0 || r->pin > 7) continue;
+
+                if(clipPending_[i].exchange(false, std::memory_order_relaxed)) {
+                    clipHoldTicks_[i] = holdTicks;
+                } else if(clipHoldTicks_[i] > 0) {
+                    clipHoldTicks_[i]--;
+                }
+
+                bool active  = (clipHoldTicks_[i] > 0);
+                bool pinHigh = r->activeLow ? !active : active;
+                uint8_t bit  = (1 << r->pin);
+
+                if(!r->portB) {
+                    if(pinHigh) newOlatA |= bit;
+                    else        newOlatA &= ~bit;
+                } else {
+                    if(pinHigh) newOlatB |= bit;
+                    else        newOlatB &= ~bit;
+                }
+            }
+
+            // Only write to I2C if the output latch state has changed
+            if(newOlatA != currentOlatA_) {
+                uint8_t wBuf[2] = { MCP_OLATA, newOlatA };
+                if(write(i2cFd_, wBuf, 2) == 2) {
+                    currentOlatA_ = newOlatA;
+                }
+            }
+            if(newOlatB != currentOlatB_) {
+                uint8_t wBuf[2] = { MCP_OLATB, newOlatB };
+                if(write(i2cFd_, wBuf, 2) == 2) {
+                    currentOlatB_ = newOlatB;
+                }
+            }
+        }
     } else {
         mcpConsecutiveErrors_++;
         if(mcpConsecutiveErrors_ >= kMcpMaxConsecutiveErrors) {
@@ -227,6 +321,13 @@ bool HardwareManager::getSwitchStateB(int pin) const {
 
 void HardwareManager::closeMcp23017() {
     if(i2cFd_ >= 0) {
+        if(hasClipOutputs_) {
+            uint8_t buf[2];
+            buf[0] = MCP_OLATA; buf[1] = 0x00;
+            write(i2cFd_, buf, 2);
+            buf[0] = MCP_OLATB; buf[1] = 0x00;
+            write(i2cFd_, buf, 2);
+        }
         close(i2cFd_);
         i2cFd_ = -1;
     }

@@ -133,6 +133,30 @@ extern SwitchRef FX2_FILTER_MIDS;
 extern SwitchRef SIREN_TRIGGER;
 
 // ---------------------------------------------------------------------------
+// Clip LED mapping (MCP23017 output pins)
+// ---------------------------------------------------------------------------
+
+/**
+ * Reference to one MCP23017 clip LED output.
+ *   pin       : GPIO pin index (0–7) within the port (-1 = unassigned/disabled)
+ *   portB     : false = port A (default), true = port B
+ *   activeLow : false = HIGH turns LED on (default), true = LOW turns LED on
+ *   enabled   : true only when actively configured in config.json
+ */
+struct ClipLedRef {
+    int  pin       = -1;
+    bool portB     = false;
+    bool activeLow = false;
+    bool enabled   = false;
+};
+
+extern ClipLedRef CLIP_LED_MASTER;
+extern ClipLedRef CLIP_LED_AUX1;
+extern ClipLedRef CLIP_LED_AUX2;
+extern ClipLedRef CLIP_LED_AUX3;
+extern ClipLedRef CLIP_LED_AUX4;
+
+// ---------------------------------------------------------------------------
 // Potentiometer mapping
 // ---------------------------------------------------------------------------
 

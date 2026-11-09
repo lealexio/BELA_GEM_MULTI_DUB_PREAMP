@@ -9,6 +9,7 @@
 #include <cstring>
 #include <cstdio>
 #include <algorithm>
+#include <cctype>
 
 // ---------------------------------------------------------------------------
 // Internal helpers
@@ -95,6 +96,50 @@ static double numOf(JSONValue* obj, const wchar_t* key, double defaultVal) {
 static bool boolOf(JSONValue* obj, const wchar_t* key, bool defaultVal) {
     JSONValue* v = child(obj, key);
     return (v && v->IsBool()) ? v->AsBool() : defaultVal;
+}
+
+/**
+ * Parses one clipLed entry: accepts "B5", "A6", etc., or {"port": "B", "pin": 5, "activeLow": false}.
+ * Enables output mode on that pin ONLY if a valid pin is defined.
+ */
+static void parseClipLedEntry(JSONValue* v, ClipLedRef* ref, const char* name) {
+    if(!v || !ref) return;
+    if(v->IsString()) {
+        std::string s = JSON::ws2s(v->AsString());
+        if(s.length() >= 2) {
+            char p = (char)toupper((unsigned char)s[0]);
+            int pin = s[1] - '0';
+            if((p == 'A' || p == 'B') && pin >= 0 && pin <= 7) {
+                ref->pin       = pin;
+                ref->portB     = (p == 'B');
+                ref->activeLow = false;
+                ref->enabled   = true;
+                fprintf(stderr, "[ConfigLoader] Clip LED %s -> Port %c, Pin %d (OUTPUT)\n", name, p, pin);
+                return;
+            }
+        }
+        fprintf(stderr, "[ConfigLoader] Clip LED %s: invalid format '%s' (expected e.g. 'B5' or 'A6')\n",
+                name, s.c_str());
+    } else if(v->IsObject()) {
+        int pin = (int)numOf(v, L"pin", -1);
+        JSONValue* portVal = child(v, L"port");
+        bool portB = false;
+        if(portVal && portVal->IsString()) {
+            std::string pStr = JSON::ws2s(portVal->AsString());
+            portB = (!pStr.empty() && toupper((unsigned char)pStr[0]) == 'B');
+        }
+        bool activeLow = boolOf(v, L"activeLow", false);
+        if(pin >= 0 && pin <= 7) {
+            ref->pin       = pin;
+            ref->portB     = portB;
+            ref->activeLow = activeLow;
+            ref->enabled   = true;
+            fprintf(stderr, "[ConfigLoader] Clip LED %s -> Port %c, Pin %d (OUTPUT, activeLow=%d)\n",
+                    name, portB ? 'B' : 'A', pin, activeLow ? 1 : 0);
+            return;
+        }
+        fprintf(stderr, "[ConfigLoader] Clip LED %s: invalid pin %d\n", name, pin);
+    }
 }
 
 /** Clamps ADC input PGA gain to the codec-supported range. */
@@ -457,6 +502,38 @@ bool ConfigLoader::load(const char* path) {
             JSONValue* portVal = child(e, L"port");
             if(portVal && portVal->IsString())
                 sw->portB = (JSON::ws2s(portVal->AsString()) == "B");
+        }
+    }
+
+    // --- clipLeds (MCP23017 outputs) ---
+    // All MCP23017 pins are inputs in read mode by default.
+    // A pin is ONLY converted to output (write mode) if explicitly defined here.
+    JSONValue* clipVal = child(root, L"clipLeds");
+    if(clipVal && clipVal->IsObject()) {
+        parseClipLedEntry(child(clipVal, L"master"), &CLIP_LED_MASTER, "MASTER");
+        parseClipLedEntry(child(clipVal, L"aux1"),   &CLIP_LED_AUX1,   "AUX1");
+        parseClipLedEntry(child(clipVal, L"aux2"),   &CLIP_LED_AUX2,   "AUX2");
+        parseClipLedEntry(child(clipVal, L"aux3"),   &CLIP_LED_AUX3,   "AUX3");
+        parseClipLedEntry(child(clipVal, L"aux4"),   &CLIP_LED_AUX4,   "AUX4");
+    } else if(clipVal && clipVal->IsArray()) {
+        const JSONArray& arr = clipVal->AsArray();
+        for(size_t i = 0; i < arr.size(); ++i) {
+            JSONValue* e = arr[i];
+            if(!e || !e->IsObject()) continue;
+            JSONValue* nameVal = child(e, L"name");
+            if(!nameVal || !nameVal->IsString()) continue;
+            std::string name = JSON::ws2s(nameVal->AsString());
+            std::transform(name.begin(), name.end(), name.begin(), [](unsigned char c){ return std::tolower(c); });
+            if(name == "master" || name == "clip_master")
+                parseClipLedEntry(e, &CLIP_LED_MASTER, "MASTER");
+            else if(name == "aux1" || name == "clip_aux1")
+                parseClipLedEntry(e, &CLIP_LED_AUX1, "AUX1");
+            else if(name == "aux2" || name == "clip_aux2")
+                parseClipLedEntry(e, &CLIP_LED_AUX2, "AUX2");
+            else if(name == "aux3" || name == "clip_aux3")
+                parseClipLedEntry(e, &CLIP_LED_AUX3, "AUX3");
+            else if(name == "aux4" || name == "clip_aux4")
+                parseClipLedEntry(e, &CLIP_LED_AUX4, "AUX4");
         }
     }
 

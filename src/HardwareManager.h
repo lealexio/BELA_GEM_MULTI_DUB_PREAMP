@@ -131,6 +131,28 @@ public:
     /** Closes the I2C file descriptor. Call from Bela cleanup(). */
     void closeMcp23017();
 
+    // -----------------------------------------------------------------------
+    // Clip LED control (MCP23017 outputs — RT-safe signal from render)
+    // -----------------------------------------------------------------------
+
+    enum ClipChannel {
+        CLIP_MASTER = 0,
+        CLIP_AUX1,
+        CLIP_AUX2,
+        CLIP_AUX3,
+        CLIP_AUX4,
+        kNumClipChannels
+    };
+
+    /**
+     * RT-safe clip notification: sets an atomic flag consumed by the I2C auxiliary task.
+     * Safe to call from render() at audio frame rate (zero blocking, lock-free).
+     */
+    void triggerClip(ClipChannel ch) {
+        if(ch >= 0 && ch < kNumClipChannels)
+            clipPending_[ch].store(true, std::memory_order_relaxed);
+    }
+
 private:
     float potValues_[kNumMux * kPotsPerMux];
     int   currentChannel_ = 0;
@@ -146,4 +168,11 @@ private:
     uint8_t              activeAddress_        = 0;
     std::atomic<uint8_t> mcpPortA_{0xFF}; // cached GPIOA register (0xFF = all HIGH = all open)
     std::atomic<uint8_t> mcpPortB_{0xFF}; // cached GPIOB register
+
+    // Clip LED output state (managed by readMcp23017 in the non-RT AuxTask)
+    std::atomic<bool>    clipPending_[kNumClipChannels];
+    int                  clipHoldTicks_[kNumClipChannels] = {};
+    uint8_t              currentOlatA_   = 0x00;
+    uint8_t              currentOlatB_   = 0x00;
+    bool                 hasClipOutputs_ = false;
 };

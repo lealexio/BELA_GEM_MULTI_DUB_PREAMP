@@ -583,5 +583,12 @@
       "port": "B"
     }
   ],
+  "clipLeds": {
+    "master": "B5",
+    "aux1": "A6",
+    "aux2": "A7",
+    "aux3": "B6",
+    "aux4": "B7"
+  },
   "ignoredPots": []
 }

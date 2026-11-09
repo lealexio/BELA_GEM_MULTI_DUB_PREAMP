@@ -72,6 +72,18 @@ SwitchRef FX2_FILTER_MIDS = {7, false, false};
 SwitchRef SIREN_TRIGGER = {0, false, true};
 
 // ---------------------------------------------------------------------------
+// Clip LED mapping (MCP23017 outputs)
+// Disabled by default. All MCP23017 pins remain inputs in read mode unless
+// explicitly configured in config.json.
+// ---------------------------------------------------------------------------
+
+ClipLedRef CLIP_LED_MASTER = {-1, false, false, false};
+ClipLedRef CLIP_LED_AUX1   = {-1, false, false, false};
+ClipLedRef CLIP_LED_AUX2   = {-1, false, false, false};
+ClipLedRef CLIP_LED_AUX3   = {-1, false, false, false};
+ClipLedRef CLIP_LED_AUX4   = {-1, false, false, false};
+
+// ---------------------------------------------------------------------------
 // Potentiometer mapping (7 MUX x 10 channels)
 // ---------------------------------------------------------------------------
 

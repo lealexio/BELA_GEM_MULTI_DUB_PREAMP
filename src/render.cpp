@@ -948,17 +948,16 @@ void render(BelaContext* context, void* userData) {
     const bool stereoOut = (MASTER_OUTS_COUNT >= 2);
 
     // --- Sample loop ---
-    bool clipCh0 = false;
-    bool clipCh1 = false;
+    bool clipAux1   = false;
+    bool clipAux2   = false;
+    bool clipAux3   = false;
+    bool clipAux4   = false;
+    bool clipMaster = false;
 
     for(unsigned int n = 0; n < context->audioFrames; n++) {
         // Left (or mono) inputs
         float in0L = readChannelInputL(context, n, AUX1_CONFIG);
         float in1L = readChannelInputL(context, n, AUX2_CONFIG);
-
-        if(fabsf(in0L) >= kClipThreshold) clipCh0 = true;
-        if(fabsf(in1L) >= kClipThreshold) clipCh1 = true;
-
         float in2L = readChannelInputL(context, n, AUX3_CONFIG);
         float in3L = readChannelInputL(context, n, AUX4_CONFIG);
 
@@ -979,6 +978,19 @@ void render(BelaContext* context, void* userData) {
         float dry2R = applyMicHpfR(1, gChannelStrip2R.process(in1R));
         float dry3R = applyMicHpfR(2, gChannelStrip3R.process(in2R));
         float dry4R = applyMicHpfR(3, gChannelStrip4R.process(in3R));
+
+        // Clip detection: ADC input or post-strip exceeding threshold
+        if(fabsf(in0L) >= kClipThreshold || fabsf(dry1L) >= kClipThreshold) clipAux1 = true;
+        if(AUX1_CONFIG.isStereo() && (fabsf(in0R) >= kClipThreshold || fabsf(dry1R) >= kClipThreshold)) clipAux1 = true;
+
+        if(fabsf(in1L) >= kClipThreshold || fabsf(dry2L) >= kClipThreshold) clipAux2 = true;
+        if(AUX2_CONFIG.isStereo() && (fabsf(in1R) >= kClipThreshold || fabsf(dry2R) >= kClipThreshold)) clipAux2 = true;
+
+        if(fabsf(in2L) >= kClipThreshold || fabsf(dry3L) >= kClipThreshold) clipAux3 = true;
+        if(AUX3_CONFIG.isStereo() && (fabsf(in2R) >= kClipThreshold || fabsf(dry3R) >= kClipThreshold)) clipAux3 = true;
+
+        if(fabsf(in3L) >= kClipThreshold || fabsf(dry4L) >= kClipThreshold) clipAux4 = true;
+        if(AUX4_CONFIG.isStereo() && (fabsf(in3R) >= kClipThreshold || fabsf(dry4R) >= kClipThreshold)) clipAux4 = true;
 
         // Siren + sampler: mono sources, present equally on L and R
         float sirenOut   = gDubSiren.process();
@@ -1030,6 +1042,7 @@ void render(BelaContext* context, void* userData) {
             outL = gMasterFx.process(dryNormalL + fxReturn + fxReturn2);
             if(anyMic) outL += gMasterFx.processMicPath(dryMicL);
         }
+        if(fabsf(outL) >= kClipThreshold) clipMaster = true;
         outL = gMasterFx.limitOutput(outL);
 
         // ---- Right master bus (only when stereo output is configured) ----
@@ -1050,6 +1063,7 @@ void render(BelaContext* context, void* userData) {
                 outR = gMasterFxR.process(dryNormalR + fxReturn + fxReturn2);
                 if(anyMic) outR += gMasterFxR.processMicPath(dryMicR);
             }
+            if(fabsf(outR) >= kClipThreshold) clipMaster = true;
             outR = gMasterFxR.limitOutput(outR);
         } else {
             outR = outL; // unused when mono, but keep consistent
@@ -1105,11 +1119,21 @@ void render(BelaContext* context, void* userData) {
         #undef GUI_PEAK
     }
 
+    // --- Trigger hardware clip LEDs on MCP23017 (RT-safe atomic signals) ---
+    if(clipMaster) gHardwareManager.triggerClip(HardwareManager::CLIP_MASTER);
+    if(clipAux1)   gHardwareManager.triggerClip(HardwareManager::CLIP_AUX1);
+    if(clipAux2)   gHardwareManager.triggerClip(HardwareManager::CLIP_AUX2);
+    if(clipAux3)   gHardwareManager.triggerClip(HardwareManager::CLIP_AUX3);
+    if(clipAux4)   gHardwareManager.triggerClip(HardwareManager::CLIP_AUX4);
+
     // --- Clip warnings (rate-limited) ---
     ++gClipWarnCounter;
-    if((clipCh0 || clipCh1) && gClipWarnCounter >= kClipWarnIntervalBlocks) {
-        if(clipCh0) rt_printf("WARNING Canal 0 clipping\n");
-        if(clipCh1) rt_printf("WARNING Canal 1 clipping\n");
+    if((clipAux1 || clipAux2 || clipAux3 || clipAux4 || clipMaster) && gClipWarnCounter >= kClipWarnIntervalBlocks) {
+        if(clipAux1)   rt_printf("WARNING Aux 1 clipping\n");
+        if(clipAux2)   rt_printf("WARNING Aux 2 clipping\n");
+        if(clipAux3)   rt_printf("WARNING Aux 3 clipping\n");
+        if(clipAux4)   rt_printf("WARNING Aux 4 clipping\n");
+        if(clipMaster) rt_printf("WARNING Master clipping\n");
         gClipWarnCounter = 0;
     }
 
