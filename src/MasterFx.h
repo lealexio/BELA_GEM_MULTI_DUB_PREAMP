@@ -120,7 +120,7 @@ public:
     /**
      * Sets the master output gain applied after the full dry processing chain.
      * FX returns are also scaled by this gain in render.cpp (post-master injection).
-     * @param gain  [0.0–1.0]; 0.0 = total silence
+     * @param gain  [0.0–kMasterMaxGain]; 0.0 = total silence, 1.0 = unity gain, 2.0 = +6 dB
      */
     void setMasterGain(float gain);
 

@@ -677,23 +677,30 @@ transition:background .1s,color .1s,border-color .1s;
 .console-filter-btn.active{
 background:var(--ink);color:#fff;border-color:var(--ink);
 }
-.console-list{list-style:none;margin:0;padding:0}
+.console-list{list-style:none;margin:0;padding:0;position:relative;overflow:hidden}
 .crow{
 display:flex;align-items:center;gap:8px;
-padding:5px 0;border-bottom:1px solid var(--line-soft);
+padding:5px 6px;border-bottom:1px solid var(--line-soft);
+border-left:3px solid transparent;border-radius:4px;
+background:transparent;
+transition:background 1.2s ease,border-left-color 1.2s ease;
+will-change:transform,opacity;
 }
 .crow:last-child{border-bottom:none}
 .crow.empty .cname,
 .crow.empty .cval{color:transparent}
+.crow.empty .cdir{visibility:hidden}
 .cname{
-flex:0 0 175px;font-family:var(--mono);font-size:11px;
+flex:0 0 170px;font-family:var(--mono);font-size:11px;
 font-weight:600;color:var(--ink);white-space:nowrap;overflow:hidden;
+text-overflow:ellipsis;
+transition:color .2s ease;
 }
-.ctrack{flex:1;height:5px;background:var(--line-soft);border-radius:3px;overflow:hidden}
+.ctrack{flex:1;height:5px;background:var(--line-soft);border-radius:3px;overflow:hidden;position:relative}
 .cfill{
 display:block;height:100%;min-width:0;
 background:var(--ink);border-radius:3px;
-transition:width .15s ease;
+transition:width .08s ease-out,background-color .4s ease;
 }
 .crow.sw .cfill{background:var(--accent)}
 .crow.empty .ctrack{background:var(--line-soft)}
@@ -707,9 +714,42 @@ animation-delay:calc(var(--slot, 0) * 0.15s);
 0%,100%{width:12%;opacity:.3}
 50%{width:58%;opacity:.85}
 }
+.cdir{
+flex:0 0 14px;text-align:center;font-size:10px;line-height:1;
+opacity:0;transition:opacity .8s ease;
+font-weight:700;user-select:none;
+}
+.cdir.up{color:#10b981}
+.cdir.down{color:#f59e0b}
+.cdir.sw{color:var(--accent)}
 .cval{
 flex:0 0 46px;text-align:right;font-family:var(--mono);
-font-size:11px;color:var(--muted);
+font-size:11px;color:var(--muted);font-variant-numeric:tabular-nums;
+transition:color .2s ease;
+}
+
+/* --- Active / Highlight state for recent changes --- */
+.crow.active{
+background:rgba(37,99,235,.07);
+border-left-color:#2563eb;
+transition:background .06s ease,border-left-color .06s ease;
+}
+.crow.active .cname{color:var(--ink);font-weight:700}
+.crow.active .cfill{
+background:#2563eb;
+box-shadow:0 0 6px rgba(37,99,235,.4);
+}
+.crow.active .cval{color:var(--ink);font-weight:700}
+.crow.active .cdir{opacity:1;transition:opacity .06s ease}
+
+/* Switches in active state */
+.crow.sw.active{
+background:rgba(231,76,60,.07);
+border-left-color:var(--accent);
+}
+.crow.sw.active .cfill{
+background:var(--accent);
+box-shadow:0 0 6px rgba(231,76,60,.4);
 }
 
 /* --- Switches (grouped tiles) --- */
@@ -3212,25 +3252,180 @@ border-radius:6px;background:transparent;
     syncConsolePotBaselines();
     renderConsole();
   }
+  var CONSOLE_ACTIVE_HOLD_MS = 1400;
   function buildConsoleRow(entry, slot) {
     const isSw = entry && entry.type === "sw";
     const isEmpty = !entry;
+    const key = entry ? entry.name : "__empty_" + slot;
     const li = el("li", { className: "crow" + (isEmpty ? " empty" : isSw ? " sw" : "") });
+    li.dataset.key = key;
     if (isEmpty) li.style.setProperty("--slot", String(slot));
     const pct = entry ? Math.min(100, Math.max(0, entry.value * 100)).toFixed(1) : "0";
-    const cval = entry ? entry.value.toFixed(3) : "\xA0";
+    const cval = entry ? isSw ? entry.value > 0.5 ? "ON" : "OFF" : entry.value.toFixed(3) : "\xA0";
     const cname = entry ? entry.name : "\xA0";
     const fillCls = isEmpty ? "cfill cfill-loading" : "cfill";
     const fillStyle = isEmpty ? "" : ` style="width:${pct}%"`;
-    li.innerHTML = `<span class="cname">${cname}</span><span class="ctrack"><span class="${fillCls}"${fillStyle}></span></span><span class="cval">${cval}</span>`;
+    let dirHtml = "&nbsp;";
+    let dirCls = "cdir";
+    if (!isEmpty) {
+      if (isSw) {
+        dirHtml = "\u25CF";
+        dirCls = "cdir sw";
+      } else if (entry.direction === "up") {
+        dirHtml = "\u25B2";
+        dirCls = "cdir up";
+      } else if (entry.direction === "down") {
+        dirHtml = "\u25BC";
+        dirCls = "cdir down";
+      }
+    }
+    li.innerHTML = `<span class="cname" title="${cname}">${cname}</span><span class="ctrack"><span class="${fillCls}"${fillStyle}></span></span><span class="${dirCls}">${dirHtml}</span><span class="cval">${cval}</span>`;
+    if (entry && entry.ts && Date.now() - entry.ts < CONSOLE_ACTIVE_HOLD_MS) {
+      li.classList.add("active");
+      const remaining = Math.max(100, CONSOLE_ACTIVE_HOLD_MS - (Date.now() - entry.ts));
+      li._activeTimer = setTimeout(() => {
+        li.classList.remove("active");
+        li._activeTimer = null;
+      }, remaining);
+    }
     return li;
+  }
+  function updateRowContent(row, entry, isNew, direction) {
+    if (!row || !entry) return;
+    const isSw = entry.type === "sw";
+    row.dataset.key = entry.name;
+    row.classList.remove("empty");
+    row.classList.toggle("sw", isSw);
+    const nameEl = row.querySelector(".cname");
+    if (nameEl && nameEl.textContent !== entry.name) {
+      nameEl.textContent = entry.name;
+      nameEl.title = entry.name;
+    }
+    const fillEl = row.querySelector(".cfill");
+    if (fillEl) {
+      fillEl.className = "cfill";
+      const pct = Math.min(100, Math.max(0, entry.value * 100)).toFixed(1);
+      fillEl.style.width = pct + "%";
+    }
+    const dirEl = row.querySelector(".cdir");
+    if (dirEl) {
+      if (isSw) {
+        dirEl.textContent = "\u25CF";
+        dirEl.className = "cdir sw";
+      } else if (direction === "up") {
+        dirEl.textContent = "\u25B2";
+        dirEl.className = "cdir up";
+      } else if (direction === "down") {
+        dirEl.textContent = "\u25BC";
+        dirEl.className = "cdir down";
+      }
+    }
+    const valEl = row.querySelector(".cval");
+    if (valEl) {
+      valEl.textContent = isSw ? entry.value > 0.5 ? "ON" : "OFF" : entry.value.toFixed(3);
+    }
+    row.classList.add("active");
+    if (row._activeTimer) clearTimeout(row._activeTimer);
+    row._activeTimer = setTimeout(() => {
+      row.classList.remove("active");
+      row._activeTimer = null;
+    }, CONSOLE_ACTIVE_HOLD_MS);
+  }
+  function removeExcessBottomSlot(list) {
+    if (list.children.length <= MAX_CONSOLE) return;
+    for (let i = list.children.length - 1; i >= 0; i--) {
+      const child = list.children[i];
+      if (child.classList.contains("empty")) {
+        list.removeChild(child);
+        return;
+      }
+    }
+    if (list.lastElementChild) {
+      list.removeChild(list.lastElementChild);
+    }
+  }
+  function applyConsoleChangeToList(entry, list, direction) {
+    const firstChild = list.firstElementChild;
+    if (firstChild && firstChild.dataset.key === entry.name) {
+      updateRowContent(firstChild, entry, false, direction);
+      return;
+    }
+    const firstTops = /* @__PURE__ */ new Map();
+    for (const child of list.children) {
+      firstTops.set(child, child.getBoundingClientRect().top);
+    }
+    let targetRow = null;
+    for (const child of list.children) {
+      if (child.dataset.key === entry.name) {
+        targetRow = child;
+        break;
+      }
+    }
+    if (targetRow) {
+      list.insertBefore(targetRow, list.firstElementChild);
+    } else {
+      targetRow = buildConsoleRow(entry, 0);
+      list.insertBefore(targetRow, list.firstElementChild);
+      removeExcessBottomSlot(list);
+    }
+    updateRowContent(targetRow, entry, true, direction);
+    for (const child of list.children) {
+      const first = firstTops.get(child);
+      const last = child.getBoundingClientRect().top;
+      if (first !== void 0) {
+        const dy = first - last;
+        if (Math.abs(dy) > 0.5) {
+          child.style.transform = `translateY(${dy}px)`;
+          child.style.transition = "none";
+        } else {
+          child.style.transform = "";
+          child.style.transition = "none";
+        }
+      } else {
+        child.style.transform = "translateY(-18px) scale(0.98)";
+        child.style.opacity = "0";
+        child.style.transition = "none";
+      }
+    }
+    void list.offsetHeight;
+    for (const child of list.children) {
+      child.style.transition = "transform 320ms cubic-bezier(0.16, 1, 0.3, 1), opacity 320ms ease";
+      child.style.transform = "";
+      child.style.opacity = "";
+    }
+    clearTimeout(list._animTimer);
+    list._animTimer = setTimeout(() => {
+      for (const child of list.children) {
+        child.style.transition = "";
+      }
+      list._animTimer = null;
+    }, 340);
+  }
+  function pushRecentChangeData(entry) {
+    if (!getContext().recentChanges) getContext().recentChanges = [];
+    getContext().recentChanges = getContext().recentChanges.filter((e) => e.name !== entry.name);
+    getContext().recentChanges.unshift(entry);
+    if (getContext().recentChanges.length > MAX_CONSOLE) {
+      getContext().recentChanges.length = MAX_CONSOLE;
+    }
+  }
+  function applyConsoleChange(entry) {
+    const lists = (getContext().consoleLists || []).filter((l) => l && l.isConnected);
+    if (!lists.length) {
+      pushRecentChangeData(entry);
+      return;
+    }
+    lists.forEach((list) => {
+      applyConsoleChangeToList(entry, list, entry.direction);
+    });
+    pushRecentChangeData(entry);
   }
   function updateConsole() {
     const now = Date.now();
-    let dirty = false;
     const isNormal = getContext().consoleFilterMode === "normal";
     const potDelta = isNormal ? CONSOLE_POT_MIN_DELTA_NORMAL : CONSOLE_POT_MIN_DELTA_DETAILED;
     const potPrev = isNormal ? getContext().prevPotValuesNormal : getContext().prevPotValues;
+    const changes = [];
     const mappedChannels = /* @__PURE__ */ new Set();
     for (let i = 0; i < POT_NAMES.length; i++) {
       const coords = getPotMuxChannel(i);
@@ -3239,22 +3434,34 @@ border-radius:6px;background:transparent;
       }
       if (coords && isPotIgnored(coords.mux, coords.pot)) continue;
       const v = getContext().potValues[i];
-      if (Math.abs(v - potPrev[i]) >= potDelta) {
+      const prevV = potPrev[i];
+      if (Math.abs(v - prevV) >= potDelta) {
         potPrev[i] = v;
         if (coords) {
           const unmappedName = formatUnmappedPotLabel(coords.mux, coords.pot);
-          getContext().recentChanges = getContext().recentChanges.filter((e) => e.name !== unmappedName);
+          getContext().recentChanges = (getContext().recentChanges || []).filter((e) => e.name !== unmappedName);
         }
-        pushConsoleEntry({ name: POT_NAMES[i], value: v, type: "pot", ts: now });
-        dirty = true;
+        const dir = v > prevV + 5e-4 ? "up" : v < prevV - 5e-4 ? "down" : "same";
+        changes.push({
+          name: POT_NAMES[i],
+          value: v,
+          type: "pot",
+          ts: now,
+          direction: dir
+        });
       }
     }
     for (let i = 0; i < SWITCH_NAMES.length; i++) {
       const v = getContext().switchStates[i];
       if (v !== getContext().prevSwitchStates[i]) {
         getContext().prevSwitchStates[i] = v;
-        pushConsoleEntry({ name: SWITCH_NAMES[i], value: v, type: "sw", ts: now });
-        dirty = true;
+        changes.push({
+          name: SWITCH_NAMES[i],
+          value: v,
+          type: "sw",
+          ts: now,
+          direction: v > 0.5 ? "on" : "off"
+        });
       }
     }
     if (getContext().muxRawValues && getContext().prevMuxRawValues && getContext().prevMuxRawValuesNormal) {
@@ -3265,26 +3472,31 @@ border-radius:6px;background:transparent;
           if (isPotIgnored(m, p) || mappedChannels.has(`${m}:${p}`) || isPotMapped(m, p)) continue;
           const idx = muxRawIndex(m, p);
           const v = getContext().muxRawValues[idx];
-          if (Math.abs(v - muxPrev[idx]) >= potDelta) {
+          const prevV = muxPrev[idx];
+          if (Math.abs(v - prevV) >= potDelta) {
             muxPrev[idx] = v;
-            pushConsoleEntry({
+            const dir = v > prevV + 5e-4 ? "up" : v < prevV - 5e-4 ? "down" : "same";
+            changes.push({
               name: formatUnmappedPotLabel(m, p),
               value: v,
               type: "pot",
-              ts: now
+              ts: now,
+              direction: dir
             });
-            dirty = true;
           }
         }
       }
     }
-    if (dirty) renderConsole();
-  }
-  function pushConsoleEntry(entry) {
-    getContext().recentChanges = getContext().recentChanges.filter((e) => e.name !== entry.name);
-    getContext().recentChanges.unshift(entry);
-    if (getContext().recentChanges.length > MAX_CONSOLE)
-      getContext().recentChanges.length = MAX_CONSOLE;
+    if (changes.length > 0) {
+      if (changes.length > 2) {
+        for (const c of changes) pushRecentChangeData(c);
+        renderConsole();
+      } else {
+        for (let i = changes.length - 1; i >= 0; i--) {
+          applyConsoleChange(changes[i]);
+        }
+      }
+    }
   }
   function renderConsole() {
     const lists = getContext().consoleLists || [];
@@ -3292,9 +3504,10 @@ border-radius:6px;background:transparent;
     lists.forEach((list) => {
       if (!list) return;
       list.innerHTML = "";
+      const recent = getContext().recentChanges || [];
       for (let i = 0; i < MAX_CONSOLE; i++) {
         list.appendChild(
-          buildConsoleRow(getContext().recentChanges[i] || null, i)
+          buildConsoleRow(recent[i] || null, i)
         );
       }
     });

@@ -68,6 +68,22 @@ constexpr float kSnapRadiusEdge   = 0.04f;
 constexpr float kCenteredPotExponent = 2.0f;
 
 // ---------------------------------------------------------------------------
+// Linear gain ranges (channels, master, FX returns)
+// ---------------------------------------------------------------------------
+
+/// Maximum linear gain for AUX input channels (AUX 1-4) when the pot is at maximum (1.0).
+/// 1.0 = unity gain (0 dB), 2.0 = +6 dB.
+constexpr float kInputMaxGain = 2.0f;
+
+/// Maximum linear gain for the master output when the pot is at maximum (1.0).
+/// 1.0 = unity gain (0 dB), 2.0 = +6 dB.
+constexpr float kMasterMaxGain = 2.0f;
+
+/// Maximum linear gain for FX return inputs (FX1, FX2) when the pot is at maximum (1.0).
+/// 1.0 = unity gain (0 dB), 2.0 = +6 dB.
+constexpr float kFxReturnMaxGain = 2.0f;
+
+// ---------------------------------------------------------------------------
 // Channel EQ (ChannelStrip — 3-band parametric)
 // ---------------------------------------------------------------------------
 

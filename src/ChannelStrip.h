@@ -29,7 +29,7 @@ public:
 
     /**
      * Sets the input gain (linear).
-     * @param gain  0.0 = silence, 1.0 = unity gain
+     * @param gain  0.0 = silence, 1.0 = unity gain, up to kInputMaxGain (2.0 = +6 dB)
      */
     void setInputGain(float gain);
 

@@ -279,6 +279,27 @@ static inline float scaleFxSendPot(float pot) {
 }
 
 /**
+ * Scales a raw input channel gain pot value [0.0, 1.0] to linear gain [0.0, kInputMaxGain].
+ */
+static inline float scaleInputGainPot(float pot) {
+    return pot * kInputMaxGain;
+}
+
+/**
+ * Scales a raw master gain pot value [0.0, 1.0] to linear gain [0.0, kMasterMaxGain].
+ */
+static inline float scaleMasterGainPot(float pot) {
+    return pot * kMasterMaxGain;
+}
+
+/**
+ * Scales a raw FX return gain pot value [0.0, 1.0] to linear gain [0.0, kFxReturnMaxGain].
+ */
+static inline float scaleFxReturnGainPot(float pot) {
+    return pot * kFxReturnMaxGain;
+}
+
+/**
  * Returns the left (or only) input sample for the given config and frame.
  * audioIns[0] is always the left/mono channel.
  */
@@ -742,7 +763,8 @@ void render(BelaContext* context, void* userData) {
 
     // Shared controls between L and R strips (same gain/EQ/FX send on both sides)
     // --- Channel Strip 1 controls ---
-    gChannelStrip.setInputGain(gHardwareManager.getPotValue(AUX1_INPUT_GAIN));
+    const float aux1Gain = scaleInputGainPot(gHardwareManager.getPotValue(AUX1_INPUT_GAIN));
+    gChannelStrip.setInputGain(aux1Gain);
     gChannelStrip.setEqGains(
         potToGainDb(gHardwareManager.getPotValue(AUX1_EQ_LOW)),
         potToGainDb(gHardwareManager.getPotValue(AUX1_EQ_MID)),
@@ -750,7 +772,7 @@ void render(BelaContext* context, void* userData) {
     );
     gChannelStrip.setFxSend1Level(scaleFxSendPot(gHardwareManager.getPotValue(AUX1_FX_SEND)));
     gChannelStrip.setFxSend2Level(scaleFxSendPot(gHardwareManager.getPotValue(AUX1_FX2_SEND)));
-    gChannelStripR.setInputGain(gHardwareManager.getPotValue(AUX1_INPUT_GAIN));
+    gChannelStripR.setInputGain(aux1Gain);
     gChannelStripR.setEqGains(
         potToGainDb(gHardwareManager.getPotValue(AUX1_EQ_LOW)),
         potToGainDb(gHardwareManager.getPotValue(AUX1_EQ_MID)),
@@ -760,7 +782,8 @@ void render(BelaContext* context, void* userData) {
     gChannelStripR.setFxSend2Level(scaleFxSendPot(gHardwareManager.getPotValue(AUX1_FX2_SEND)));
 
     // --- Channel Strip 2 controls ---
-    gChannelStrip2.setInputGain(gHardwareManager.getPotValue(AUX2_INPUT_GAIN));
+    const float aux2Gain = scaleInputGainPot(gHardwareManager.getPotValue(AUX2_INPUT_GAIN));
+    gChannelStrip2.setInputGain(aux2Gain);
     gChannelStrip2.setEqGains(
         potToGainDb(gHardwareManager.getPotValue(AUX2_EQ_LOW)),
         potToGainDb(gHardwareManager.getPotValue(AUX2_EQ_MID)),
@@ -768,7 +791,7 @@ void render(BelaContext* context, void* userData) {
     );
     gChannelStrip2.setFxSend1Level(scaleFxSendPot(gHardwareManager.getPotValue(AUX2_FX_SEND)));
     gChannelStrip2.setFxSend2Level(scaleFxSendPot(gHardwareManager.getPotValue(AUX2_FX2_SEND)));
-    gChannelStrip2R.setInputGain(gHardwareManager.getPotValue(AUX2_INPUT_GAIN));
+    gChannelStrip2R.setInputGain(aux2Gain);
     gChannelStrip2R.setEqGains(
         potToGainDb(gHardwareManager.getPotValue(AUX2_EQ_LOW)),
         potToGainDb(gHardwareManager.getPotValue(AUX2_EQ_MID)),
@@ -778,7 +801,8 @@ void render(BelaContext* context, void* userData) {
     gChannelStrip2R.setFxSend2Level(scaleFxSendPot(gHardwareManager.getPotValue(AUX2_FX2_SEND)));
 
     // --- AUX 3 controls ---
-    gChannelStrip3.setInputGain(gHardwareManager.getPotValue(AUX3_INPUT_GAIN));
+    const float aux3Gain = scaleInputGainPot(gHardwareManager.getPotValue(AUX3_INPUT_GAIN));
+    gChannelStrip3.setInputGain(aux3Gain);
     gChannelStrip3.setEqGains(
         potToGainDb(gHardwareManager.getPotValue(AUX3_EQ_LOW)),
         potToGainDb(gHardwareManager.getPotValue(AUX3_EQ_MID)),
@@ -786,7 +810,7 @@ void render(BelaContext* context, void* userData) {
     );
     gChannelStrip3.setFxSend1Level(scaleFxSendPot(gHardwareManager.getPotValue(AUX3_FX_SEND)));
     gChannelStrip3.setFxSend2Level(scaleFxSendPot(gHardwareManager.getPotValue(AUX3_FX2_SEND)));
-    gChannelStrip3R.setInputGain(gHardwareManager.getPotValue(AUX3_INPUT_GAIN));
+    gChannelStrip3R.setInputGain(aux3Gain);
     gChannelStrip3R.setEqGains(
         potToGainDb(gHardwareManager.getPotValue(AUX3_EQ_LOW)),
         potToGainDb(gHardwareManager.getPotValue(AUX3_EQ_MID)),
@@ -796,7 +820,8 @@ void render(BelaContext* context, void* userData) {
     gChannelStrip3R.setFxSend2Level(scaleFxSendPot(gHardwareManager.getPotValue(AUX3_FX2_SEND)));
 
     // --- AUX 4 controls ---
-    gChannelStrip4.setInputGain(gHardwareManager.getPotValue(AUX4_INPUT_GAIN));
+    const float aux4Gain = scaleInputGainPot(gHardwareManager.getPotValue(AUX4_INPUT_GAIN));
+    gChannelStrip4.setInputGain(aux4Gain);
     gChannelStrip4.setEqGains(
         potToGainDb(gHardwareManager.getPotValue(AUX4_EQ_LOW)),
         potToGainDb(gHardwareManager.getPotValue(AUX4_EQ_MID)),
@@ -804,7 +829,7 @@ void render(BelaContext* context, void* userData) {
     );
     gChannelStrip4.setFxSend1Level(scaleFxSendPot(gHardwareManager.getPotValue(AUX4_FX_SEND)));
     gChannelStrip4.setFxSend2Level(scaleFxSendPot(gHardwareManager.getPotValue(AUX4_FX2_SEND)));
-    gChannelStrip4R.setInputGain(gHardwareManager.getPotValue(AUX4_INPUT_GAIN));
+    gChannelStrip4R.setInputGain(aux4Gain);
     gChannelStrip4R.setEqGains(
         potToGainDb(gHardwareManager.getPotValue(AUX4_EQ_LOW)),
         potToGainDb(gHardwareManager.getPotValue(AUX4_EQ_MID)),
@@ -878,7 +903,7 @@ void render(BelaContext* context, void* userData) {
 
     // --- Master output gain — mirrored on both buses ---
     {
-        const float mg = gHardwareManager.getPotValue(MASTER_GAIN);
+        const float mg = scaleMasterGainPot(gHardwareManager.getPotValue(MASTER_GAIN));
         gMasterFx.setMasterGain(mg);
         gMasterFxR.setMasterGain(mg);
     }
@@ -935,9 +960,9 @@ void render(BelaContext* context, void* userData) {
     // Sampler shares siren gain / FX sends; trigger comes from the GUI only.
     gSamplePlayer.setControls(sirenGain, sirenFxSend, sirenFxSend2);
 
-    // --- FX return input gains (0 = mute, 1 = unity) ---
-    const float fx1ReturnGain = gHardwareManager.getPotValue(FX1_RETURN_GAIN);
-    const float fx2ReturnGain = gHardwareManager.getPotValue(FX2_RETURN_GAIN);
+    // --- FX return input gains ---
+    const float fx1ReturnGain = scaleFxReturnGainPot(gHardwareManager.getPotValue(FX1_RETURN_GAIN));
+    const float fx2ReturnGain = scaleFxReturnGainPot(gHardwareManager.getPotValue(FX2_RETURN_GAIN));
 
     // Mic-mode flags are config-time only — compute once per block.
     const bool anyMic = AUX1_CONFIG.micMode || AUX2_CONFIG.micMode
