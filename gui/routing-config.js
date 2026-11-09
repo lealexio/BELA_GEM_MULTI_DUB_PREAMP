@@ -22,19 +22,19 @@ export const ROUTING_CONFIG = {
     },
     "vuSub": {
       "channel": 4,
-      "gain": 2
+      "gain": 0
     },
     "vuKick": {
       "channel": 5,
-      "gain": 3
+      "gain": 0
     },
     "vuMid": {
       "channel": 2,
-      "gain": 4
+      "gain": 0
     },
     "vuTop": {
       "channel": 3,
-      "gain": 5
+      "gain": 0
     }
   },
   "in": {
@@ -92,4 +92,85 @@ export const ROUTING_CONFIG = {
     }
   }
 };
-export const IGNORED_POTS_DEFAULT = [];
+export const IGNORED_POTS_DEFAULT = [
+  {
+    "mux": 0,
+    "pot": 3
+  },
+  {
+    "mux": 0,
+    "pot": 4
+  },
+  {
+    "mux": 1,
+    "pot": 2
+  },
+  {
+    "mux": 1,
+    "pot": 5
+  },
+  {
+    "mux": 2,
+    "pot": 2
+  },
+  {
+    "mux": 2,
+    "pot": 3
+  },
+  {
+    "mux": 3,
+    "pot": 2
+  },
+  {
+    "mux": 3,
+    "pot": 3
+  },
+  {
+    "mux": 4,
+    "pot": 2
+  },
+  {
+    "mux": 4,
+    "pot": 3
+  },
+  {
+    "mux": 5,
+    "pot": 2
+  },
+  {
+    "mux": 5,
+    "pot": 3
+  },
+  {
+    "mux": 6,
+    "pot": 2
+  },
+  {
+    "mux": 6,
+    "pot": 3
+  },
+  {
+    "mux": 7,
+    "pot": 0
+  },
+  {
+    "mux": 7,
+    "pot": 1
+  },
+  {
+    "mux": 7,
+    "pot": 2
+  },
+  {
+    "mux": 7,
+    "pot": 3
+  },
+  {
+    "mux": 7,
+    "pot": 8
+  },
+  {
+    "mux": 7,
+    "pot": 9
+  }
+];

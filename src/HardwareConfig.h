@@ -276,7 +276,7 @@ extern int    kAllNamedPotsCount;
 // Debug logging exclusion list — runtime array.
 // ---------------------------------------------------------------------------
 
-constexpr int kIgnoredPotsMax = 16;
+constexpr int kIgnoredPotsMax = 32;
 extern PotRef kIgnoredPots[kIgnoredPotsMax];
 extern int    kIgnoredPotsCount;
 

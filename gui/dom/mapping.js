@@ -886,10 +886,10 @@ export function renderIgnoredPotsTable() {
 
     const list = ensureIgnoredPotsList();
     const countLabel = document.getElementById('ign-count-label');
-    if (countLabel) countLabel.textContent = `${list.length} / 16 ignored`;
+    if (countLabel) countLabel.textContent = `${list.length} / 32 ignored`;
 
     const btnAdd = document.getElementById('btn-add-ignored');
-    if (btnAdd) btnAdd.disabled = list.length >= 16;
+    if (btnAdd) btnAdd.disabled = list.length >= 32;
 
     if (list.length === 0) {
         tbody.innerHTML = '<tr><td colspan="4" class="loading-cell">No ignored pots configured. Click "+ Add Ignored Pot" to exclude a channel.</td></tr>';
@@ -940,7 +940,7 @@ export function renderIgnoredPotsTable() {
 /** Adds a new row to the ignored pots list. */
 export function addIgnoredPotRow(mux, pot) {
     const list = ensureIgnoredPotsList();
-    if (list.length >= 16) return;
+    if (list.length >= 32) return;
 
     let m = (mux !== undefined) ? mux : 3;
     let p = (pot !== undefined) ? pot : 0;

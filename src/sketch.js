@@ -1400,19 +1400,19 @@ border-radius:6px;background:transparent;
       },
       "vuSub": {
         "channel": 4,
-        "gain": 2
+        "gain": 0
       },
       "vuKick": {
         "channel": 5,
-        "gain": 3
+        "gain": 0
       },
       "vuMid": {
         "channel": 2,
-        "gain": 4
+        "gain": 0
       },
       "vuTop": {
         "channel": 3,
-        "gain": 5
+        "gain": 0
       }
     },
     "in": {
@@ -1470,7 +1470,88 @@ border-radius:6px;background:transparent;
       }
     }
   };
-  var IGNORED_POTS_DEFAULT = [];
+  var IGNORED_POTS_DEFAULT = [
+    {
+      "mux": 0,
+      "pot": 3
+    },
+    {
+      "mux": 0,
+      "pot": 4
+    },
+    {
+      "mux": 1,
+      "pot": 2
+    },
+    {
+      "mux": 1,
+      "pot": 5
+    },
+    {
+      "mux": 2,
+      "pot": 2
+    },
+    {
+      "mux": 2,
+      "pot": 3
+    },
+    {
+      "mux": 3,
+      "pot": 2
+    },
+    {
+      "mux": 3,
+      "pot": 3
+    },
+    {
+      "mux": 4,
+      "pot": 2
+    },
+    {
+      "mux": 4,
+      "pot": 3
+    },
+    {
+      "mux": 5,
+      "pot": 2
+    },
+    {
+      "mux": 5,
+      "pot": 3
+    },
+    {
+      "mux": 6,
+      "pot": 2
+    },
+    {
+      "mux": 6,
+      "pot": 3
+    },
+    {
+      "mux": 7,
+      "pot": 0
+    },
+    {
+      "mux": 7,
+      "pot": 1
+    },
+    {
+      "mux": 7,
+      "pot": 2
+    },
+    {
+      "mux": 7,
+      "pot": 3
+    },
+    {
+      "mux": 7,
+      "pot": 8
+    },
+    {
+      "mux": 7,
+      "pot": 9
+    }
+  ];
 
   // gui/dom/meters.js
   var INPUT_GAIN_MIN = -12;
@@ -2640,9 +2721,9 @@ border-radius:6px;background:transparent;
     if (!tbody) return;
     const list = ensureIgnoredPotsList();
     const countLabel = document.getElementById("ign-count-label");
-    if (countLabel) countLabel.textContent = `${list.length} / 16 ignored`;
+    if (countLabel) countLabel.textContent = `${list.length} / 32 ignored`;
     const btnAdd = document.getElementById("btn-add-ignored");
-    if (btnAdd) btnAdd.disabled = list.length >= 16;
+    if (btnAdd) btnAdd.disabled = list.length >= 32;
     if (list.length === 0) {
       tbody.innerHTML = '<tr><td colspan="4" class="loading-cell">No ignored pots configured. Click "+ Add Ignored Pot" to exclude a channel.</td></tr>';
       return;
@@ -2678,7 +2759,7 @@ border-radius:6px;background:transparent;
   }
   function addIgnoredPotRow(mux, pot) {
     const list = ensureIgnoredPotsList();
-    if (list.length >= 16) return;
+    if (list.length >= 32) return;
     let m = mux !== void 0 ? mux : 3;
     let p = pot !== void 0 ? pot : 0;
     if (mux === void 0 && pot === void 0) {

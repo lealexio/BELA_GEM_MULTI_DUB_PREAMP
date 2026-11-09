@@ -346,7 +346,7 @@ constexpr int kGuiStaticBufSendDivisor = 40;
 ///         [14-15] fx returns | [16-19] AUX channelL | [20-23] AUX micMode
 ///         [24-27] AUX hpfHz | [28-31] AUX channelR | [32] ignoredPotsCount | [33+] ignored pairs
 constexpr int kGuiConfigMetaHeaderFloats = 33;
-constexpr int kGuiConfigMetaSize         = kGuiConfigMetaHeaderFloats + 32; // 16 ignored pairs max
+constexpr int kGuiConfigMetaSize         = kGuiConfigMetaHeaderFloats + 64; // 32 ignored pairs max
 
 /// Raw MUX grid for GUI buffer 7: kNumMux × kPotsPerMux (must match HardwareConfig.h).
 constexpr int kGuiMuxRawBufSize = 80;
