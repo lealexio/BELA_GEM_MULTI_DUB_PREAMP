@@ -16,38 +16,38 @@
     "out": {
       "master": {
         "channels": [
-          2,
-          3
+          0,
+          1
         ],
         "gain": 0
       },
       "fx1Send": {
         "channels": [
-          0
+          8
         ],
         "gain": 0
       },
       "fx2Send": {
         "channels": [
-          1
+          9
         ],
         "gain": 0
       },
       "vuSub": {
-        "channel": 9,
-        "gain": 0
+        "channel": 4,
+        "gain": 2
       },
       "vuKick": {
-        "channel": 8,
-        "gain": 0
+        "channel": 5,
+        "gain": 3
       },
       "vuMid": {
-        "channel": 7,
-        "gain": 0
+        "channel": 2,
+        "gain": 4
       },
       "vuTop": {
-        "channel": 6,
-        "gain": 0
+        "channel": 3,
+        "gain": 5
       }
     },
     "in": {
@@ -65,43 +65,43 @@
         ],
         "mic": false,
         "hpf": 0,
-        "gain": -3
+        "gain": 0
       },
       "aux1": {
         "channels": [
-          2,
-          3
+          9,
+          8
         ],
         "mic": false,
         "hpf": 0,
-        "gain": -3
+        "gain": 0
       },
       "aux2": {
         "channels": [
-          4,
-          5
+          7,
+          6
         ],
         "mic": false,
         "hpf": 0,
-        "gain": -3
+        "gain": 0
       },
       "aux3": {
         "channels": [
-          6,
-          7
+          5,
+          4
         ],
         "mic": false,
         "hpf": 0,
-        "gain": -3
+        "gain": 0
       },
       "aux4": {
         "channels": [
-          8,
-          9
+          3,
+          2
         ],
         "mic": false,
         "hpf": 0,
-        "gain": -3
+        "gain": 0
       }
     }
   },
@@ -355,7 +355,7 @@
       "name": "MASTER_LPF_FREQ",
       "mux": 4,
       "pot": 7,
-      "reversed": true,
+      "reversed": false,
       "centered": false
     },
     {
@@ -537,7 +537,7 @@
     {
       "name": "KILL_KICK",
       "pin": 0,
-      "reversed": false,
+      "reversed": true,
       "port": "B"
     },
     {
@@ -549,32 +549,32 @@
     {
       "name": "KILL_TOP",
       "pin": 1,
-      "reversed": false,
+      "reversed": true,
       "port": "A"
     },
     {
       "name": "FX_FILTER_MIDS",
-      "pin": 5,
+      "pin": 4,
       "reversed": false,
-      "port": "A"
+      "port": "B"
     },
     {
       "name": "FX_FILTER_TOPS",
-      "pin": 6,
+      "pin": 2,
       "reversed": false,
       "port": "A"
     },
     {
       "name": "FX2_FILTER_TOPS",
-      "pin": 4,
+      "pin": 3,
       "reversed": false,
       "port": "A"
     },
     {
       "name": "FX2_FILTER_MIDS",
-      "pin": 7,
+      "pin": 3,
       "reversed": false,
-      "port": "A"
+      "port": "B"
     },
     {
       "name": "SIREN_TRIGGER",
