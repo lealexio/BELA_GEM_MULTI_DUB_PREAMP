@@ -3,7 +3,7 @@
  */
 
 /** Tab indices — must match shell.js tab bar order. */
-export const TAB_LIVE    = 0;
+export const TAB_LIVE = 0;
 export const TAB_MAPPING = 1;
 
 /**
@@ -11,13 +11,13 @@ export const TAB_MAPPING = 1;
  * `pair` tiles share the top 2-column grid when both are enabled.
  */
 export const LIVE_TILES = [
-    { id: 'siren',    label: 'Siren',         pair: true,  defaultOn: true  },
-    { id: 'mic',      label: 'Mic inputs',    pair: true,  defaultOn: true  },
-    { id: 'sampler',  label: 'Sampler',       pair: false, defaultOn: true  },
-    { id: 'meters',   label: 'VU meters',     pair: false, defaultOn: true  },
-    { id: 'switches', label: 'Switches',      pair: false, defaultOn: false },
-    { id: 'console',  label: 'Console',       pair: false, defaultOn: false },
-    { id: 'masterEq', label: 'Master EQ',     pair: false, defaultOn: false },
+    { id: 'siren', label: 'Siren', pair: true, defaultOn: true },
+    { id: 'mic', label: 'Mic inputs', pair: true, defaultOn: true },
+    { id: 'sampler', label: 'Sampler', pair: false, defaultOn: true },
+    { id: 'meters', label: 'VU meters', pair: false, defaultOn: true },
+    { id: 'switches', label: 'Switches', pair: false, defaultOn: false },
+    { id: 'console', label: 'Console', pair: false, defaultOn: false },
+    { id: 'masterEq', label: 'Master EQ', pair: false, defaultOn: false },
 ];
 
 /** Must match kMaxSamples / kMaxSampleNameLen in SoftwareConfig.h. */
@@ -35,11 +35,11 @@ export const DETECT_POT_MIN_DELTA = 0.25;
 
 /** MUX grid layout — must match kNumMux × kPotsPerMux in HardwareConfig.h. */
 export const MUX_POTS_PER_MUX = 10;
-export const MUX_RAW_SIZE     = 80;
+export const MUX_RAW_SIZE = 80;
 
 /** Console pot change thresholds — detailed catches ADC jitter, normal filters it. */
 export const CONSOLE_POT_MIN_DELTA_DETAILED = 0.003;
-export const CONSOLE_POT_MIN_DELTA_NORMAL   = 0.02;
+export const CONSOLE_POT_MIN_DELTA_NORMAL = 0.025;
 
 /** No fresh Bela data for this long → badge OFFLINE. */
 export const BELA_OFFLINE_TIMEOUT_MS = 1000;
@@ -48,52 +48,52 @@ export const BELA_LAG_THRESHOLD_MS = 180;
 
 /** CPU temp badge colour thresholds (°C) — display only. */
 export const CPU_TEMP_WARM_C = 65;
-export const CPU_TEMP_HOT_C  = 75;
+export const CPU_TEMP_HOT_C = 75;
 
 export const SIREN_PRESETS = ['Wail', 'Whoop', 'Police', 'Scanner', 'Riotgun', 'Laser'];
 
 /** Pot names in kAllNamedPots order (60 entries). */
 export const POT_NAMES = [
     // AUX1 — idx 0-5
-    'AUX1_INPUT_GAIN','AUX1_EQ_MID','AUX1_EQ_LOW','AUX1_EQ_HIGH','AUX1_FX_SEND','AUX1_FX2_SEND',
+    'AUX1_INPUT_GAIN', 'AUX1_EQ_MID', 'AUX1_EQ_LOW', 'AUX1_EQ_HIGH', 'AUX1_FX_SEND', 'AUX1_FX2_SEND',
     // AUX2 — idx 6-11
-    'AUX2_INPUT_GAIN','AUX2_EQ_MID','AUX2_EQ_HIGH','AUX2_EQ_LOW','AUX2_FX_SEND','AUX2_FX2_SEND',
+    'AUX2_INPUT_GAIN', 'AUX2_EQ_MID', 'AUX2_EQ_HIGH', 'AUX2_EQ_LOW', 'AUX2_FX_SEND', 'AUX2_FX2_SEND',
     // AUX3 — idx 12-17
-    'AUX3_INPUT_GAIN','AUX3_EQ_LOW','AUX3_EQ_MID','AUX3_EQ_HIGH','AUX3_FX_SEND','AUX3_FX2_SEND',
+    'AUX3_INPUT_GAIN', 'AUX3_EQ_LOW', 'AUX3_EQ_MID', 'AUX3_EQ_HIGH', 'AUX3_FX_SEND', 'AUX3_FX2_SEND',
     // AUX4 — idx 18-23
-    'AUX4_INPUT_GAIN','AUX4_EQ_LOW','AUX4_EQ_MID','AUX4_EQ_HIGH','AUX4_FX_SEND','AUX4_FX2_SEND',
+    'AUX4_INPUT_GAIN', 'AUX4_EQ_LOW', 'AUX4_EQ_MID', 'AUX4_EQ_HIGH', 'AUX4_FX_SEND', 'AUX4_FX2_SEND',
     // Master — idx 24
     'MASTER_GAIN',
     // Parametric EQ — idx 25-32
-    'MASTER_EQ_SUB_FREQ','MASTER_EQ_SUB_GAIN',
-    'MASTER_EQ_KICK_FREQ','MASTER_EQ_KICK_GAIN',
-    'MASTER_EQ_MID_FREQ','MASTER_EQ_MID_GAIN',
-    'MASTER_EQ_TOP_FREQ','MASTER_EQ_TOP_GAIN',
+    'MASTER_EQ_SUB_FREQ', 'MASTER_EQ_SUB_GAIN',
+    'MASTER_EQ_KICK_FREQ', 'MASTER_EQ_KICK_GAIN',
+    'MASTER_EQ_MID_FREQ', 'MASTER_EQ_MID_GAIN',
+    'MASTER_EQ_TOP_FREQ', 'MASTER_EQ_TOP_GAIN',
     // Filters — idx 33-36
-    'MASTER_HPF_FREQ','MASTER_HPF_RES','MASTER_LPF_FREQ','MASTER_LPF_RES',
+    'MASTER_HPF_FREQ', 'MASTER_HPF_RES', 'MASTER_LPF_FREQ', 'MASTER_LPF_RES',
     // Band Trim — idx 37-40
-    'BTRIM_SUB','BTRIM_KICK','BTRIM_MID','BTRIM_TOP',
+    'BTRIM_SUB', 'BTRIM_KICK', 'BTRIM_MID', 'BTRIM_TOP',
     // Siren — idx 41-45
-    'SIREN_TYPE','SIREN_MOD','SIREN_GAIN','SIREN_FX_SEND','SIREN_FX2_SEND',
+    'SIREN_TYPE', 'SIREN_MOD', 'SIREN_GAIN', 'SIREN_FX_SEND', 'SIREN_FX2_SEND',
     // Graphic EQ 12 bands — idx 46-57
-    'GEQ_40HZ','GEQ_60HZ','GEQ_80HZ','GEQ_100HZ','GEQ_125HZ','GEQ_250HZ',
-    'GEQ_500HZ','GEQ_1KHZ','GEQ_2KHZ','GEQ_4KHZ','GEQ_8KHZ','GEQ_16KHZ',
+    'GEQ_40HZ', 'GEQ_60HZ', 'GEQ_80HZ', 'GEQ_100HZ', 'GEQ_125HZ', 'GEQ_250HZ',
+    'GEQ_500HZ', 'GEQ_1KHZ', 'GEQ_2KHZ', 'GEQ_4KHZ', 'GEQ_8KHZ', 'GEQ_16KHZ',
     // FX return gains — idx 58-59
-    'FX1_RETURN_GAIN','FX2_RETURN_GAIN'
+    'FX1_RETURN_GAIN', 'FX2_RETURN_GAIN'
 ]; // 60 entries
 
 /** Switch names matching kGuiSwitchRefs[] order in render.cpp. */
 export const SWITCH_NAMES = [
-    'KILL_SUB','KILL_KICK','KILL_MID','KILL_TOP',
-    'FX_FILTER_MIDS','FX_FILTER_TOPS','FX2_FILTER_TOPS','FX2_FILTER_MIDS',
+    'KILL_SUB', 'KILL_KICK', 'KILL_MID', 'KILL_TOP',
+    'FX_FILTER_MIDS', 'FX_FILTER_TOPS', 'FX2_FILTER_TOPS', 'FX2_FILTER_MIDS',
     'SIREN_TRIGGER'
 ]; // 9 entries
 
 /** Switch groups for the Live tab UI (indices match SWITCH_NAMES). */
 export const SWITCH_GROUPS = [
-    { label: 'Band kill',      type: 'kill',  indices: [0, 1, 2, 3] },
-    { label: 'FX send filter', type: 'fx',    indices: [4, 5, 6, 7] },
-    { label: 'Siren',          type: 'siren', indices: [8]          }
+    { label: 'Band kill', type: 'kill', indices: [0, 1, 2, 3] },
+    { label: 'FX send filter', type: 'fx', indices: [4, 5, 6, 7] },
+    { label: 'Siren', type: 'siren', indices: [8] }
 ];
 
 /** I2C bus string — must match kI2cBus in HardwareConfig.h. */
@@ -110,7 +110,8 @@ export const CONFIG_META = {
     MIC_AUX1: 20, MIC_AUX2: 21, MIC_AUX3: 22, MIC_AUX4: 23,
     HPF_AUX1: 24, HPF_AUX2: 25, HPF_AUX3: 26, HPF_AUX4: 27,
     AUX1_R: 28, AUX2_R: 29, AUX3_R: 30, AUX4_R: 31,
-    IGNORED_COUNT: 32, IGNORED_BASE: 33
+    MASTER_STEREO: 32,
+    IGNORED_COUNT: 33, IGNORED_BASE: 34
 };
 
 /** Mic-mode HPF Hz range — must match kMicHpfFMin/FMax in SoftwareConfig.h. */
@@ -162,57 +163,57 @@ export const MASTER_EQ_CONFIG = {
 };
 
 /** Log-spaced frequency (Hz) for one curve sample index. */
-export const masterEqFreqs = (function() {
+export const masterEqFreqs = (function () {
     const n = MASTER_EQ_CONFIG.CURVE_POINTS;
     const fMin = MASTER_EQ_CONFIG.FREQ_MIN;
     const fMax = MASTER_EQ_CONFIG.FREQ_MAX;
     const logMin = Math.log10(fMin);
     const logMax = Math.log10(fMax);
     const out = new Float32Array(n);
-    for(let i = 0; i < n; i++)
+    for (let i = 0; i < n; i++)
         out[i] = Math.pow(10, logMin + (logMax - logMin) * i / (n - 1));
     return out;
 })();
 
 /** X-axis tick labels for the master EQ plot (Hz). */
 export const MASTER_EQ_FREQ_TICKS = [20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000];
-export const METER_ATTACK     = 0.55;  // fast rise (~60 fps LED ballistic)
-export const METER_RELEASE    = 0.12;  // slow fall
-export const PEAK_HOLD_MS     = 750;
-export const PEAK_DECAY       = 0.94;
+export const METER_ATTACK = 0.55;  // fast rise (~60 fps LED ballistic)
+export const METER_RELEASE = 0.12;  // slow fall
+export const PEAK_HOLD_MS = 750;
+export const PEAK_DECAY = 0.94;
 /** Clip detection — must match kClipThreshold in SoftwareConfig.h. */
-export const CLIP_THRESHOLD   = 0.99;
-export const CLIP_HOLD_MS     = 1500;
+export const CLIP_THRESHOLD = 0.99;
+export const CLIP_HOLD_MS = 1500;
 /** Canvas VU meter layout — matches vumeter.js style. */
-export const VU_BOX_COUNT        = 30;
-export const VU_BOX_COUNT_RED    = 4;
+export const VU_BOX_COUNT = 30;
+export const VU_BOX_COUNT_RED = 4;
 export const VU_BOX_COUNT_YELLOW = 6;
 export const VU_BOX_GAP_FRACTION = 0.25;
-export const VU_MAX              = 100;
-export const VU_CANVAS_W         = 300;
-export const VU_CANVAS_H         = 26;
+export const VU_MAX = 100;
+export const VU_CANVAS_W = 300;
+export const VU_CANVAS_H = 26;
 /** dB scale tick labels under each VU bar (-60 floor … 0). */
-export const VU_SCALE_TICKS      = [-60, -40, -20, -6, 0];
-export const MAX_CONSOLE         = 10;
+export const VU_SCALE_TICKS = [-60, -40, -20, -6, 0];
+export const MAX_CONSOLE = 10;
 
 /**
  * Maps routing key names (from config.json) to their fixed index in gAudioPeaks (C++).
  * This table is the JS source of truth — must stay in sync with the index layout in render.cpp.
  */
 export const ROUTING_KEY_TO_BUFFER3 = {
-    aux1:      0,
-    aux2:      1,
-    aux3:      2,
-    aux4:      3,
+    aux1: 0,
+    aux2: 1,
+    aux3: 2,
+    aux4: 3,
     fx1Return: 4,
     fx2Return: 5,
-    master:    6,
-    fx1Send:   7,
-    fx2Send:   8,
-    vuSub:     9,
-    vuKick:    10,
-    vuMid:     11,
-    vuTop:     12,
+    master: 6,
+    fx1Send: 7,
+    fx2Send: 8,
+    vuSub: 9,
+    vuKick: 10,
+    vuMid: 11,
+    vuTop: 12,
 };
 
 /**
@@ -235,8 +236,8 @@ export function buildFullRouting(routing) {
 
     /** Resolves a physical channel from a routing value (number, array, or object). */
     const toPhysical = val => {
-        if(val != null && typeof val === 'object' && !Array.isArray(val)) {
-            if(Array.isArray(val.channels) && val.channels.length)
+        if (val != null && typeof val === 'object' && !Array.isArray(val)) {
+            if (Array.isArray(val.channels) && val.channels.length)
                 return val.channels[0];
             return val.channel;
         }
@@ -245,25 +246,25 @@ export function buildFullRouting(routing) {
 
     /** Reads default codec gain dB from a routing value (0 when absent). */
     const toGain = val => {
-        if(val != null && typeof val === 'object' && !Array.isArray(val)) {
+        if (val != null && typeof val === 'object' && !Array.isArray(val)) {
             const g = Number(val.gain);
             return isNaN(g) ? 0 : g;
         }
         return 0;
     };
 
-    const inEntries  = Object.entries(routing.in  || {});
+    const inEntries = Object.entries(routing.in || {});
     const outEntries = Object.entries(routing.out || {});
 
     const levelGroups = [
         {
-            label:   'INPUTS',
+            label: 'INPUTS',
             indices: inEntries
                 .map(([k]) => ROUTING_KEY_TO_BUFFER3[k])
                 .filter(i => i !== undefined),
         },
         {
-            label:   'OUTPUTS',
+            label: 'OUTPUTS',
             indices: outEntries
                 .map(([k]) => ROUTING_KEY_TO_BUFFER3[k])
                 .filter(i => i !== undefined),
@@ -273,23 +274,23 @@ export function buildFullRouting(routing) {
     const levelLabels = {};
     [...inEntries, ...outEntries].forEach(([key]) => {
         const idx = ROUTING_KEY_TO_BUFFER3[key];
-        if(idx !== undefined) levelLabels[idx] = toLabel(key);
+        if (idx !== undefined) levelLabels[idx] = toLabel(key);
     });
 
     const inputChannels = inEntries.map(([key, val]) => ({
         key,
-        ch:    toPhysical(val),
+        ch: toPhysical(val),
         label: toLabel(key),
-        buf3:  ROUTING_KEY_TO_BUFFER3[key],
-        gain:  toGain(val),
+        buf3: ROUTING_KEY_TO_BUFFER3[key],
+        gain: toGain(val),
     }));
 
     const outputChannels = outEntries.map(([key, val]) => ({
         key,
-        ch:    toPhysical(val),
+        ch: toPhysical(val),
         label: toLabel(key),
-        buf3:  ROUTING_KEY_TO_BUFFER3[key],
-        gain:  toGain(val),
+        buf3: ROUTING_KEY_TO_BUFFER3[key],
+        gain: toGain(val),
     }));
 
     return { levelGroups, levelLabels, inputChannels, outputChannels };

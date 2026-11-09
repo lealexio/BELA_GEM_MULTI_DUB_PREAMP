@@ -100,9 +100,11 @@ VU meter (post-master, par bande) :
 - Dans `config.json` : `"aux1": { "channels": [2, 3], ... }` pour activer le mode stéréo (ou `[N]` / `[N, -1]` pour mono)
 
 **Règles stéréo (sortie master) :**
-- `MASTER_OUTS = [N]` ou `[N, -1]` → mono (1 seul bus MasterFx)
-- `MASTER_OUTS = [L, R]` → stéréo : MASTER_OUTS[0]=L, MASTER_OUTS[1]=R (2 buses MasterFx indépendants)
-- Dans `config.json` : `"master": { "channels": [2, 3], "gain": 0 }` pour activer le stéréo
+- `MASTER_OUTS = [N]` ou `[N, -1]` → mono (1 seule sortie physique)
+- `MASTER_OUTS = [L, R]` avec `stereo: true` → stéréo : MASTER_OUTS[0]=L, MASTER_OUTS[1]=R (2 buses MasterFx indépendants)
+- `MASTER_OUTS = [L, R]` avec `stereo: false` (ou `mono: true`) → mono : MASTER_OUTS[0] et MASTER_OUTS[1] diffusent le signal sommé `0.5 * (outL + outR)`
+- Dans `config.json` : `"master": { "channels": [0, 1], "stereo": true, "gain": 0 }`
+- Bascule en direct sans reboot : bouton STÉRÉO / MONO dans la tuile VU meters (onglet Live) ou case à cocher Stereo dans l'onglet Mapping (WebSocket `Bela.control` : `{ event: 'custom', masterStereo: bool }`)
 
 **Chaque ChannelStrip :**
 ```

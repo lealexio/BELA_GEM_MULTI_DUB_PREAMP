@@ -27,7 +27,7 @@
 // ---------------------------------------------------------------------------
 
 /// Maximum number of MUX chips the firmware can handle (sets array sizes).
-constexpr int kNumMux     = 8;
+constexpr int kNumMux = 8;
 
 /// Number of channels per MUX chip (10 channels: 0..9).
 constexpr int kPotsPerMux = 10;
@@ -46,7 +46,8 @@ extern int kActiveMux;
 /// Voltage scaling factor: Bela ADC reference (4.096 V) ÷ MUX supply (3.3 V).
 extern float kPotScaleRecovery;
 
-/// Raw scaled value that maps to 1.0 (pots rarely reach the exact rail voltage).
+/// Raw scaled value that maps to 1.0 (pots rarely reach the exact rail
+/// voltage).
 extern float kPotMax;
 
 /// Raw scaled values at or below this threshold are clamped to 0.0.
@@ -56,16 +57,19 @@ extern float kPotMin;
 // MCP23017 I2C configuration — runtime (loaded from JSON "i2c")
 // ---------------------------------------------------------------------------
 
-extern const char* kI2cBus;
-extern uint8_t     kMcpAddress;
+extern const char *kI2cBus;
+extern uint8_t kMcpAddress;
 
 // ---------------------------------------------------------------------------
 // Audio routing — runtime (loaded from JSON "routing")
 // ---------------------------------------------------------------------------
 
 constexpr int kMasterOutsMax = 8; ///< Maximum number of master output channels.
-extern int MASTER_OUTS[kMasterOutsMax]; ///< List of Bela output indices the master is written to.
-extern int MASTER_OUTS_COUNT;           ///< Number of active entries in MASTER_OUTS[].
+extern int MASTER_OUTS[kMasterOutsMax]; ///< List of Bela output indices the
+                                        ///< master is written to.
+extern int MASTER_OUTS_COUNT; ///< Number of active entries in MASTER_OUTS[].
+extern bool MASTER_STEREO; ///< true = stereo (L on out 0, R on out 1); false =
+                           ///< mono (L+R on all outs).
 
 extern int FX1_SEND_OUT;
 extern int FX1_RETURN_IN;
@@ -80,10 +84,12 @@ extern int VU_TOP_OUT;
 /// Physical codec channel count (Bela Gem Multi ADC / DAC paths).
 constexpr int kCodecChannels = 10;
 
-/// Default ADC input PGA gains (dB) by physical channel — from routing.in.*.gain.
+/// Default ADC input PGA gains (dB) by physical channel — from
+/// routing.in.*.gain.
 extern float CODEC_INPUT_GAIN_DB[kCodecChannels];
 
-/// Default DAC output levels (dB) by physical channel — from routing.out.*.gain.
+/// Default DAC output levels (dB) by physical channel — from
+/// routing.out.*.gain.
 extern float CODEC_OUTPUT_GAIN_DB[kCodecChannels];
 
 // ---------------------------------------------------------------------------
@@ -91,12 +97,15 @@ extern float CODEC_OUTPUT_GAIN_DB[kCodecChannels];
 // ---------------------------------------------------------------------------
 
 struct ChannelConfig {
-    int   audioIns[2]; ///< Bela audio input indices. [0] = left/mono, [1] = right (-1 = mono: right mirrors left).
-    bool  micMode;     ///< true = bypass master ParamEq / HPF-LPF / kills.
-    float hpfHz;       ///< Mic-path HPF cutoff (Hz); 0 = off. Applied only when micMode.
+  int audioIns[2]; ///< Bela audio input indices. [0] = left/mono, [1] = right
+                   ///< (-1 = mono: right mirrors left).
+  bool micMode;    ///< true = bypass master ParamEq / HPF-LPF / kills.
+  float
+      hpfHz; ///< Mic-path HPF cutoff (Hz); 0 = off. Applied only when micMode.
 
-    /// Returns true when this channel is configured as stereo (audioIns[1] != -1).
-    bool isStereo() const { return audioIns[1] != -1; }
+  /// Returns true when this channel is configured as stereo (audioIns[1] !=
+  /// -1).
+  bool isStereo() const { return audioIns[1] != -1; }
 };
 
 extern ChannelConfig AUX1_CONFIG;
@@ -115,9 +124,9 @@ extern ChannelConfig AUX4_CONFIG;
  *   portB    : false = port A (default), true = port B
  */
 struct SwitchRef {
-    int  pin;
-    bool reversed = false;
-    bool portB    = false;
+  int pin;
+  bool reversed = false;
+  bool portB = false;
 };
 
 extern SwitchRef KILL_SUB;
@@ -144,10 +153,10 @@ extern SwitchRef SIREN_TRIGGER;
  *   enabled   : true only when actively configured in config.json
  */
 struct ClipLedRef {
-    int  pin       = -1;
-    bool portB     = false;
-    bool activeLow = false;
-    bool enabled   = false;
+  int pin = -1;
+  bool portB = false;
+  bool activeLow = false;
+  bool enabled = false;
 };
 
 extern ClipLedRef CLIP_LED_MASTER;
@@ -174,11 +183,11 @@ extern ClipLedRef CLIP_LED_AUX4;
  *              when this flag is set.
  */
 struct PotRef {
-    int         mux;
-    int         pot;
-    bool        reversed = false;
-    const char* name     = nullptr;
-    bool        centered = false;
+  int mux;
+  int pot;
+  bool reversed = false;
+  const char *name = nullptr;
+  bool centered = false;
 };
 
 // --- MUX 0 ---
@@ -268,9 +277,10 @@ extern PotRef MASTER_LPF_FREQ;
 // Defined in HardwareConfigData.cpp; size tracked by kAllNamedPotsCount.
 // ---------------------------------------------------------------------------
 
-constexpr int kAllNamedPotsMax = 80; ///< Upper bound — increase if more pots are added.
+constexpr int kAllNamedPotsMax =
+    80; ///< Upper bound — increase if more pots are added.
 extern PotRef kAllNamedPots[kAllNamedPotsMax];
-extern int    kAllNamedPotsCount;
+extern int kAllNamedPotsCount;
 
 // ---------------------------------------------------------------------------
 // Debug logging exclusion list — runtime array.
@@ -278,19 +288,19 @@ extern int    kAllNamedPotsCount;
 
 constexpr int kIgnoredPotsMax = 32;
 extern PotRef kIgnoredPots[kIgnoredPotsMax];
-extern int    kIgnoredPotsCount;
+extern int kIgnoredPotsCount;
 
 // ---------------------------------------------------------------------------
 // Pot name lookup — no switch/case needed, name lives in the PotRef itself.
 // ---------------------------------------------------------------------------
 
 /// Returns the name of the pot at (mux, pot), or nullptr if unassigned.
-inline const char* getPotName(int mux, int pot) {
-    for(int i = 0; i < kAllNamedPotsCount; ++i)
-        if(kAllNamedPots[i].mux == mux && kAllNamedPots[i].pot == pot)
-            return kAllNamedPots[i].name;
-    return nullptr;
+inline const char *getPotName(int mux, int pot) {
+  for (int i = 0; i < kAllNamedPotsCount; ++i)
+    if (kAllNamedPots[i].mux == mux && kAllNamedPots[i].pot == pot)
+      return kAllNamedPots[i].name;
+  return nullptr;
 }
 
 /// Returns the name stored in the PotRef — O(1), no lookup.
-inline const char* getPotName(const PotRef& ref) { return ref.name; }
+inline const char *getPotName(const PotRef &ref) { return ref.name; }

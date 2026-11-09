@@ -117,6 +117,7 @@ function setConsoleFilterMode(mode) {
 }
 
 const CONSOLE_ACTIVE_HOLD_MS = 1400;
+const CONSOLE_GLITCH_REBOUND_MAX_MS = 600;
 
 /** Formats a console value according to its type (pot = 0.000, sw = ON/OFF). */
 function formatVal(v, type) {
@@ -132,6 +133,28 @@ function findRecentChange(name) {
     const list = getContext().recentChanges;
     if (!list) return null;
     return list.find(e => e.name === name) || null;
+}
+
+/** Purges a transient glitch entry from recentChanges and removes its row from the DOM. */
+function purgeGlitchEntry(name) {
+    if (!getContext().recentChanges) return;
+    const idx = getContext().recentChanges.findIndex(e => e.name === name);
+    if (idx === -1) return;
+    getContext().recentChanges.splice(idx, 1);
+
+    const lists = (getContext().consoleLists || []).filter(l => l && l.isConnected);
+    lists.forEach(list => {
+        for (const child of list.children) {
+            if (child.dataset.key === name) {
+                list.removeChild(child);
+                break;
+            }
+        }
+        if (list.children.length < MAX_CONSOLE) {
+            const slot = list.children.length;
+            list.appendChild(buildConsoleRow(null, slot));
+        }
+    });
 }
 
 /** Builds one console row — filled from entry or empty placeholder slot. */
@@ -172,9 +195,9 @@ function buildConsoleRow(entry, slot) {
         `<span class="cname" title="${cname}">${cname}</span>` +
         `<span class="ctrack"><span class="${fillCls}"${fillStyle}></span></span>` +
         `<span class="cval-group">` +
-            `<span class="coldval">${coldval}</span>` +
-            `<span class="${dirCls}">${dirHtml}</span>` +
-            `<span class="cval">${cval}</span>` +
+        `<span class="coldval">${coldval}</span>` +
+        `<span class="${dirCls}">${dirHtml}</span>` +
+        `<span class="cval">${cval}</span>` +
         `</span>`;
 
     if (entry && entry.ts && (Date.now() - entry.ts < CONSOLE_ACTIVE_HOLD_MS)) {
@@ -363,6 +386,7 @@ export function updateConsole() {
     const now = Date.now();
     const isNormal = getContext().consoleFilterMode === 'normal';
     const potDelta = isNormal ? CONSOLE_POT_MIN_DELTA_NORMAL : CONSOLE_POT_MIN_DELTA_DETAILED;
+    const unmappedPotDelta = isNormal ? 0.035 : CONSOLE_POT_MIN_DELTA_DETAILED;
     const potPrev = isNormal ? getContext().prevPotValuesNormal : getContext().prevPotValues;
 
     const changes = [];
@@ -389,11 +413,34 @@ export function updateConsole() {
             const name = POT_NAMES[i];
             const existing = findRecentChange(name);
             const inActiveSession = existing && existing.ts && (now - existing.ts < CONSOLE_ACTIVE_HOLD_MS);
-            const initialValue = (inActiveSession && existing.initialValue !== undefined)
-                ? existing.initialValue
-                : (existing ? existing.value : prevV);
 
-            const dir = (v > prevV + 0.0005) ? 'up' : ((v < prevV - 0.0005) ? 'down' : 'same');
+            let dir = (v > prevV + 0.0005) ? 'up' : ((v < prevV - 0.0005) ? 'down' : 'same');
+            let initialValue;
+
+            if (inActiveSession && existing.initialValue !== undefined) {
+                // If turning direction reversed (e.g. was climbing, now turning down from peak)
+                if (existing.direction && dir !== 'same' && dir !== existing.direction) {
+                    initialValue = existing.value;
+                } else {
+                    initialValue = existing.initialValue;
+                }
+            } else {
+                initialValue = prevV;
+            }
+
+            // Anti-glitch: if value returns to starting point (within 0.001 or same 3-dec format), do not display
+            if (Math.abs(v - initialValue) <= 0.001 || formatVal(v, 'pot') === formatVal(initialValue, 'pot')) {
+                // If it jumped and returned very quickly (< 600ms): purge the transient entry!
+                if (existing && existing.ts && (now - existing.ts < CONSOLE_GLITCH_REBOUND_MAX_MS)) {
+                    purgeGlitchEntry(name);
+                }
+                continue;
+            }
+
+            if (dir === 'same' && existing && existing.direction) {
+                dir = existing.direction;
+            }
+
             changes.push({
                 name,
                 value: v,
@@ -438,16 +485,36 @@ export function updateConsole() {
                 const idx = muxRawIndex(m, p);
                 const v = getContext().muxRawValues[idx];
                 const prevV = muxPrev[idx];
-                if (Math.abs(v - prevV) >= potDelta) {
+                if (Math.abs(v - prevV) >= unmappedPotDelta) {
                     muxPrev[idx] = v;
                     const name = formatUnmappedPotLabel(m, p);
                     const existing = findRecentChange(name);
                     const inActiveSession = existing && existing.ts && (now - existing.ts < CONSOLE_ACTIVE_HOLD_MS);
-                    const initialValue = (inActiveSession && existing.initialValue !== undefined)
-                        ? existing.initialValue
-                        : (existing ? existing.value : prevV);
 
-                    const dir = (v > prevV + 0.0005) ? 'up' : ((v < prevV - 0.0005) ? 'down' : 'same');
+                    let dir = (v > prevV + 0.0005) ? 'up' : ((v < prevV - 0.0005) ? 'down' : 'same');
+                    let initialValue;
+
+                    if (inActiveSession && existing.initialValue !== undefined) {
+                        if (existing.direction && dir !== 'same' && dir !== existing.direction) {
+                            initialValue = existing.value;
+                        } else {
+                            initialValue = existing.initialValue;
+                        }
+                    } else {
+                        initialValue = prevV;
+                    }
+
+                    if (Math.abs(v - initialValue) <= 0.001 || formatVal(v, 'pot') === formatVal(initialValue, 'pot')) {
+                        if (existing && existing.ts && (now - existing.ts < CONSOLE_GLITCH_REBOUND_MAX_MS)) {
+                            purgeGlitchEntry(name);
+                        }
+                        continue;
+                    }
+
+                    if (dir === 'same' && existing && existing.direction) {
+                        dir = existing.direction;
+                    }
+
                     changes.push({
                         name,
                         value: v,

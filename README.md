@@ -252,7 +252,7 @@ Default ADC / DAC levels applied once at Bela boot (same APIs as the Meters UI).
     "aux1": { "channel": 0, "mic": false, "hpf": 0, "gain": 0 }
   },
   "out": {
-    "master":  { "channels": [1], "gain": 0 },
+    "master":  { "channels": [0, 1], "stereo": true, "gain": 0 },
     "fx1Send": { "channel": 2, "gain": 0 }
   }
 }
@@ -261,9 +261,12 @@ Default ADC / DAC levels applied once at Bela boot (same APIs as the Meters UI).
 | Direction | Field | Range | API |
 |---|---|---|---|
 | Inputs (ADC) | `gain` (dB) | −12 … +10 | `Bela_setAudioInputGain` |
+| Inputs (ADC) | `mic` | boolean | Mic mode (bypasses ParamEQ/filters/kills) |
+| Inputs (ADC) | `hpf` (Hz) | 0, 20 … 300 | High-pass cutoff on mic dry path |
 | Outputs (DAC) | `gain` (dB) | −63 … 0 | `Bela_setHpLevel` |
+| Outputs (DAC) | `stereo` (master) | boolean | `true` = Stereo (L on out 0, R on out 1), `false` = Mono (L+R on both outs) |
 
-Missing `gain` → **0 dB**. Legacy ints / arrays for `routing.out` still work (gain defaults to 0).
+Missing `gain` → **0 dB**. Legacy ints / arrays for `routing.out` still work (gain defaults to 0). Toggleable live in the UI (Live VU meters tile or Mapping tab) without rebooting.
 
 ---
 

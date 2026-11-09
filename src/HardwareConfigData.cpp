@@ -34,6 +34,7 @@ uint8_t     kMcpAddress = 0x20;
 
 int MASTER_OUTS[kMasterOutsMax] = {2, 3};
 int MASTER_OUTS_COUNT           = 2;
+bool MASTER_STEREO              = true;
 
 int FX1_SEND_OUT  = 0;
 int FX1_RETURN_IN = 0;

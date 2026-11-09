@@ -61,6 +61,19 @@ function routingOutChannel(val) {
 }
 
 /**
+ * Reads the stereo flag for routing.out.master (default true).
+ * @param {*} val
+ * @returns {boolean}
+ */
+function routingOutStereo(val) {
+    if (val != null && typeof val === 'object' && !Array.isArray(val)) {
+        if (val.stereo !== undefined) return !!val.stereo;
+        if (val.mono !== undefined) return !val.mono;
+    }
+    return true;
+}
+
+/**
  * Reads the mic flag from a routing.in value (legacy number → false).
  * @param {*} val
  * @returns {boolean}
@@ -199,6 +212,7 @@ function buildRoutingSection() {
     const hint = el('div', { className: 'routing-hint' });
     hint.textContent =
         'Physical Bela channel numbers (0–9). Master may list one or two outputs, e.g. 0 or 0,1. ' +
+        'Stereo: checked = stereo (L on 1st out, R on 2nd); unchecked = mono (L+R on both outs). ' +
         'Gain (dB): codec default at boot (ADC −12…10, DAC −63…0). ' +
         'Mic: bypass master ParamEQ / HPF-LPF / kills (Graphic EQ + Band Trim still apply). ' +
         'HPF (Hz): mic dry high-pass (0 = off, 20–300); DSP only when Mic is on.';
@@ -243,23 +257,24 @@ function buildRoutingTable(heading, dir, keys, values, withMic) {
         : `DAC gain at boot (${OUTPUT_GAIN_MIN}…${OUTPUT_GAIN_MAX} dB)`;
 
     const tbl = el('table', { className: 'mtable routing-table', id: `routing-${dir}-table` });
-    const micCols = withMic
+    const isOut = (dir === 'out');
+    const extraCols = withMic
         ? '<col class="col-check"><col class="col-num">'
-        : '';
-    const micHead = withMic
+        : (isOut ? '<col class="col-check">' : '');
+    const extraHead = withMic
         ? '<th class="col-check" title="Bypass ParamEQ / HPF-LPF / kills">Mic</th>' +
         '<th title="Mic dry HPF cutoff in Hz (0 = off)">HPF (Hz)</th>'
-        : '';
+        : (isOut ? '<th class="col-check" title="Master output mode: Stereo (checked) or Mono L+R (unchecked)">Stereo</th>' : '');
     tbl.innerHTML = `
         <colgroup>
             <col class="col-name">
             <col class="col-num">
             <col class="col-num">
-            ${micCols}
+            ${extraCols}
         </colgroup>
         <thead><tr>
             <th>Signal</th><th>Channel</th>
-            <th title="${gainTitle}">Gain (dB)</th>${micHead}
+            <th title="${gainTitle}">Gain (dB)</th>${extraHead}
         </tr></thead>
         <tbody id="routing-${dir}-tbody"></tbody>`;
     wrap.appendChild(tbl);
@@ -296,10 +311,30 @@ function buildRoutingTable(heading, dir, keys, values, withMic) {
                 `<td><input type="number" class="ri-hpf" data-dir="${dir}" data-key="${key}" ` +
                 `value="${hpfVal}" min="${MIC_HPF_HZ_MIN}" max="${MIC_HPF_HZ_MAX}" step="1" ` +
                 `title="Mic HPF Hz (0 = off)"></td>`;
+        } else if (isOut) {
+            if (key === 'master') {
+                const stereoChecked = routingOutStereo(raw) ? 'checked' : '';
+                cells +=
+                    `<td class="col-check"><input type="checkbox" class="ri-stereo" ` +
+                    `data-dir="${dir}" data-key="${key}" ${stereoChecked} ` +
+                    `title="Master mode: Stereo (checked) or Mono L+R (unchecked)"></td>`;
+            } else {
+                cells += `<td class="col-check" style="color:#666;text-align:center">—</td>`;
+            }
         }
         tr.innerHTML = cells;
         tbody.appendChild(tr);
     });
+
+    if (isOut) {
+        tbody.querySelectorAll('.ri-stereo').forEach(cb => {
+            cb.addEventListener('change', () => {
+                if (typeof window.Bela !== 'undefined' && window.Bela.control) {
+                    window.Bela.control.send({ event: 'custom', masterStereo: !!cb.checked });
+                }
+            });
+        });
+    }
 
     return wrap;
 }
@@ -400,6 +435,11 @@ export function fillRoutingFromConfigMeta() {
         cb.checked = !!micFlags[key];
     });
 
+    const isMasterStereo = (meta.length > M.MASTER_STEREO) ? (meta[M.MASTER_STEREO] > 0.5) : true;
+    document.querySelectorAll('.ri-stereo').forEach(cb => {
+        cb.checked = isMasterStereo;
+    });
+
     document.querySelectorAll('.ri-hpf').forEach(inp => {
         const key = inp.dataset.key;
         const hz = hpfHz[key];
@@ -422,6 +462,11 @@ function collectRoutingFromForm() {
     const readMic = (key) => {
         const cb = document.querySelector(`.ri-mic[data-key="${key}"]`);
         return cb ? !!cb.checked : false;
+    };
+
+    const readMasterStereo = () => {
+        const cb = document.querySelector(`.ri-stereo[data-key="master"]`);
+        return cb ? !!cb.checked : true;
     };
 
     const readHpf = (key) => {
@@ -448,7 +493,9 @@ function collectRoutingFromForm() {
         const val = readChannel('out', key);
         if (val === undefined) return;
         const gain = readGain('out', key);
-        if (key === 'master' || key.startsWith('fx'))
+        if (key === 'master')
+            out[key] = { channels: Array.isArray(val) ? val : [val], stereo: readMasterStereo(), gain };
+        else if (key.startsWith('fx'))
             out[key] = { channels: Array.isArray(val) ? val : [val], gain };
         else
             out[key] = { channel: val, gain };
@@ -779,13 +826,19 @@ export function isPotIgnored(mux, pot) {
             p => Math.round(p.mux) === mux && Math.round(p.pot) === pot
         );
     }
-    if (!getContext().configMeta) return false;
-    const count = Math.round(getContext().configMeta[CONFIG_META.IGNORED_COUNT]);
-    for (let i = 0; i < count; i++) {
-        const base = CONFIG_META.IGNORED_BASE + i * 2;
-        if (Math.round(getContext().configMeta[base]) === mux &&
-            Math.round(getContext().configMeta[base + 1]) === pot)
-            return true;
+    if (getContext().configMeta) {
+        const count = Math.round(getContext().configMeta[CONFIG_META.IGNORED_COUNT]);
+        for (let i = 0; i < count; i++) {
+            const base = CONFIG_META.IGNORED_BASE + i * 2;
+            if (Math.round(getContext().configMeta[base]) === mux &&
+                Math.round(getContext().configMeta[base + 1]) === pot)
+                return true;
+        }
+    }
+    if (Array.isArray(IGNORED_POTS_DEFAULT)) {
+        return IGNORED_POTS_DEFAULT.some(
+            p => Math.round(p.mux) === mux && Math.round(p.pot) === pot
+        );
     }
     return false;
 }

@@ -6,6 +6,7 @@ export const ROUTING_CONFIG = {
         0,
         1
       ],
+      "stereo": true,
       "gain": 0
     },
     "fx1Send": {

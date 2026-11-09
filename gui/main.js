@@ -9,7 +9,7 @@ import { layoutTopChrome, hideP5Dom } from './dom/utils.js';
 import { updateSiren, syncMicInputs } from './dom/live.js';
 import { updateSampler } from './dom/sampler.js';
 import { updateConsole, updateSwitches } from './dom/console.js';
-import { startMeterAnim, syncCodecGains, updateClipIndicators, clearClipBadges } from './dom/meters.js';
+import { startMeterAnim, syncCodecGains, updateClipIndicators, clearClipBadges, syncMasterStereo } from './dom/meters.js';
 import { TAB_LIVE } from './config.js';
 import { isLiveTileOn } from './live-layout.js';
 import { updateMasterEq, resizeMasterEqCanvas } from './dom/masterEq.js';
@@ -119,10 +119,11 @@ export default function sketch(p) {
             fillRoutingFromConfigMeta();
             fillIgnoredPotsFromConfigMeta();
         }
-        // Buffer 6 also carries live mic/hpf flags — sync Live tab (no send back).
+        // Buffer 6 also carries live mic/hpf flags and master stereo mode — sync Live tab (no send back).
         if (b[6]) {
             ctx.configMeta = b[6];
             syncMicInputs(b[6]);
+            syncMasterStereo(b[6]);
         }
 
         // Buffer 8: codec gain state — sync all connected clients (no send back to Bela).

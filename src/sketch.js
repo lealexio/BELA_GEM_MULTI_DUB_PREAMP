@@ -79,7 +79,7 @@ var __belaPreampSketch = (() => {
   var MUX_POTS_PER_MUX = 10;
   var MUX_RAW_SIZE = 80;
   var CONSOLE_POT_MIN_DELTA_DETAILED = 3e-3;
-  var CONSOLE_POT_MIN_DELTA_NORMAL = 0.02;
+  var CONSOLE_POT_MIN_DELTA_NORMAL = 0.025;
   var BELA_OFFLINE_TIMEOUT_MS = 1e3;
   var BELA_LAG_THRESHOLD_MS = 180;
   var CPU_TEMP_WARM_C = 65;
@@ -208,8 +208,9 @@ var __belaPreampSketch = (() => {
     AUX2_R: 29,
     AUX3_R: 30,
     AUX4_R: 31,
-    IGNORED_COUNT: 32,
-    IGNORED_BASE: 33
+    MASTER_STEREO: 32,
+    IGNORED_COUNT: 33,
+    IGNORED_BASE: 34
   };
   var MIC_HPF_HZ_MIN = 0;
   var MIC_HPF_HZ_MAX = 300;
@@ -830,7 +831,7 @@ padding-top:11px;
 }
 .meter-id{
 display:flex;flex-direction:column;gap:1px;
-min-width:58px;width:58px;flex-shrink:0;
+min-width:64px;width:64px;flex-shrink:0;
 align-items:flex-start;text-align:left;
 }
 .meter-strip{
@@ -910,6 +911,39 @@ transition:background .1s,color .1s;
 .meter-gain-btn:hover{background:#2e2e2e;color:#fff}
 .meter-gain-btn:active{background:#3a3a3a}
 .meter-gain-btn:disabled{color:#555;cursor:default;background:#1a1a1a}
+
+/* Master Stereo / Mono pill button on VU meter */
+.meter-mode-btn{
+align-self:flex-start;
+padding:1px 5px;
+font-size:8px;
+font-family:var(--mono);
+font-weight:700;
+line-height:12px;
+border-radius:3px;
+border:1px solid transparent;
+cursor:pointer;
+letter-spacing:.04em;
+user-select:none;
+margin-top:1px;
+transition:background .15s ease,color .15s ease,border-color .15s ease;
+}
+.meter-mode-btn.stereo{
+background:#1a7a3a;
+color:#fff;
+border-color:#28a745;
+}
+.meter-mode-btn.stereo:hover{
+background:#218838;
+}
+.meter-mode-btn.mono{
+background:#d35400;
+color:#fff;
+border-color:#e67e22;
+}
+.meter-mode-btn.mono:hover{
+background:#e67e22;
+}
 
 /* --- Mapping --- */
 #mapping-note{
@@ -1432,6 +1466,7 @@ border-radius:6px;background:transparent;
           0,
           1
         ],
+        "stereo": true,
         "gain": 0
       },
       "fx1Send": {
@@ -1638,6 +1673,27 @@ border-radius:6px;background:transparent;
   function _sendGain(payload) {
     if (!belaControlReady()) return;
     Bela.control.send(payload);
+  }
+  var _masterStereoBtn = null;
+  var _masterStereoSyncHoldUntil = 0;
+  var MASTER_STEREO_SYNC_HOLD_MS = 2500;
+  function _sendMasterStereo(payload) {
+    if (!belaControlReady()) return;
+    Bela.control.send(payload);
+  }
+  function _setMasterStereoBtnState(btn, isStereo) {
+    if (!btn) return;
+    if (isStereo) {
+      btn.classList.remove("mono");
+      btn.classList.add("stereo");
+      btn.textContent = "ST\xC9R\xC9O";
+      btn.title = "Master mode: St\xE9r\xE9o (cliquer pour Mono L+R)";
+    } else {
+      btn.classList.remove("stereo");
+      btn.classList.add("mono");
+      btn.textContent = "MONO";
+      btn.title = "Master mode: Mono Canal L + R (cliquer pour St\xE9r\xE9o)";
+    }
   }
   function _buildMeterGainControls(initVal, min, max, step, onSend) {
     const btnDec = el("button", {
@@ -1967,6 +2023,26 @@ border-radius:6px;background:transparent;
         const lbl = el("div", { className: "meter-lbl" });
         lbl.textContent = levelLabels[idx] || String(idx);
         mid.appendChild(lbl);
+        if (idx === ROUTING_KEY_TO_BUFFER3.master) {
+          const initIsStereo = ROUTING_CONFIG.out && ROUTING_CONFIG.out.master && ROUTING_CONFIG.out.master.stereo !== void 0 ? !!ROUTING_CONFIG.out.master.stereo : true;
+          const modeBtn = el("button", {
+            className: "meter-mode-btn " + (initIsStereo ? "stereo" : "mono"),
+            type: "button"
+          });
+          _setMasterStereoBtnState(modeBtn, initIsStereo);
+          modeBtn.addEventListener("click", (e) => {
+            e.stopPropagation();
+            const currentIsStereo = modeBtn.classList.contains("stereo");
+            const nextIsStereo = !currentIsStereo;
+            _setMasterStereoBtnState(modeBtn, nextIsStereo);
+            _masterStereoSyncHoldUntil = Date.now() + MASTER_STEREO_SYNC_HOLD_MS;
+            _sendMasterStereo({ event: "custom", masterStereo: nextIsStereo });
+            const mapCb = document.querySelector('.ri-stereo[data-key="master"]');
+            if (mapCb) mapCb.checked = nextIsStereo;
+          });
+          _masterStereoBtn = modeBtn;
+          mid.appendChild(modeBtn);
+        }
         const gainDesc = gainByBuf3[idx];
         const gainCtrl = gainDesc ? _createInlineGain(gainDesc) : null;
         if (gainCtrl)
@@ -2087,6 +2163,25 @@ border-radius:6px;background:transparent;
       }
     }
   }
+  function syncMasterStereo(meta) {
+    if (!meta || meta.length <= CONFIG_META.MASTER_STEREO) return;
+    const remoteIsStereo = meta[CONFIG_META.MASTER_STEREO] > 0.5;
+    const now = Date.now();
+    if (_masterStereoBtn) {
+      if (now < _masterStereoSyncHoldUntil) {
+        const currentIsStereo = _masterStereoBtn.classList.contains("stereo");
+        if (currentIsStereo === remoteIsStereo) {
+          _masterStereoSyncHoldUntil = 0;
+        }
+      } else {
+        _setMasterStereoBtnState(_masterStereoBtn, remoteIsStereo);
+      }
+    }
+    const mapCb = document.querySelector('.ri-stereo[data-key="master"]');
+    if (mapCb && now >= _masterStereoSyncHoldUntil) {
+      mapCb.checked = remoteIsStereo;
+    }
+  }
 
   // gui/dom/mapping.js
   var ROUTING_CH_MIN = 0;
@@ -2131,6 +2226,13 @@ border-radius:6px;background:transparent;
       return val.channel != null ? val.channel : 0;
     }
     return val;
+  }
+  function routingOutStereo(val) {
+    if (val != null && typeof val === "object" && !Array.isArray(val)) {
+      if (val.stereo !== void 0) return !!val.stereo;
+      if (val.mono !== void 0) return !val.mono;
+    }
+    return true;
   }
   function routingInMic(val) {
     if (val != null && typeof val === "object" && !Array.isArray(val))
@@ -2224,7 +2326,7 @@ border-radius:6px;background:transparent;
     title.textContent = "Audio I/O Routing";
     section.appendChild(title);
     const hint = el("div", { className: "routing-hint" });
-    hint.textContent = "Physical Bela channel numbers (0\u20139). Master may list one or two outputs, e.g. 0 or 0,1. Gain (dB): codec default at boot (ADC \u221212\u202610, DAC \u221263\u20260). Mic: bypass master ParamEQ / HPF-LPF / kills (Graphic EQ + Band Trim still apply). HPF (Hz): mic dry high-pass (0 = off, 20\u2013300); DSP only when Mic is on.";
+    hint.textContent = "Physical Bela channel numbers (0\u20139). Master may list one or two outputs, e.g. 0 or 0,1. Stereo: checked = stereo (L on 1st out, R on 2nd); unchecked = mono (L+R on both outs). Gain (dB): codec default at boot (ADC \u221212\u202610, DAC \u221263\u20260). Mic: bypass master ParamEQ / HPF-LPF / kills (Graphic EQ + Band Trim still apply). HPF (Hz): mic dry high-pass (0 = off, 20\u2013300); DSP only when Mic is on.";
     section.appendChild(hint);
     const grid = el("div", { className: "routing-grid" });
     grid.appendChild(buildRoutingTable(
@@ -2258,18 +2360,19 @@ border-radius:6px;background:transparent;
     const gainMax = withMic ? INPUT_GAIN_MAX2 : OUTPUT_GAIN_MAX2;
     const gainTitle = withMic ? `ADC gain at boot (${INPUT_GAIN_MIN2}\u2026${INPUT_GAIN_MAX2} dB)` : `DAC gain at boot (${OUTPUT_GAIN_MIN2}\u2026${OUTPUT_GAIN_MAX2} dB)`;
     const tbl = el("table", { className: "mtable routing-table", id: `routing-${dir}-table` });
-    const micCols = withMic ? '<col class="col-check"><col class="col-num">' : "";
-    const micHead = withMic ? '<th class="col-check" title="Bypass ParamEQ / HPF-LPF / kills">Mic</th><th title="Mic dry HPF cutoff in Hz (0 = off)">HPF (Hz)</th>' : "";
+    const isOut = dir === "out";
+    const extraCols = withMic ? '<col class="col-check"><col class="col-num">' : isOut ? '<col class="col-check">' : "";
+    const extraHead = withMic ? '<th class="col-check" title="Bypass ParamEQ / HPF-LPF / kills">Mic</th><th title="Mic dry HPF cutoff in Hz (0 = off)">HPF (Hz)</th>' : isOut ? '<th class="col-check" title="Master output mode: Stereo (checked) or Mono L+R (unchecked)">Stereo</th>' : "";
     tbl.innerHTML = `
         <colgroup>
             <col class="col-name">
             <col class="col-num">
             <col class="col-num">
-            ${micCols}
+            ${extraCols}
         </colgroup>
         <thead><tr>
             <th>Signal</th><th>Channel</th>
-            <th title="${gainTitle}">Gain (dB)</th>${micHead}
+            <th title="${gainTitle}">Gain (dB)</th>${extraHead}
         </tr></thead>
         <tbody id="routing-${dir}-tbody"></tbody>`;
     wrap.appendChild(tbl);
@@ -2291,10 +2394,26 @@ border-radius:6px;background:transparent;
         const micChecked = routingInMic(raw) ? "checked" : "";
         const hpfVal = routingInHpf(raw);
         cells += `<td class="col-check"><input type="checkbox" class="ri-mic" data-dir="${dir}" data-key="${key}" ${micChecked} title="Mic mode: bypass ParamEQ / HPF-LPF / kills"></td><td><input type="number" class="ri-hpf" data-dir="${dir}" data-key="${key}" value="${hpfVal}" min="${MIC_HPF_HZ_MIN}" max="${MIC_HPF_HZ_MAX}" step="1" title="Mic HPF Hz (0 = off)"></td>`;
+      } else if (isOut) {
+        if (key === "master") {
+          const stereoChecked = routingOutStereo(raw) ? "checked" : "";
+          cells += `<td class="col-check"><input type="checkbox" class="ri-stereo" data-dir="${dir}" data-key="${key}" ${stereoChecked} title="Master mode: Stereo (checked) or Mono L+R (unchecked)"></td>`;
+        } else {
+          cells += `<td class="col-check" style="color:#666;text-align:center">\u2014</td>`;
+        }
       }
       tr.innerHTML = cells;
       tbody.appendChild(tr);
     });
+    if (isOut) {
+      tbody.querySelectorAll(".ri-stereo").forEach((cb) => {
+        cb.addEventListener("change", () => {
+          if (typeof window.Bela !== "undefined" && window.Bela.control) {
+            window.Bela.control.send({ event: "custom", masterStereo: !!cb.checked });
+          }
+        });
+      });
+    }
     return wrap;
   }
   function formatRoutingValue(raw, asArray) {
@@ -2374,6 +2493,10 @@ border-radius:6px;background:transparent;
       const key = cb.dataset.key;
       cb.checked = !!micFlags[key];
     });
+    const isMasterStereo = meta.length > M.MASTER_STEREO ? meta[M.MASTER_STEREO] > 0.5 : true;
+    document.querySelectorAll(".ri-stereo").forEach((cb) => {
+      cb.checked = isMasterStereo;
+    });
     document.querySelectorAll(".ri-hpf").forEach((inp) => {
       const key = inp.dataset.key;
       const hz = hpfHz[key];
@@ -2393,6 +2516,10 @@ border-radius:6px;background:transparent;
     const readMic = (key) => {
       const cb = document.querySelector(`.ri-mic[data-key="${key}"]`);
       return cb ? !!cb.checked : false;
+    };
+    const readMasterStereo = () => {
+      const cb = document.querySelector(`.ri-stereo[data-key="master"]`);
+      return cb ? !!cb.checked : true;
     };
     const readHpf = (key) => {
       const inp = document.querySelector(`.ri-hpf[data-key="${key}"]`);
@@ -2415,7 +2542,9 @@ border-radius:6px;background:transparent;
       const val = readChannel("out", key);
       if (val === void 0) return;
       const gain = readGain("out", key);
-      if (key === "master" || key.startsWith("fx"))
+      if (key === "master")
+        out[key] = { channels: Array.isArray(val) ? val : [val], stereo: readMasterStereo(), gain };
+      else if (key.startsWith("fx"))
         out[key] = { channels: Array.isArray(val) ? val : [val], gain };
       else
         out[key] = { channel: val, gain };
@@ -2681,12 +2810,18 @@ border-radius:6px;background:transparent;
         (p) => Math.round(p.mux) === mux && Math.round(p.pot) === pot
       );
     }
-    if (!getContext().configMeta) return false;
-    const count = Math.round(getContext().configMeta[CONFIG_META.IGNORED_COUNT]);
-    for (let i = 0; i < count; i++) {
-      const base = CONFIG_META.IGNORED_BASE + i * 2;
-      if (Math.round(getContext().configMeta[base]) === mux && Math.round(getContext().configMeta[base + 1]) === pot)
-        return true;
+    if (getContext().configMeta) {
+      const count = Math.round(getContext().configMeta[CONFIG_META.IGNORED_COUNT]);
+      for (let i = 0; i < count; i++) {
+        const base = CONFIG_META.IGNORED_BASE + i * 2;
+        if (Math.round(getContext().configMeta[base]) === mux && Math.round(getContext().configMeta[base + 1]) === pot)
+          return true;
+      }
+    }
+    if (Array.isArray(IGNORED_POTS_DEFAULT)) {
+      return IGNORED_POTS_DEFAULT.some(
+        (p) => Math.round(p.mux) === mux && Math.round(p.pot) === pot
+      );
     }
     return false;
   }
@@ -3261,6 +3396,7 @@ border-radius:6px;background:transparent;
     renderConsole();
   }
   var CONSOLE_ACTIVE_HOLD_MS = 1400;
+  var CONSOLE_GLITCH_REBOUND_MAX_MS = 600;
   function formatVal(v, type) {
     if (v === void 0 || v === null) return "\xA0";
     if (type === "sw") {
@@ -3272,6 +3408,25 @@ border-radius:6px;background:transparent;
     const list = getContext().recentChanges;
     if (!list) return null;
     return list.find((e) => e.name === name) || null;
+  }
+  function purgeGlitchEntry(name) {
+    if (!getContext().recentChanges) return;
+    const idx = getContext().recentChanges.findIndex((e) => e.name === name);
+    if (idx === -1) return;
+    getContext().recentChanges.splice(idx, 1);
+    const lists = (getContext().consoleLists || []).filter((l) => l && l.isConnected);
+    lists.forEach((list) => {
+      for (const child of list.children) {
+        if (child.dataset.key === name) {
+          list.removeChild(child);
+          break;
+        }
+      }
+      if (list.children.length < MAX_CONSOLE) {
+        const slot = list.children.length;
+        list.appendChild(buildConsoleRow(null, slot));
+      }
+    });
   }
   function buildConsoleRow(entry, slot) {
     const isSw = entry && entry.type === "sw";
@@ -3449,6 +3604,7 @@ border-radius:6px;background:transparent;
     const now = Date.now();
     const isNormal = getContext().consoleFilterMode === "normal";
     const potDelta = isNormal ? CONSOLE_POT_MIN_DELTA_NORMAL : CONSOLE_POT_MIN_DELTA_DETAILED;
+    const unmappedPotDelta = isNormal ? 0.035 : CONSOLE_POT_MIN_DELTA_DETAILED;
     const potPrev = isNormal ? getContext().prevPotValuesNormal : getContext().prevPotValues;
     const changes = [];
     const mappedChannels = /* @__PURE__ */ new Set();
@@ -3469,8 +3625,26 @@ border-radius:6px;background:transparent;
         const name = POT_NAMES[i];
         const existing = findRecentChange(name);
         const inActiveSession = existing && existing.ts && now - existing.ts < CONSOLE_ACTIVE_HOLD_MS;
-        const initialValue = inActiveSession && existing.initialValue !== void 0 ? existing.initialValue : existing ? existing.value : prevV;
-        const dir = v > prevV + 5e-4 ? "up" : v < prevV - 5e-4 ? "down" : "same";
+        let dir = v > prevV + 5e-4 ? "up" : v < prevV - 5e-4 ? "down" : "same";
+        let initialValue;
+        if (inActiveSession && existing.initialValue !== void 0) {
+          if (existing.direction && dir !== "same" && dir !== existing.direction) {
+            initialValue = existing.value;
+          } else {
+            initialValue = existing.initialValue;
+          }
+        } else {
+          initialValue = prevV;
+        }
+        if (Math.abs(v - initialValue) <= 1e-3 || formatVal(v, "pot") === formatVal(initialValue, "pot")) {
+          if (existing && existing.ts && now - existing.ts < CONSOLE_GLITCH_REBOUND_MAX_MS) {
+            purgeGlitchEntry(name);
+          }
+          continue;
+        }
+        if (dir === "same" && existing && existing.direction) {
+          dir = existing.direction;
+        }
         changes.push({
           name,
           value: v,
@@ -3508,13 +3682,31 @@ border-radius:6px;background:transparent;
           const idx = muxRawIndex(m, p);
           const v = getContext().muxRawValues[idx];
           const prevV = muxPrev[idx];
-          if (Math.abs(v - prevV) >= potDelta) {
+          if (Math.abs(v - prevV) >= unmappedPotDelta) {
             muxPrev[idx] = v;
             const name = formatUnmappedPotLabel(m, p);
             const existing = findRecentChange(name);
             const inActiveSession = existing && existing.ts && now - existing.ts < CONSOLE_ACTIVE_HOLD_MS;
-            const initialValue = inActiveSession && existing.initialValue !== void 0 ? existing.initialValue : existing ? existing.value : prevV;
-            const dir = v > prevV + 5e-4 ? "up" : v < prevV - 5e-4 ? "down" : "same";
+            let dir = v > prevV + 5e-4 ? "up" : v < prevV - 5e-4 ? "down" : "same";
+            let initialValue;
+            if (inActiveSession && existing.initialValue !== void 0) {
+              if (existing.direction && dir !== "same" && dir !== existing.direction) {
+                initialValue = existing.value;
+              } else {
+                initialValue = existing.initialValue;
+              }
+            } else {
+              initialValue = prevV;
+            }
+            if (Math.abs(v - initialValue) <= 1e-3 || formatVal(v, "pot") === formatVal(initialValue, "pot")) {
+              if (existing && existing.ts && now - existing.ts < CONSOLE_GLITCH_REBOUND_MAX_MS) {
+                purgeGlitchEntry(name);
+              }
+              continue;
+            }
+            if (dir === "same" && existing && existing.direction) {
+              dir = existing.direction;
+            }
             changes.push({
               name,
               value: v,
@@ -4679,6 +4871,7 @@ border-radius:6px;background:transparent;
       if (b[6]) {
         ctx.configMeta = b[6];
         syncMicInputs(b[6]);
+        syncMasterStereo(b[6]);
       }
       if (b[8]) syncCodecGains(b[8]);
       if (b[9] && b[9].length) updateTempBadge(b[9][0]);

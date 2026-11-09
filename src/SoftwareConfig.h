@@ -4,7 +4,8 @@
  * DSP and software behaviour constants.
  *
  * All timing values are in milliseconds unless noted otherwise.
- * Frequencies are in Hz. Gains/thresholds are in linear scale unless dB is noted.
+ * Frequencies are in Hz. Gains/thresholds are in linear scale unless dB is
+ * noted.
  *
  * Split with HardwareConfig.h:
  *   HardwareConfig  → physical wiring, calibration, I/O indices
@@ -51,13 +52,14 @@ constexpr float kStartupRampMs = 80.f;
 /// Suppresses quantisation / jitter noise without degrading responsiveness.
 constexpr float kJitterThreshold = 0.002f;
 
-/// Dead-zone at each end of the pot travel: values ≤ kSnapRadiusEdge snap to 0.0,
-/// values ≥ (1 - kSnapRadiusEdge) snap to 1.0.
-/// Applied in scanStep() so all accessors benefit automatically.
-constexpr float kSnapRadiusEdge   = 0.04f;
+/// Dead-zone at each end of the pot travel: values ≤ kSnapRadiusEdge snap to
+/// 0.0, values ≥ (1 - kSnapRadiusEdge) snap to 1.0. Applied in scanStep() so
+/// all accessors benefit automatically.
+constexpr float kSnapRadiusEdge = 0.04f;
 
-/// Exponent for the power curve applied to centred pots in getCenteredPotValue().
-/// The curve maps raw [0, 1] → output [0, 1] symmetrically around 0.5:
+/// Exponent for the power curve applied to centred pots in
+/// getCenteredPotValue(). The curve maps raw [0, 1] → output [0, 1]
+/// symmetrically around 0.5:
 ///   - Near 0.5 : low sensitivity (small pot movements → minimal DSP change).
 ///   - Near 0 or 1 : high sensitivity (same movement → larger DSP change).
 /// The derivative at 0.5 is zero for any exponent > 1, so ADC jitter at
@@ -71,29 +73,29 @@ constexpr float kCenteredPotExponent = 2.0f;
 // Linear gain ranges (channels, master, FX returns)
 // ---------------------------------------------------------------------------
 
-/// Maximum linear gain for AUX input channels (AUX 1-4) when the pot is at maximum (1.0).
-/// 1.0 = unity gain (0 dB), 2.0 = +6 dB.
+/// Maximum linear gain for AUX input channels (AUX 1-4) when the pot is at
+/// maximum (1.0). 1.0 = unity gain (0 dB), 2.0 = +6 dB.
 constexpr float kInputMaxGain = 2.0f;
 
 /// Maximum linear gain for the master output when the pot is at maximum (1.0).
 /// 1.0 = unity gain (0 dB), 2.0 = +6 dB.
 constexpr float kMasterMaxGain = 2.0f;
 
-/// Maximum linear gain for FX return inputs (FX1, FX2) when the pot is at maximum (1.0).
-/// 1.0 = unity gain (0 dB), 2.0 = +6 dB.
+/// Maximum linear gain for FX return inputs (FX1, FX2) when the pot is at
+/// maximum (1.0). 1.0 = unity gain (0 dB), 2.0 = +6 dB.
 constexpr float kFxReturnMaxGain = 2.0f;
 
 // ---------------------------------------------------------------------------
 // Channel EQ (ChannelStrip — 3-band parametric)
 // ---------------------------------------------------------------------------
 
-constexpr float kEqLowFreq    = 250.f;   // Low shelf centre frequency (Hz)
-constexpr float kEqMidFreq    = 1000.f;  // Mid peaking centre frequency (Hz)
-constexpr float kEqHighFreq   = 4000.f;  // High shelf centre frequency (Hz)
-constexpr float kEqMidQ       = 1.4f;    // Mid band Q factor
-constexpr float kEqGainRangeDb = 6.f;    // Pot 0.0 → -kEqGainRangeDb dB
-                                          // Pot 0.5 →  0 dB
-                                          // Pot 1.0 → +kEqGainRangeDb dB
+constexpr float kEqLowFreq = 250.f;   // Low shelf centre frequency (Hz)
+constexpr float kEqMidFreq = 1000.f;  // Mid peaking centre frequency (Hz)
+constexpr float kEqHighFreq = 4000.f; // High shelf centre frequency (Hz)
+constexpr float kEqMidQ = 1.4f;       // Mid band Q factor
+constexpr float kEqGainRangeDb = 6.f; // Pot 0.0 → -kEqGainRangeDb dB
+                                      // Pot 0.5 →  0 dB
+                                      // Pot 1.0 → +kEqGainRangeDb dB
 
 /// Smoothing time for EQ gain changes (ms) — applied to all EQ classes.
 /// A one-pole filter per sample prevents abrupt biquad coefficient jumps
@@ -108,15 +110,17 @@ constexpr float kEqGainSmoothMs = 5.f;
 /// 0.005 ≈ -46 dBFS — captures real silence while passing any musical signal.
 constexpr float kGateThreshold = 0.001f;
 
-/// Gate open speed: how fast the gate ramps to 1.0 once signal is detected (ms).
-constexpr float kGateAttackMs  = 2.0f;
+/// Gate open speed: how fast the gate ramps to 1.0 once signal is detected
+/// (ms).
+constexpr float kGateAttackMs = 2.0f;
 
-/// Gate close speed: how fast the gate ramps to 0.0 after the hold expires (ms).
+/// Gate close speed: how fast the gate ramps to 0.0 after the hold expires
+/// (ms).
 constexpr float kGateReleaseMs = 150.0f;
 
 /// How long the gate stays open after signal drops below threshold (ms).
 /// Prevents chatter on melodic content with brief inter-note silence.
-constexpr float kGateHoldMs    = 100.0f;
+constexpr float kGateHoldMs = 100.0f;
 
 // ---------------------------------------------------------------------------
 // Master parametric EQ (ParametricEq — 4 bands, inserted before kills)
@@ -124,44 +128,50 @@ constexpr float kGateHoldMs    = 100.0f;
 
 /// Frequency ranges for each band's logarithmic pot sweep.
 /// The pot [0.0–1.0] sweeps from FMin to FMax on a log scale.
-constexpr float kMasterEqSubFMin  =   20.f;    // SUB  band min (Hz)
-constexpr float kMasterEqSubFMax  =   80.f;    // SUB  band max (Hz)
-constexpr float kMasterEqKickFMin =   80.f;    // KICK band min (Hz)
-constexpr float kMasterEqKickFMax =  200.f;    // KICK band max (Hz)
-constexpr float kMasterEqMidFMin  =  200.f;    // MID  band min (Hz)
-constexpr float kMasterEqMidFMax  = 1200.f;    // MID  band max (Hz)
-constexpr float kMasterEqTopFMin  = 1200.f;    // TOP  band min (Hz)
-constexpr float kMasterEqTopFMax  = 16000.f;   // TOP  band max (Hz) — capped for filter stability
+constexpr float kMasterEqSubFMin = 20.f;   // SUB  band min (Hz)
+constexpr float kMasterEqSubFMax = 80.f;   // SUB  band max (Hz)
+constexpr float kMasterEqKickFMin = 80.f;  // KICK band min (Hz)
+constexpr float kMasterEqKickFMax = 200.f; // KICK band max (Hz)
+constexpr float kMasterEqMidFMin = 200.f;  // MID  band min (Hz)
+constexpr float kMasterEqMidFMax = 1200.f; // MID  band max (Hz)
+constexpr float kMasterEqTopFMin = 1200.f; // TOP  band min (Hz)
+constexpr float kMasterEqTopFMax =
+    16000.f; // TOP  band max (Hz) — capped for filter stability
 
 /// Q factor of each peaking filter.
 /// Higher Q = narrower bell; lower Q = broad, musical shaping.
 constexpr float kMasterEqQ = 0.8f;
 
-/// Gain range for master EQ bands: pot 0.5 → 0 dB, pot 1.0 → +range, pot 0.0 → -range.
+/// Gain range for master EQ bands: pot 0.5 → 0 dB, pot 1.0 → +range, pot 0.0 →
+/// -range.
 constexpr float kMasterEqGainRangeDb = 6.f;
 
 // ---------------------------------------------------------------------------
 // FilterSection (HPF + LPF) — inserted in master bus before kills
 // ---------------------------------------------------------------------------
 
-/// HPF frequency sweep range. When freqPot < kFilterOffThreshold the HPF is bypassed.
-constexpr float kHpfFMin = 20.f;     // HPF minimum cutoff frequency (Hz)
-constexpr float kHpfFMax = 2000.f;   // HPF maximum cutoff frequency (Hz)
+/// HPF frequency sweep range. When freqPot < kFilterOffThreshold the HPF is
+/// bypassed.
+constexpr float kHpfFMin = 20.f;   // HPF minimum cutoff frequency (Hz)
+constexpr float kHpfFMax = 2000.f; // HPF maximum cutoff frequency (Hz)
 
-/// LPF frequency sweep range. When freqPot < kFilterOffThreshold the LPF is bypassed.
-constexpr float kLpfFMin = 200.f;    // LPF minimum cutoff frequency (Hz)
-constexpr float kLpfFMax = 20000.f;  // LPF maximum cutoff frequency (Hz)
+/// LPF frequency sweep range. When freqPot < kFilterOffThreshold the LPF is
+/// bypassed.
+constexpr float kLpfFMin = 200.f;   // LPF minimum cutoff frequency (Hz)
+constexpr float kLpfFMax = 20000.f; // LPF maximum cutoff frequency (Hz)
 
 /// Resonance (Q) sweep range applied to both HPF and LPF.
 /// kFilterQMin = Butterworth (flat), kFilterQMax = CDJ-style resonance peak.
-constexpr float kFilterQMin = 0.7f;  // minimum Q — flat, no resonance
-constexpr float kFilterQMax = 4.5f;  // maximum Q — pronounced resonance peak
+constexpr float kFilterQMin = 0.7f; // minimum Q — flat, no resonance
+constexpr float kFilterQMax = 4.5f; // maximum Q — pronounced resonance peak
 
-/// Pot value below which a filter is considered OFF and removed from the signal path.
+/// Pot value below which a filter is considered OFF and removed from the signal
+/// path.
 constexpr float kFilterOffThreshold = 0.01f;
 
 /// Crossfade time when toggling HPF or LPF on/off (ms).
-/// A one-pole ramp blends dry↔wet over this window, eliminating activation clicks.
+/// A one-pole ramp blends dry↔wet over this window, eliminating activation
+/// clicks.
 constexpr float kFilterBypassRampMs = 5.f;
 
 // ---------------------------------------------------------------------------
@@ -169,19 +179,19 @@ constexpr float kFilterBypassRampMs = 5.f;
 // ---------------------------------------------------------------------------
 
 /// Cascaded 2nd-order stages → 24 dB/oct Butterworth slope.
-constexpr int   kMicHpfStages = 2;
-constexpr float kMicHpfQ      = 0.707f; ///< Butterworth pole Q (maximally flat)
-constexpr float kMicHpfFMin   = 20.f;   ///< Minimum cutoff when hpf > 0 (Hz)
-constexpr float kMicHpfFMax   = 300.f;  ///< Maximum cutoff (Hz); 0 in config = off
+constexpr int kMicHpfStages = 2;
+constexpr float kMicHpfQ = 0.707f;   ///< Butterworth pole Q (maximally flat)
+constexpr float kMicHpfFMin = 20.f;  ///< Minimum cutoff when hpf > 0 (Hz)
+constexpr float kMicHpfFMax = 300.f; ///< Maximum cutoff (Hz); 0 in config = off
 
 // ---------------------------------------------------------------------------
 // Kill switches — crossover frequencies (KillSwitch)
 // ---------------------------------------------------------------------------
 
-constexpr float kKillFc0        =   80.f;   // SUB  / KICK band boundary (Hz)
-constexpr float kKillFc1        =  200.f;   // KICK / MID  band boundary (Hz)
-constexpr float kKillFc2        = 1200.f;   // MID  / TOP  band boundary (Hz)
-constexpr float kKillCrossoverQ = 0.707f;   // Butterworth 2nd-order pole Q
+constexpr float kKillFc0 = 80.f;          // SUB  / KICK band boundary (Hz)
+constexpr float kKillFc1 = 200.f;         // KICK / MID  band boundary (Hz)
+constexpr float kKillFc2 = 1200.f;        // MID  / TOP  band boundary (Hz)
+constexpr float kKillCrossoverQ = 0.707f; // Butterworth 2nd-order pole Q
 
 /// Fade time when toggling a kill band (ms).
 /// Higher = softer transition; lower = snappier but may pop at short values.
@@ -195,25 +205,28 @@ constexpr float kKillRampMs = 30.0f;
 constexpr int kKillFilterStages = 2;
 
 // ---------------------------------------------------------------------------
-// Band Trim (BandTrim — 4-band ±3 dB trim, after FilterSection, before KillSwitch)
+// Band Trim (BandTrim — 4-band ±3 dB trim, after FilterSection, before
+// KillSwitch)
 // ---------------------------------------------------------------------------
 
-/// Gain range per band: pot 0.5 → 0 dB, pot 0.0 → -kBandTrimGainDb, pot 1.0 → +kBandTrimGainDb.
+/// Gain range per band: pot 0.5 → 0 dB, pot 0.0 → -kBandTrimGainDb, pot 1.0 →
+/// +kBandTrimGainDb.
 constexpr float kBandTrimGainDb = 6.f;
 
-/// Centre frequency for the KICK peaking filter: geometric mean of SUB/KICK boundary (80 Hz)
-/// and KICK/MID boundary (200 Hz).
-constexpr float kBandTrimKickFreq = 126.f;  // sqrt(80 * 200)
+/// Centre frequency for the KICK peaking filter: geometric mean of SUB/KICK
+/// boundary (80 Hz) and KICK/MID boundary (200 Hz).
+constexpr float kBandTrimKickFreq = 126.f; // sqrt(80 * 200)
 
-/// Centre frequency for the MID peaking filter: geometric mean of KICK/MID (200 Hz)
-/// and MID/TOP boundary (1200 Hz).
-constexpr float kBandTrimMidFreq  = 490.f;  // sqrt(200 * 1200)
+/// Centre frequency for the MID peaking filter: geometric mean of KICK/MID (200
+/// Hz) and MID/TOP boundary (1200 Hz).
+constexpr float kBandTrimMidFreq = 490.f; // sqrt(200 * 1200)
 
 /// Q factor for the KICK peaking band — moderately wide bell.
 constexpr float kBandTrimKickQ = 1.0f;
 
-/// Q factor for the MID peaking band — slightly broader bell for a smoother transition.
-constexpr float kBandTrimMidQ  = 0.7f;
+/// Q factor for the MID peaking band — slightly broader bell for a smoother
+/// transition.
+constexpr float kBandTrimMidQ = 0.7f;
 
 /// Minimum gain change (dB) that triggers a biquad coefficient recompute.
 constexpr float kBandTrimEpsilonDb = 0.05f;
@@ -251,7 +264,7 @@ constexpr float kSirenPresetCrossfadeMs = 200.f;
 /// 0.03 ≈ 24 % of one zone — wide enough to absorb typical jitter.
 constexpr float kSirenPresetHysteresis = 0.03f;
 
-constexpr float kSirenGateAttackMs  = 5.f;
+constexpr float kSirenGateAttackMs = 5.f;
 
 /// Time for the siren gate amplitude to ramp from 1 to 0 (trigger released).
 constexpr float kSirenGateReleaseMs = 80.f;
@@ -270,13 +283,15 @@ constexpr float kFxSendPotCeiling = 0.7f;
 // FX Send filter modes (PA5 = mids only, PA6 = tops only)
 // ---------------------------------------------------------------------------
 
-/// Low boundary of the mid band: frequencies below this are excluded in MIDS mode.
-constexpr float kFxMidLowFreq  = 250.f;   // Hz
+/// Low boundary of the mid band: frequencies below this are excluded in MIDS
+/// mode.
+constexpr float kFxMidLowFreq = 250.f; // Hz
 
 /// High boundary of the mid band / tops crossover.
-constexpr float kFxMidHighFreq = 4000.f;  // Hz
+constexpr float kFxMidHighFreq = 4000.f; // Hz
 
-/// Butterworth Q for FX send filter transitions (0.707 = maximally flat, no resonance).
+/// Butterworth Q for FX send filter transitions (0.707 = maximally flat, no
+/// resonance).
 constexpr float kFxFilterQ = 0.707f;
 
 /// Master gain scale applied to both the dry output and FX send of the siren.
@@ -326,12 +341,15 @@ constexpr bool kLimiterEnabled = true;
 // ---------------------------------------------------------------------------
 
 /// When true  : FX returns are injected POST-master (after EQ, filters, kills).
-///              The wet signal bypasses all master processing — only masterGain applies.
-///              Use this when the effect unit has its own character that should not
-///              be coloured by the master chain (HPF, EQ, kills…).
+///              The wet signal bypasses all master processing — only masterGain
+///              applies. Use this when the effect unit has its own character
+///              that should not be coloured by the master chain (HPF, EQ,
+///              kills…).
 ///
-/// When false : FX returns are summed PRE-master, entering the full processing chain.
-///              Use this when you want kills and EQ to shape the wet return as well.
+/// When false : FX returns are summed PRE-master, entering the full processing
+/// chain.
+///              Use this when you want kills and EQ to shape the wet return as
+///              well.
 constexpr bool kFxReturnPostMaster = true;
 
 // ---------------------------------------------------------------------------
@@ -340,31 +358,36 @@ constexpr bool kFxReturnPostMaster = true;
 
 /// ADC input PGA range supported by the codec (dB).
 constexpr float kCodecInputGainMinDb = -12.f;
-constexpr float kCodecInputGainMaxDb =  10.f;
+constexpr float kCodecInputGainMaxDb = 10.f;
 
 /// DAC output level range supported by the codec (dB).
 constexpr float kCodecOutputGainMinDb = -63.f;
-constexpr float kCodecOutputGainMaxDb =   0.f;
+constexpr float kCodecOutputGainMaxDb = 0.f;
 
 // ---------------------------------------------------------------------------
 // Bela GUI web interface (sketch.js)
 // ---------------------------------------------------------------------------
 
 /// GUI send interval in audio samples (~50 ms @ 44.1 kHz → ~20 fps).
-/// Lower rate keeps multi-client WiFi sessions stable on the embedded web server.
+/// Lower rate keeps multi-client WiFi sessions stable on the embedded web
+/// server.
 constexpr int kGuiUpdateIntervalSamples = 2205;
 
 /// Resend static mapping/config-meta buffers every N GUI ticks (~2 s @ 20 fps).
 constexpr int kGuiStaticBufSendDivisor = 40;
 
-/// Float count for GUI buffer 6 (mux, routing, ignoredPots). Must match sketch.js.
-/// Layout: [0-4] mux/cal/i2c | [5-7] master outs | [8-9] fx sends | [10-13] vu outs
+/// Float count for GUI buffer 6 (mux, routing, ignoredPots). Must match
+/// sketch.js. Layout: [0-4] mux/cal/i2c | [5-7] master outs | [8-9] fx sends |
+/// [10-13] vu outs
 ///         [14-15] fx returns | [16-19] AUX channelL | [20-23] AUX micMode
-///         [24-27] AUX hpfHz | [28-31] AUX channelR | [32] ignoredPotsCount | [33+] ignored pairs
-constexpr int kGuiConfigMetaHeaderFloats = 33;
-constexpr int kGuiConfigMetaSize         = kGuiConfigMetaHeaderFloats + 64; // 32 ignored pairs max
+///         [24-27] AUX hpfHz | [28-31] AUX channelR | [32] masterStereo | [33]
+///         ignoredPotsCount | [34+] ignored pairs
+constexpr int kGuiConfigMetaHeaderFloats = 34;
+constexpr int kGuiConfigMetaSize =
+    kGuiConfigMetaHeaderFloats + 64; // 32 ignored pairs max
 
-/// Raw MUX grid for GUI buffer 7: kNumMux × kPotsPerMux (must match HardwareConfig.h).
+/// Raw MUX grid for GUI buffer 7: kNumMux × kPotsPerMux (must match
+/// HardwareConfig.h).
 constexpr int kGuiMuxRawBufSize = 80;
 
 /// CPU die temperature poll interval for the non-RT AuxTask (sysfs read).
@@ -373,7 +396,8 @@ constexpr int kCpuTempPollUs = 2000000; // 2 s
 
 /// Sysfs path for the first thermal zone (millidegrees C). Matches
 /// `cat /sys/class/thermal/thermal_zone*/temp` first glob hit on Bela.
-constexpr const char* kCpuTempSysfsPath = "/sys/class/thermal/thermal_zone0/temp";
+constexpr const char *kCpuTempSysfsPath =
+    "/sys/class/thermal/thermal_zone0/temp";
 
 // ---------------------------------------------------------------------------
 // MCP23017 / I2C fault tolerance
@@ -382,6 +406,6 @@ constexpr const char* kCpuTempSysfsPath = "/sys/class/thermal/thermal_zone0/temp
 /// Reconnection retry interval in milliseconds when MCP23017 is disconnected.
 constexpr unsigned int kMcpReconnectIntervalMs = 1000;
 
-/// Number of consecutive I2C read errors before declaring MCP23017 disconnected.
+/// Number of consecutive I2C read errors before declaring MCP23017
+/// disconnected.
 constexpr int kMcpMaxConsecutiveErrors = 5;
-

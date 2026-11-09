@@ -8,6 +8,8 @@ import {
     CLIP_THRESHOLD, CLIP_HOLD_MS,
     TAB_LIVE,
     buildFullRouting,
+    CONFIG_META,
+    ROUTING_KEY_TO_BUFFER3
 } from '../config.js';
 import { ROUTING_CONFIG } from '../routing-config.js';
 import { el, cardTitle } from './utils.js';
@@ -19,13 +21,13 @@ import { belaControlReady } from '../bela/connection.js';
 // (hpGain wire key = DAC output level; Bela SDK API name is setHpLevel.)
 // ---------------------------------------------------------------------------
 
-const INPUT_GAIN_MIN   = -12;
-const INPUT_GAIN_MAX   = 10;
-const INPUT_GAIN_STEP  = 1;
-const OUTPUT_GAIN_MIN  = -63;
-const OUTPUT_GAIN_MAX  = 0;
+const INPUT_GAIN_MIN = -12;
+const INPUT_GAIN_MAX = 10;
+const INPUT_GAIN_STEP = 1;
+const OUTPUT_GAIN_MIN = -63;
+const OUTPUT_GAIN_MAX = 0;
 const OUTPUT_GAIN_STEP = 1;
-const METER_COUNT     = 13;
+const METER_COUNT = 13;
 
 /** Compact header labels for clip badges (routing key → text). */
 const CLIP_BADGE_LABELS = {
@@ -40,14 +42,14 @@ const CLIP_BADGE_LABELS = {
 let _clipBadgesByIdx = null;
 
 /** Picker handles for syncCodecGains() — indexed by physical channel. */
-const _inputPickers  = new Array(10).fill(null);
+const _inputPickers = new Array(10).fill(null);
 const _outputPickers = new Array(10).fill(null);
 
 /**
  * After a local ± click, ignore buffer-8 echo until Bela catches up (or timeout).
  * Same pattern as mic/HPF sync hold in live.js.
  */
-const _inputGainSyncHoldUntil  = new Array(10).fill(0);
+const _inputGainSyncHoldUntil = new Array(10).fill(0);
 const _outputGainSyncHoldUntil = new Array(10).fill(0);
 /** Must cover control round-trip + a few GUI buffer frames. */
 const GAIN_SYNC_HOLD_MS = 2500;
@@ -55,8 +57,8 @@ const GAIN_SYNC_HOLD_MS = 2500;
 /** Marks one codec gain channel as locally authoritative for a short window. */
 function _holdCodecGainSync(ch, isInput) {
     const until = Date.now() + GAIN_SYNC_HOLD_MS;
-    if (isInput) _inputGainSyncHoldUntil[ch]  = until;
-    else         _outputGainSyncHoldUntil[ch] = until;
+    if (isInput) _inputGainSyncHoldUntil[ch] = until;
+    else _outputGainSyncHoldUntil[ch] = until;
 }
 
 /** Sends a codec-gain payload to render.cpp via Bela.control. */
@@ -64,6 +66,31 @@ function _sendGain(payload) {
     if (!belaControlReady()) return;
     /* global Bela */
     Bela.control.send(payload);
+}
+
+let _masterStereoBtn = null;
+let _masterStereoSyncHoldUntil = 0;
+const MASTER_STEREO_SYNC_HOLD_MS = 2500;
+
+function _sendMasterStereo(payload) {
+    if (!belaControlReady()) return;
+    /* global Bela */
+    Bela.control.send(payload);
+}
+
+function _setMasterStereoBtnState(btn, isStereo) {
+    if (!btn) return;
+    if (isStereo) {
+        btn.classList.remove('mono');
+        btn.classList.add('stereo');
+        btn.textContent = 'STÉRÉO';
+        btn.title = 'Master mode: Stéréo (cliquer pour Mono L+R)';
+    } else {
+        btn.classList.remove('stereo');
+        btn.classList.add('mono');
+        btn.textContent = 'MONO';
+        btn.title = 'Master mode: Mono Canal L + R (cliquer pour Stéréo)';
+    }
 }
 
 /**
@@ -81,7 +108,7 @@ function _buildMeterGainControls(initVal, min, max, step, onSend) {
         title: `+${step} dB`,
         type: 'button'
     });
-    const valEl = el('div', {className: 'meter-gain-val'});
+    const valEl = el('div', { className: 'meter-gain-val' });
 
     btnDec.textContent = '−';
     btnInc.textContent = '+';
@@ -134,11 +161,11 @@ function _buildMeterGainControls(initVal, min, max, step, onSend) {
  */
 function _buildGainByBuf3(inputChannels, outputChannels) {
     const map = {};
-    inputChannels.forEach(({ch, label, buf3, gain}) => {
+    inputChannels.forEach(({ ch, label, buf3, gain }) => {
         if (buf3 !== undefined)
             map[buf3] = { kind: 'input', ch, label, gain: gain != null ? gain : 0 };
     });
-    outputChannels.forEach(({ch, label, buf3, gain}) => {
+    outputChannels.forEach(({ ch, label, buf3, gain }) => {
         if (buf3 !== undefined)
             map[buf3] = { kind: 'output', ch, label, gain: gain != null ? gain : 0 };
     });
@@ -152,8 +179,8 @@ function _buildGainByBuf3(inputChannels, outputChannels) {
 function _createInlineGain(desc) {
     const { kind, ch, label } = desc;
     const isInput = kind === 'input';
-    const min  = isInput ? INPUT_GAIN_MIN  : OUTPUT_GAIN_MIN;
-    const max  = isInput ? INPUT_GAIN_MAX  : OUTPUT_GAIN_MAX;
+    const min = isInput ? INPUT_GAIN_MIN : OUTPUT_GAIN_MIN;
+    const max = isInput ? INPUT_GAIN_MAX : OUTPUT_GAIN_MAX;
     const step = isInput ? INPUT_GAIN_STEP : OUTPUT_GAIN_STEP;
     const init = desc.gain != null ? desc.gain : 0;
 
@@ -168,7 +195,7 @@ function _createInlineGain(desc) {
 
     controls.btnDec.title = `${label}: -${step} dB`;
     controls.btnInc.title = `${label}: +${step} dB`;
-    controls.valEl.title  = isInput
+    controls.valEl.title = isInput
         ? `${label} ADC gain (−12…10 dB)`
         : `${label} DAC gain (−63…0 dB)`;
 
@@ -219,21 +246,21 @@ export function syncCodecGains(buf) {
  * @returns {{ setTargets: Function, getPeakPct: Function, draw: Function, resize: Function }}
  */
 function createVuMeter(canvas, config) {
-    const max            = config.max || 100;
-    const boxCount       = config.boxCount || 15;
-    const boxCountRed    = config.boxCountRed || 2;
+    const max = config.max || 100;
+    const boxCount = config.boxCount || 15;
+    const boxCountRed = config.boxCountRed || 2;
     const boxCountYellow = config.boxCountYellow || 3;
     const boxGapFraction = config.boxGapFraction || 0.25;
 
-    const redStart    = boxCount - boxCountRed + 1;
+    const redStart = boxCount - boxCountRed + 1;
     const yellowStart = boxCount - boxCountRed - boxCountYellow + 1;
 
-    const redOn     = 'rgba(255,47,30,0.9)';
-    const redOff    = 'rgba(64,12,8,0.9)';
-    const yellowOn  = 'rgba(255,215,5,0.9)';
+    const redOn = 'rgba(255,47,30,0.9)';
+    const redOff = 'rgba(64,12,8,0.9)';
+    const yellowOn = 'rgba(255,215,5,0.9)';
     const yellowOff = 'rgba(64,53,0,0.9)';
-    const greenOn   = 'rgba(53,255,30,0.9)';
-    const greenOff  = 'rgba(13,64,8,0.9)';
+    const greenOn = 'rgba(53,255,30,0.9)';
+    const greenOff = 'rgba(13,64,8,0.9)';
 
     const ctx2d = canvas.getContext('2d');
     let width = 0;
@@ -251,33 +278,33 @@ function createVuMeter(canvas, config) {
 
     /** Recomputes canvas pixel size and box geometry from CSS dimensions. */
     function resize() {
-        const dpr   = window.devicePixelRatio || 1;
-        const rect  = canvas.getBoundingClientRect();
+        const dpr = window.devicePixelRatio || 1;
+        const rect = canvas.getBoundingClientRect();
         const style = window.getComputedStyle(canvas);
         let cssW = rect.width;
         let cssH = rect.height;
-        if (cssW < 2) cssW = parseFloat(style.width)  || VU_CANVAS_W;
+        if (cssW < 2) cssW = parseFloat(style.width) || VU_CANVAS_W;
         if (cssH < 2) cssH = parseFloat(style.height) || VU_CANVAS_H;
 
         const newW = Math.max(1, Math.round(cssW));
         const newH = Math.max(1, Math.round(cssH));
-        const pxW  = Math.round(newW * dpr);
-        const pxH  = Math.round(newH * dpr);
+        const pxW = Math.round(newW * dpr);
+        const pxH = Math.round(newH * dpr);
 
         if (newW === width && newH === height &&
             canvas.width === pxW && canvas.height === pxH)
             return;
 
-        width  = newW;
+        width = newW;
         height = newH;
-        canvas.width  = pxW;
+        canvas.width = pxW;
         canvas.height = pxH;
         ctx2d.setTransform(dpr, 0, 0, dpr, 0, 0);
 
-        boxWidth  = width / (boxCount + (boxCount + 1) * boxGapFraction);
-        boxGapX   = boxWidth * boxGapFraction;
+        boxWidth = width / (boxCount + (boxCount + 1) * boxGapFraction);
+        boxGapX = boxWidth * boxGapFraction;
         boxHeight = Math.max(8, height - boxGapX * 2);
-        boxGapY   = boxGapX;
+        boxGapY = boxGapX;
         needsRedraw = true;
     }
 
@@ -289,7 +316,7 @@ function createVuMeter(canvas, config) {
     /** Fill colour for box id (1..boxCount) given how many boxes are lit. */
     function boxColor(id, lit) {
         const on = id <= lit;
-        if (id >= redStart)    return on ? redOn : redOff;
+        if (id >= redStart) return on ? redOn : redOff;
         if (id >= yellowStart) return on ? yellowOn : yellowOff;
         return on ? greenOn : greenOff;
     }
@@ -311,12 +338,12 @@ function createVuMeter(canvas, config) {
     function drawPeakIndicator(peakVal) {
         if (peakVal < 1.5) return;
 
-        const innerLeft  = boxGapX;
+        const innerLeft = boxGapX;
         const innerRight = width - boxGapX;
         const x = innerLeft + (peakVal / max) * (innerRight - innerLeft);
 
         ctx2d.strokeStyle = '#fff';
-        ctx2d.lineWidth   = 2;
+        ctx2d.lineWidth = 2;
         ctx2d.beginPath();
         ctx2d.moveTo(x, boxGapY);
         ctx2d.lineTo(x, height - boxGapY);
@@ -331,7 +358,7 @@ function createVuMeter(canvas, config) {
     return {
         /** Sets current level and peak-hold percentages (0–max). */
         setTargets(level, peak) {
-            curVal     = Math.max(0, Math.min(max, level));
+            curVal = Math.max(0, Math.min(max, level));
             curPeakVal = Math.max(0, Math.min(max, peak));
         },
 
@@ -351,8 +378,8 @@ function createVuMeter(canvas, config) {
                 return;
 
             lastLitBoxes = lit;
-            lastPeakPx   = peakPx;
-            needsRedraw  = false;
+            lastPeakPx = peakPx;
+            needsRedraw = false;
 
             ctx2d.fillStyle = 'rgb(32,32,32)';
             ctx2d.fillRect(0, 0, width, height);
@@ -468,8 +495,8 @@ export function clearClipBadges() {
 
 /** Builds the meters section (VU strips + inline codec gains) for the Live tab. */
 export function buildMetersSection() {
-    const wrap    = el('div', {id: 'meters-wrap'});
-    const columns = el('div', {className: 'meters-columns'});
+    const wrap = el('div', { id: 'meters-wrap' });
+    const columns = el('div', { className: 'meters-columns' });
 
     const { levelGroups, levelLabels, inputChannels, outputChannels } =
         buildFullRouting(ROUTING_CONFIG);
@@ -477,7 +504,7 @@ export function buildMetersSection() {
     const gainByBuf3 = _buildGainByBuf3(inputChannels, outputChannels);
 
     for (let ch = 0; ch < 10; ch++) {
-        _inputPickers[ch]  = null;
+        _inputPickers[ch] = null;
         _outputPickers[ch] = null;
     }
 
@@ -487,38 +514,60 @@ export function buildMetersSection() {
     ctx.meterClipLeds = [];
 
     levelGroups.forEach(group => {
-        const card = el('div', {className: 'card meters-card'});
+        const card = el('div', { className: 'card meters-card' });
         card.appendChild(cardTitle(group.label));
-        const row = el('div', {className: 'meter-group'});
+        const row = el('div', { className: 'meter-group' });
 
         group.indices.forEach(idx => {
-            const chRow = el('div', {className: 'meter-ch'});
-            const mid   = el('div', {className: 'meter-id'});
+            const chRow = el('div', { className: 'meter-ch' });
+            const mid = el('div', { className: 'meter-id' });
 
-            const lbl = el('div', {className: 'meter-lbl'});
+            const lbl = el('div', { className: 'meter-lbl' });
             lbl.textContent = levelLabels[idx] || String(idx);
             mid.appendChild(lbl);
+
+            if (idx === ROUTING_KEY_TO_BUFFER3.master) {
+                const initIsStereo = (ROUTING_CONFIG.out && ROUTING_CONFIG.out.master && ROUTING_CONFIG.out.master.stereo !== undefined)
+                    ? !!ROUTING_CONFIG.out.master.stereo : true;
+                const modeBtn = el('button', {
+                    className: 'meter-mode-btn ' + (initIsStereo ? 'stereo' : 'mono'),
+                    type: 'button'
+                });
+                _setMasterStereoBtnState(modeBtn, initIsStereo);
+                modeBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    const currentIsStereo = modeBtn.classList.contains('stereo');
+                    const nextIsStereo = !currentIsStereo;
+                    _setMasterStereoBtnState(modeBtn, nextIsStereo);
+                    _masterStereoSyncHoldUntil = Date.now() + MASTER_STEREO_SYNC_HOLD_MS;
+                    _sendMasterStereo({ event: 'custom', masterStereo: nextIsStereo });
+                    const mapCb = document.querySelector('.ri-stereo[data-key="master"]');
+                    if (mapCb) mapCb.checked = nextIsStereo;
+                });
+                _masterStereoBtn = modeBtn;
+                mid.appendChild(modeBtn);
+            }
 
             const gainDesc = gainByBuf3[idx];
             const gainCtrl = gainDesc ? _createInlineGain(gainDesc) : null;
             if (gainCtrl)
                 mid.appendChild(gainCtrl.valEl);
 
-            const strip = el('div', {className: 'meter-strip'});
-            const body  = el('div', {className: 'meter-body'});
-            const mwrap = el('div', {className: 'meter-wrap'});
+            const strip = el('div', { className: 'meter-strip' });
+            const body = el('div', { className: 'meter-body' });
+            const mwrap = el('div', { className: 'meter-wrap' });
             mwrap.title = 'Click to reset peak hold';
 
-            const cnv = el('canvas', {className: 'meter-canvas', id: 'mc-' + idx});
+            const cnv = el('canvas', { className: 'meter-canvas', id: 'mc-' + idx });
             ctx.meterVu[idx] = createVuMeter(cnv, {
-                boxCount:       VU_BOX_COUNT,
-                boxCountRed:    VU_BOX_COUNT_RED,
+                boxCount: VU_BOX_COUNT,
+                boxCountRed: VU_BOX_COUNT_RED,
                 boxCountYellow: VU_BOX_COUNT_YELLOW,
                 boxGapFraction: VU_BOX_GAP_FRACTION,
-                max:            VU_MAX
+                max: VU_MAX
             });
 
-            const peakDb = el('div', {className: 'meter-peak-db', id: 'mpd-' + idx});
+            const peakDb = el('div', { className: 'meter-peak-db', id: 'mpd-' + idx });
             peakDb.style.left = '0%';
             peakDb.textContent = '-\u221e';
             ctx.meterPeakDbs[idx] = peakDb;
@@ -536,11 +585,11 @@ export function buildMetersSection() {
             ctx.meterClipLeds[idx] = clipLed;
 
             mwrap.addEventListener('click', () => {
-                ctx.peakHoldLevel[idx]  = 0;
+                ctx.peakHoldLevel[idx] = 0;
                 ctx.peakHoldExpire[idx] = 0;
             });
 
-            const scale = el('div', {className: 'meter-scale'});
+            const scale = el('div', { className: 'meter-scale' });
             for (let t = 0; t < VU_SCALE_TICKS.length; t++) {
                 const tick = el('span');
                 tick.textContent = String(VU_SCALE_TICKS[t]);
@@ -607,11 +656,11 @@ function updateMetersFrame() {
 
         const raw = ctx.audioLevels[i];
         const smooth = ctx.meterSmooth[i];
-        const coeff  = raw > smooth ? METER_ATTACK : METER_RELEASE;
+        const coeff = raw > smooth ? METER_ATTACK : METER_RELEASE;
         ctx.meterSmooth[i] = smooth + (raw - smooth) * coeff;
 
         if (raw > ctx.peakHoldLevel[i]) {
-            ctx.peakHoldLevel[i]  = raw;
+            ctx.peakHoldLevel[i] = raw;
             ctx.peakHoldExpire[i] = now + PEAK_HOLD_MS;
         } else if (now >= ctx.peakHoldExpire[i]) {
             ctx.peakHoldLevel[i] *= PEAK_DECAY;
@@ -644,5 +693,29 @@ function updateMetersFrame() {
             if (peakDb.style.opacity !== op)
                 peakDb.style.opacity = op;
         }
+    }
+}
+
+/**
+ * Syncs Master Stereo/Mono button from configMeta buffer 6 (no send back to Bela).
+ * @param {Float32Array|ArrayLike<number>} meta
+ */
+export function syncMasterStereo(meta) {
+    if (!meta || meta.length <= CONFIG_META.MASTER_STEREO) return;
+    const remoteIsStereo = meta[CONFIG_META.MASTER_STEREO] > 0.5;
+    const now = Date.now();
+    if (_masterStereoBtn) {
+        if (now < _masterStereoSyncHoldUntil) {
+            const currentIsStereo = _masterStereoBtn.classList.contains('stereo');
+            if (currentIsStereo === remoteIsStereo) {
+                _masterStereoSyncHoldUntil = 0;
+            }
+        } else {
+            _setMasterStereoBtnState(_masterStereoBtn, remoteIsStereo);
+        }
+    }
+    const mapCb = document.querySelector('.ri-stereo[data-key="master"]');
+    if (mapCb && now >= _masterStereoSyncHoldUntil) {
+        mapCb.checked = remoteIsStereo;
     }
 }

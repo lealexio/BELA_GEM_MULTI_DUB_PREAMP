@@ -405,7 +405,7 @@ padding-top:11px;
 }
 .meter-id{
 display:flex;flex-direction:column;gap:1px;
-min-width:58px;width:58px;flex-shrink:0;
+min-width:64px;width:64px;flex-shrink:0;
 align-items:flex-start;text-align:left;
 }
 .meter-strip{
@@ -485,6 +485,39 @@ transition:background .1s,color .1s;
 .meter-gain-btn:hover{background:#2e2e2e;color:#fff}
 .meter-gain-btn:active{background:#3a3a3a}
 .meter-gain-btn:disabled{color:#555;cursor:default;background:#1a1a1a}
+
+/* Master Stereo / Mono pill button on VU meter */
+.meter-mode-btn{
+align-self:flex-start;
+padding:1px 5px;
+font-size:8px;
+font-family:var(--mono);
+font-weight:700;
+line-height:12px;
+border-radius:3px;
+border:1px solid transparent;
+cursor:pointer;
+letter-spacing:.04em;
+user-select:none;
+margin-top:1px;
+transition:background .15s ease,color .15s ease,border-color .15s ease;
+}
+.meter-mode-btn.stereo{
+background:#1a7a3a;
+color:#fff;
+border-color:#28a745;
+}
+.meter-mode-btn.stereo:hover{
+background:#218838;
+}
+.meter-mode-btn.mono{
+background:#d35400;
+color:#fff;
+border-color:#e67e22;
+}
+.meter-mode-btn.mono:hover{
+background:#e67e22;
+}
 
 /* --- Mapping --- */
 #mapping-note{
