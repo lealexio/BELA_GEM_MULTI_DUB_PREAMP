@@ -118,6 +118,22 @@ function setConsoleFilterMode(mode) {
 
 const CONSOLE_ACTIVE_HOLD_MS = 1400;
 
+/** Formats a console value according to its type (pot = 0.000, sw = ON/OFF). */
+function formatVal(v, type) {
+    if (v === undefined || v === null) return '\u00a0';
+    if (type === 'sw') {
+        return v > 0.5 ? 'ON' : 'OFF';
+    }
+    return Number(v).toFixed(3);
+}
+
+/** Finds an existing entry in recentChanges by name. */
+function findRecentChange(name) {
+    const list = getContext().recentChanges;
+    if (!list) return null;
+    return list.find(e => e.name === name) || null;
+}
+
 /** Builds one console row — filled from entry or empty placeholder slot. */
 function buildConsoleRow(entry, slot) {
     const isSw = entry && entry.type === 'sw';
@@ -128,10 +144,14 @@ function buildConsoleRow(entry, slot) {
     if (isEmpty) li.style.setProperty('--slot', String(slot));
 
     const pct = entry ? Math.min(100, Math.max(0, entry.value * 100)).toFixed(1) : '0';
-    const cval = entry ? (isSw ? (entry.value > 0.5 ? 'ON' : 'OFF') : entry.value.toFixed(3)) : '\u00a0';
     const cname = entry ? entry.name : '\u00a0';
     const fillCls = isEmpty ? 'cfill cfill-loading' : 'cfill';
     const fillStyle = isEmpty ? '' : ` style="width:${pct}%"`;
+
+    const coldval = (!isEmpty && entry.initialValue !== undefined)
+        ? formatVal(entry.initialValue, entry.type)
+        : '\u00a0';
+    const cval = !isEmpty ? formatVal(entry.value, entry.type) : '\u00a0';
 
     let dirHtml = '&nbsp;';
     let dirCls = 'cdir';
@@ -151,8 +171,11 @@ function buildConsoleRow(entry, slot) {
     li.innerHTML =
         `<span class="cname" title="${cname}">${cname}</span>` +
         `<span class="ctrack"><span class="${fillCls}"${fillStyle}></span></span>` +
-        `<span class="${dirCls}">${dirHtml}</span>` +
-        `<span class="cval">${cval}</span>`;
+        `<span class="cval-group">` +
+            `<span class="coldval">${coldval}</span>` +
+            `<span class="${dirCls}">${dirHtml}</span>` +
+            `<span class="cval">${cval}</span>` +
+        `</span>`;
 
     if (entry && entry.ts && (Date.now() - entry.ts < CONSOLE_ACTIVE_HOLD_MS)) {
         li.classList.add('active');
@@ -187,6 +210,11 @@ function updateRowContent(row, entry, isNew, direction) {
         fillEl.style.width = pct + '%';
     }
 
+    const oldValEl = row.querySelector('.coldval');
+    if (oldValEl && entry.initialValue !== undefined) {
+        oldValEl.textContent = formatVal(entry.initialValue, entry.type);
+    }
+
     const dirEl = row.querySelector('.cdir');
     if (dirEl) {
         if (isSw) {
@@ -203,9 +231,7 @@ function updateRowContent(row, entry, isNew, direction) {
 
     const valEl = row.querySelector('.cval');
     if (valEl) {
-        valEl.textContent = isSw
-            ? (entry.value > 0.5 ? 'ON' : 'OFF')
-            : entry.value.toFixed(3);
+        valEl.textContent = formatVal(entry.value, entry.type);
     }
 
     // Active state with decay timer
@@ -360,10 +386,18 @@ export function updateConsole() {
                 getContext().recentChanges =
                     (getContext().recentChanges || []).filter(e => e.name !== unmappedName);
             }
+            const name = POT_NAMES[i];
+            const existing = findRecentChange(name);
+            const inActiveSession = existing && existing.ts && (now - existing.ts < CONSOLE_ACTIVE_HOLD_MS);
+            const initialValue = (inActiveSession && existing.initialValue !== undefined)
+                ? existing.initialValue
+                : (existing ? existing.value : prevV);
+
             const dir = (v > prevV + 0.0005) ? 'up' : ((v < prevV - 0.0005) ? 'down' : 'same');
             changes.push({
-                name: POT_NAMES[i],
+                name,
                 value: v,
+                initialValue,
                 type: 'pot',
                 ts: now,
                 direction: dir
@@ -375,9 +409,17 @@ export function updateConsole() {
         const v = getContext().switchStates[i];
         if (v !== getContext().prevSwitchStates[i]) {
             getContext().prevSwitchStates[i] = v;
+            const name = SWITCH_NAMES[i];
+            const existing = findRecentChange(name);
+            const inActiveSession = existing && existing.ts && (now - existing.ts < CONSOLE_ACTIVE_HOLD_MS);
+            const initialValue = (inActiveSession && existing.initialValue !== undefined)
+                ? existing.initialValue
+                : (existing ? existing.value : (v > 0.5 ? 0 : 1));
+
             changes.push({
-                name: SWITCH_NAMES[i],
+                name,
                 value: v,
+                initialValue,
                 type: 'sw',
                 ts: now,
                 direction: v > 0.5 ? 'on' : 'off'
@@ -398,10 +440,18 @@ export function updateConsole() {
                 const prevV = muxPrev[idx];
                 if (Math.abs(v - prevV) >= potDelta) {
                     muxPrev[idx] = v;
+                    const name = formatUnmappedPotLabel(m, p);
+                    const existing = findRecentChange(name);
+                    const inActiveSession = existing && existing.ts && (now - existing.ts < CONSOLE_ACTIVE_HOLD_MS);
+                    const initialValue = (inActiveSession && existing.initialValue !== undefined)
+                        ? existing.initialValue
+                        : (existing ? existing.value : prevV);
+
                     const dir = (v > prevV + 0.0005) ? 'up' : ((v < prevV - 0.0005) ? 'down' : 'same');
                     changes.push({
-                        name: formatUnmappedPotLabel(m, p),
+                        name,
                         value: v,
+                        initialValue,
                         type: 'pot',
                         ts: now,
                         direction: dir
