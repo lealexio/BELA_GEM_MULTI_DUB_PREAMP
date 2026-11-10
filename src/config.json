@@ -36,19 +36,19 @@
       },
       "vuSub": {
         "channel": 4,
-        "gain": -2
+        "gain": -6
       },
       "vuKick": {
         "channel": 5,
-        "gain": -1
+        "gain": -6
       },
       "vuMid": {
         "channel": 2,
-        "gain": -3
+        "gain": -2
       },
       "vuTop": {
         "channel": 3,
-        "gain": -5
+        "gain": 0
       }
     },
     "in": {
