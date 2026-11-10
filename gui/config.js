@@ -41,10 +41,12 @@ export const MUX_RAW_SIZE = 80;
 export const CONSOLE_POT_MIN_DELTA_DETAILED = 0.003;
 export const CONSOLE_POT_MIN_DELTA_NORMAL = 0.025;
 
-/** No fresh Bela data for this long → badge OFFLINE. */
-export const BELA_OFFLINE_TIMEOUT_MS = 1000;
-/** Nominal GUI tick ~50 ms @ 20 fps; gap above this → badge LAG (orange). */
-export const BELA_LAG_THRESHOLD_MS = 180;
+/** No fresh Bela data for this long → badge OFFLINE (2000 ms = 2 s). */
+export const BELA_OFFLINE_TIMEOUT_MS = 2000;
+/** Nominal GUI tick ~50 ms @ 20 fps; gap above this (10 frames) → badge LAG (orange). */
+export const BELA_LAG_THRESHOLD_MS = 500;
+/** Minimum visual duration to display LAG before reverting to LIVE (anti-flicker). */
+export const BELA_LAG_HOLD_MS = 500;
 
 /** CPU temp badge colour thresholds (°C) — display only. */
 export const CPU_TEMP_WARM_C = 65;

@@ -53,6 +53,9 @@ export function createState() {
         masterEqTargets: [],
         consoleLists: [],
         lastBelaRxMs: 0,
-        belaRxFingerprint: ''
+        belaRxFingerprint: '',
+        belaConnState: 'offline',
+        belaLastLagMs: 0,
+        belaRxPackets: 0
     };
 }

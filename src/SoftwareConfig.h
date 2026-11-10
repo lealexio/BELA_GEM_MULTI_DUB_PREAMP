@@ -58,6 +58,11 @@ constexpr float kStartupMuteDelayMs = kStartupLedStepMs * static_cast<float>(kSt
 /// clicking.
 constexpr float kStartupRampMs = 300.f;
 
+/// Duration of the smooth S-curve fade-out ramp applied to audio outputs when
+/// stopping the project via Bela IDE, Ctrl+C or SIGINT/SIGTERM (ms).
+/// Suppresses the DAC shutdown pop. 80 ms is fast and completely inaudible.
+constexpr float kShutdownRampMs = 80.f;
+
 // ---------------------------------------------------------------------------
 // Potentiometer processing
 // ---------------------------------------------------------------------------

@@ -19,6 +19,7 @@ https://bela.io
 #include <algorithm>
 #include <atomic>
 #include <cmath>
+#include <csignal>
 #include <cstdio>
 #include <cstring>
 #include <libraries/Gui/Gui.h>
@@ -236,6 +237,21 @@ static unsigned int gClipWarnCounter = 0;
 static int gStartupDelayRemaining = 0;
 static int gStartupRampRemaining = 0;
 static int gStartupRampTotal = 0;
+
+// Shutdown fade-out state (suppresses pop when stopping via Bela IDE or SIGINT/SIGTERM)
+static std::atomic<bool> gShutdownSignalReceived{false};
+static std::atomic<int> gShutdownSignalCount{0};
+static bool gShutdownInProgress = false;
+static int gShutdownRampTotal = 0;
+static int gShutdownRampRemaining = 0;
+
+static void shutdownSignalHandler(int sig) {
+  if (++gShutdownSignalCount > 2) {
+    Bela_requestStop();
+    return;
+  }
+  gShutdownSignalReceived.store(true, std::memory_order_relaxed);
+}
 
 // Populated in setup() after ConfigLoader::load() — not recomputed every block.
 static PotRef gGeqPots[GraphicEq::kNumBands];
@@ -669,6 +685,10 @@ bool setup(BelaContext *context, void *userData) {
   gStartupRampTotal = (int)(sr * kStartupRampMs / 1000.f);
   gStartupRampRemaining = gStartupRampTotal;
 
+  // Intercept termination signals (Bela IDE Stop / Ctrl+C) to fade out cleanly
+  signal(SIGINT, shutdownSignalHandler);
+  signal(SIGTERM, shutdownSignalHandler);
+
   // Initialise MCP23017 — non-blocking if disconnected (preamp starts anyway)
   if (!gHardwareManager.initMcp23017(true)) {
     rt_printf("render: MCP23017 not detected — running without hardware "
@@ -835,6 +855,15 @@ bool setup(BelaContext *context, void *userData) {
 }
 
 void render(BelaContext *context, void *userData) {
+  // Check if a shutdown signal was received and initiate the fade-out
+  if (gShutdownSignalReceived.load(std::memory_order_relaxed) &&
+      !gShutdownInProgress) {
+    gShutdownInProgress = true;
+    gShutdownRampTotal =
+        (int)(context->audioSampleRate * kShutdownRampMs / 1000.f);
+    gShutdownRampRemaining = gShutdownRampTotal;
+  }
+
   // Apply live mic/HPF changes queued by the gui_control callback (non-RT).
   {
     uint8_t pending = gMicHpfPendingMask.exchange(0);
@@ -1297,20 +1326,36 @@ void render(BelaContext *context, void *userData) {
       startupGain = 1.f;
     }
 
+    // Shutdown fade-out: smooth S-curve ramp 1.0 -> 0.0 to suppress stop pop
+    float shutdownGain = 1.f;
+    if (gShutdownInProgress) {
+      if (gShutdownRampRemaining > 0) {
+        float progress =
+            (float)gShutdownRampRemaining / (float)gShutdownRampTotal;
+        // Smooth half-cosine S-curve: 0.5 * (1 - cos(pi * progress))
+        shutdownGain = 0.5f * (1.f - cosf(progress * 3.14159265358979323846f));
+        --gShutdownRampRemaining;
+      } else {
+        shutdownGain = 0.f;
+      }
+    }
+
+    const float outputGain = startupGain * shutdownGain;
+
     scope.log(dry1L + dry2L + fxReturn, finalL);
-    audioWrite(context, n, FX1_SEND_OUT, fxSend * startupGain);
-    audioWrite(context, n, FX2_SEND_OUT, fxSend2 * startupGain);
+    audioWrite(context, n, FX1_SEND_OUT, fxSend * outputGain);
+    audioWrite(context, n, FX2_SEND_OUT, fxSend2 * outputGain);
 
     // Master outputs: in stereo, OUT0 = L, OUT1 = R. In mono, both OUT0 and
     // OUT1 = outMono (L+R).
     if (MASTER_OUTS_COUNT >= 2) {
-      audioWrite(context, n, MASTER_OUTS[0], finalL * startupGain);
-      audioWrite(context, n, MASTER_OUTS[1], finalR * startupGain);
+      audioWrite(context, n, MASTER_OUTS[0], finalL * outputGain);
+      audioWrite(context, n, MASTER_OUTS[1], finalR * outputGain);
       for (int i = 2; i < MASTER_OUTS_COUNT; ++i)
-        audioWrite(context, n, MASTER_OUTS[i], finalL * startupGain);
+        audioWrite(context, n, MASTER_OUTS[i], finalL * outputGain);
     } else {
       for (int i = 0; i < MASTER_OUTS_COUNT; ++i)
-        audioWrite(context, n, MASTER_OUTS[i], finalL * startupGain);
+        audioWrite(context, n, MASTER_OUTS[i], finalL * outputGain);
     }
 
     // VU meters — band-split reference signal (finalL: outL in stereo, outMono
@@ -1319,10 +1364,10 @@ void render(BelaContext *context, void *userData) {
     float vuKick = gVuKickLpf.process(gVuKickHpf.process(finalL));
     float vuMid = gVuMidLpf.process(gVuMidHpf.process(finalL));
     float vuTop = gVuTopHpf.process(finalL);
-    audioWrite(context, n, VU_SUB_OUT, vuSub * startupGain);
-    audioWrite(context, n, VU_KICK_OUT, vuKick * startupGain);
-    audioWrite(context, n, VU_MID_OUT, vuMid * startupGain);
-    audioWrite(context, n, VU_TOP_OUT, vuTop * startupGain);
+    audioWrite(context, n, VU_SUB_OUT, vuSub * outputGain);
+    audioWrite(context, n, VU_KICK_OUT, vuKick * outputGain);
+    audioWrite(context, n, VU_MID_OUT, vuMid * outputGain);
+    audioWrite(context, n, VU_TOP_OUT, vuTop * outputGain);
 
 // GUI peak tracking — one max(|x|) per channel per update interval.
 #define GUI_PEAK(i, x)                                                         \
@@ -1348,7 +1393,7 @@ void render(BelaContext *context, void *userData) {
   }
 
   // --- Trigger hardware clip LEDs on MCP23017 (RT-safe atomic signals) ---
-  if (gHardwareManager.isStartupAnimationDone()) {
+  if (gHardwareManager.isStartupAnimationDone() && !gShutdownInProgress) {
     if (clipMaster)
       gHardwareManager.triggerClip(HardwareManager::CLIP_MASTER);
     if (clipAux1)
@@ -1475,9 +1520,18 @@ void render(BelaContext *context, void *userData) {
       }
     }
   }
+
+  // Trigger clean shutdown once fade-out completes
+  if (gShutdownInProgress && gShutdownRampRemaining <= 0) {
+    Bela_requestStop();
+  }
 }
 
 void cleanup(BelaContext *context, void *userData) {
+  // Mute all hardware DAC output levels before codec clocks shut down
+  for (int ch = 0; ch < kCodecChannels; ++ch) {
+    applyCodecOutputGain(ch, kCodecOutputGainMinDb);
+  }
   gHardwareManager.closeMcp23017();
   gGui.cleanup();
 }

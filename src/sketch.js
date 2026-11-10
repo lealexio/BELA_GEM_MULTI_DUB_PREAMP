@@ -80,8 +80,9 @@ var __belaPreampSketch = (() => {
   var MUX_RAW_SIZE = 80;
   var CONSOLE_POT_MIN_DELTA_DETAILED = 3e-3;
   var CONSOLE_POT_MIN_DELTA_NORMAL = 0.025;
-  var BELA_OFFLINE_TIMEOUT_MS = 1e3;
-  var BELA_LAG_THRESHOLD_MS = 180;
+  var BELA_OFFLINE_TIMEOUT_MS = 2e3;
+  var BELA_LAG_THRESHOLD_MS = 500;
+  var BELA_LAG_HOLD_MS = 500;
   var CPU_TEMP_WARM_C = 65;
   var CPU_TEMP_HOT_C = 75;
   var SIREN_PRESETS = ["Wail", "Whoop", "Police", "Scanner", "Riotgun", "Laser"];
@@ -418,7 +419,10 @@ var __belaPreampSketch = (() => {
       masterEqTargets: [],
       consoleLists: [],
       lastBelaRxMs: 0,
-      belaRxFingerprint: ""
+      belaRxFingerprint: "",
+      belaConnState: "offline",
+      belaLastLagMs: 0,
+      belaRxPackets: 0
     };
   }
 
@@ -1399,39 +1403,85 @@ border-radius:6px;background:transparent;
   function belaControlReady() {
     return typeof Bela !== "undefined" && Bela.control && Bela.control.ws && Bela.control.ws.readyState === 1;
   }
-  function sampleBelaFingerprint(b) {
-    const parts = [];
-    if (b[0]) {
-      parts.push("p");
-      for (let i = 0; i < Math.min(6, b[0].length); i++)
-        parts.push(b[0][i].toFixed(4));
+  var _belaListenersAttached = false;
+  function ensureBelaWatchdogListeners() {
+    if (_belaListenersAttached) return true;
+    if (typeof Bela === "undefined") return false;
+    const onDataReceived = () => {
+      try {
+        const ctx = getContext();
+        ctx.lastBelaRxMs = Date.now();
+        ctx.belaRxPackets = (ctx.belaRxPackets || 0) + 1;
+      } catch (_) {
+      }
+    };
+    if (Bela.data && Bela.data.target && typeof Bela.data.target.addEventListener === "function") {
+      Bela.data.target.addEventListener("buffer-ready", onDataReceived);
+      _belaListenersAttached = true;
     }
-    if (b[3]) {
-      parts.push("a");
-      for (let i = 0; i < b[3].length; i++)
-        parts.push(b[3][i].toFixed(5));
+    const ws = Bela.socket || Bela.ws || Bela.data && Bela.data.socket;
+    if (ws && typeof ws.addEventListener === "function") {
+      ws.addEventListener("message", onDataReceived);
+      ws.addEventListener("close", () => {
+        try {
+          const ctx = getContext();
+          ctx.lastBelaRxMs = 0;
+          ctx.belaConnState = "offline";
+          updateBadge();
+        } catch (_) {
+        }
+      });
+      _belaListenersAttached = true;
+    }
+    return _belaListenersAttached;
+  }
+  function sampleBelaFingerprint(b) {
+    if (!b) return "";
+    const parts = [];
+    if (b[0] && b[0].length) {
+      parts.push("p:" + b[0][0].toFixed(3) + ":" + b[0][b[0].length - 1].toFixed(3) + ":" + b[0].length);
+    }
+    if (b[3] && b[3].length) {
+      parts.push("a:" + b[3][0].toFixed(4));
     }
     return parts.join(",");
   }
   function updateBelaRxWatchdog(b) {
-    if (!b || !b[0]) return;
+    if (!b) return;
+    ensureBelaWatchdogListeners();
     const now = Date.now();
-    const fp = sampleBelaFingerprint(b);
-    if (fp !== getContext().belaRxFingerprint) {
-      getContext().belaRxFingerprint = fp;
-      getContext().lastBelaRxMs = now;
-    } else if (getContext().lastBelaRxMs === 0) {
-      getContext().belaRxFingerprint = fp;
-      getContext().lastBelaRxMs = now;
+    const ctx = getContext();
+    if (ctx.lastBelaRxMs === 0 && (b[0] || b[1] || b[3])) {
+      ctx.lastBelaRxMs = now;
+    }
+    if (!_belaListenersAttached && b[0]) {
+      const fp = sampleBelaFingerprint(b);
+      if (fp !== ctx.belaRxFingerprint) {
+        ctx.belaRxFingerprint = fp;
+        ctx.lastBelaRxMs = now;
+      }
     }
   }
   function getBelaConnState() {
     if (typeof Bela === "undefined") return "offline";
     if (!belaSocketOpen()) return "offline";
-    if (getContext().lastBelaRxMs === 0) return "offline";
-    const staleMs = Date.now() - getContext().lastBelaRxMs;
-    if (staleMs >= BELA_OFFLINE_TIMEOUT_MS) return "offline";
-    if (staleMs >= BELA_LAG_THRESHOLD_MS) return "lag";
+    const ctx = getContext();
+    if (ctx.lastBelaRxMs === 0) return "offline";
+    const now = Date.now();
+    const staleMs = now - ctx.lastBelaRxMs;
+    if (staleMs >= BELA_OFFLINE_TIMEOUT_MS) {
+      ctx.belaConnState = "offline";
+      return "offline";
+    }
+    if (staleMs >= BELA_LAG_THRESHOLD_MS) {
+      ctx.belaConnState = "lag";
+      ctx.belaLastLagMs = now;
+      return "lag";
+    }
+    if (ctx.belaConnState === "lag" && now - (ctx.belaLastLagMs || 0) < BELA_LAG_HOLD_MS) {
+      return "lag";
+    }
+    ctx.belaConnState = "live";
     return "live";
   }
   function isBelaConnected() {
