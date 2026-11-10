@@ -41,7 +41,8 @@ constexpr unsigned int kClipWarnIntervalBlocks = 4410;
 constexpr float kClipLedHoldMs = 80.f;
 
 /// Duration of each step of the startup LED animation (ms).
-/// Fast ping-pong scan: MASTER -> AUX1..4 -> AUX3..1 -> MASTER (2 round-trips = 17 steps).
+/// Fast ping-pong scan: MASTER -> AUX1..4 -> AUX3..1 -> MASTER (2 round-trips =
+/// 17 steps).
 constexpr float kStartupLedStepMs = 70.f;
 
 /// Total number of steps in the startup LED animation.
@@ -50,18 +51,21 @@ constexpr int kStartupLedAnimSteps = 17;
 /// Duration of the initial silent mute period at startup (ms).
 /// Holds all audio outputs strictly at 0.0 to let DAC power rails, DC blocking
 /// capacitors, multiplexers, and I2C communication fully stabilize without any
-/// pop. Calibrated to match the full startup LED animation duration (17 steps * 70 ms = 1190 ms).
-constexpr float kStartupMuteDelayMs = kStartupLedStepMs * static_cast<float>(kStartupLedAnimSteps);
+/// pop. Calibrated to match the full startup LED animation duration (17 steps *
+/// 70 ms = 1190 ms).
+constexpr float kStartupMuteDelayMs =
+    kStartupLedStepMs * static_cast<float>(kStartupLedAnimSteps);
 
 /// Duration of the smooth S-curve fade-in ramp applied to audio outputs (ms).
 /// Gradually brings audio to full level after the startup mute delay without
 /// clicking.
 constexpr float kStartupRampMs = 300.f;
 
-/// Duration of the smooth S-curve fade-out ramp applied to audio outputs when
-/// stopping the project via Bela IDE, Ctrl+C or SIGINT/SIGTERM (ms).
-/// Suppresses the DAC shutdown pop. 80 ms is fast and completely inaudible.
-constexpr float kShutdownRampMs = 80.f;
+/// Duration of the ultra-fast S-curve fade-out ramp applied to audio outputs
+/// when stopping the project via Bela IDE Stop button or SIGINT/SIGTERM (ms).
+/// 30 ms (1323 samples @ 44.1 kHz) is completely click-free and inaudible,
+/// while completing well before the Bela IDE 200 ms kill -9 timeout.
+constexpr float kShutdownRampMs = 30.f;
 
 // ---------------------------------------------------------------------------
 // Potentiometer processing

@@ -238,7 +238,8 @@ static int gStartupDelayRemaining = 0;
 static int gStartupRampRemaining = 0;
 static int gStartupRampTotal = 0;
 
-// Shutdown fade-out state (suppresses pop when stopping via Bela IDE or SIGINT/SIGTERM)
+// Shutdown fade-out state (suppresses pop when stopping via Bela IDE or
+// SIGINT/SIGTERM)
 static std::atomic<bool> gShutdownSignalReceived{false};
 static std::atomic<int> gShutdownSignalCount{0};
 static bool gShutdownInProgress = false;
@@ -250,6 +251,8 @@ static void shutdownSignalHandler(int sig) {
     Bela_requestStop();
     return;
   }
+  rt_printf("[Audio] Stop signal intercepted! Fading out in %d ms...\n",
+            (int)kShutdownRampMs);
   gShutdownSignalReceived.store(true, std::memory_order_relaxed);
 }
 
@@ -685,10 +688,6 @@ bool setup(BelaContext *context, void *userData) {
   gStartupRampTotal = (int)(sr * kStartupRampMs / 1000.f);
   gStartupRampRemaining = gStartupRampTotal;
 
-  // Intercept termination signals (Bela IDE Stop / Ctrl+C) to fade out cleanly
-  signal(SIGINT, shutdownSignalHandler);
-  signal(SIGTERM, shutdownSignalHandler);
-
   // Initialise MCP23017 — non-blocking if disconnected (preamp starts anyway)
   if (!gHardwareManager.initMcp23017(true)) {
     rt_printf("render: MCP23017 not detected — running without hardware "
@@ -855,6 +854,18 @@ bool setup(BelaContext *context, void *userData) {
 }
 
 void render(BelaContext *context, void *userData) {
+  // Install shutdown signal handlers on first audio block so they run AFTER
+  // Bela's default_main.cpp has set up its own handlers, ensuring our fade-out
+  // handler takes precedence upon clicking "Stop" in the IDE or pressing
+  // Ctrl+C.
+  static bool gSignalsInstalled = false;
+  if (!gSignalsInstalled) {
+    signal(SIGINT, shutdownSignalHandler);
+    signal(SIGTERM, shutdownSignalHandler);
+    gSignalsInstalled = true;
+    rt_printf("[Audio] Graceful shutdown handler installed successfully\n");
+  }
+
   // Check if a shutdown signal was received and initiate the fade-out
   if (gShutdownSignalReceived.load(std::memory_order_relaxed) &&
       !gShutdownInProgress) {
@@ -1523,15 +1534,12 @@ void render(BelaContext *context, void *userData) {
 
   // Trigger clean shutdown once fade-out completes
   if (gShutdownInProgress && gShutdownRampRemaining <= 0) {
+    rt_printf("[Audio] Fade-out complete. Requesting Bela stop.\n");
     Bela_requestStop();
   }
 }
 
 void cleanup(BelaContext *context, void *userData) {
-  // Mute all hardware DAC output levels before codec clocks shut down
-  for (int ch = 0; ch < kCodecChannels; ++ch) {
-    applyCodecOutputGain(ch, kCodecOutputGainMinDb);
-  }
   gHardwareManager.closeMcp23017();
   gGui.cleanup();
 }
