@@ -54,7 +54,7 @@
     "in": {
       "fx1Return": {
         "channels": [
-          0
+          1
         ],
         "mic": false,
         "hpf": 0,
@@ -62,7 +62,7 @@
       },
       "fx2Return": {
         "channels": [
-          1
+          0
         ],
         "mic": false,
         "hpf": 0,
