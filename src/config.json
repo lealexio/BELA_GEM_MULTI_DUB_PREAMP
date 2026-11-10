@@ -175,28 +175,28 @@
       "mux": 2,
       "pot": 4,
       "reversed": true,
-      "centered": false
+      "centered": true
     },
     {
       "name": "AUX2_FX_SEND",
       "mux": 2,
       "pot": 6,
       "reversed": true,
-      "centered": true
+      "centered": false
     },
     {
       "name": "AUX2_FX2_SEND",
       "mux": 2,
       "pot": 7,
       "reversed": true,
-      "centered": true
+      "centered": false
     },
     {
       "name": "AUX3_INPUT_GAIN",
       "mux": 1,
       "pot": 3,
       "reversed": true,
-      "centered": true
+      "centered": false
     },
     {
       "name": "AUX3_EQ_LOW",
@@ -224,14 +224,14 @@
       "mux": 1,
       "pot": 6,
       "reversed": true,
-      "centered": true
+      "centered": false
     },
     {
       "name": "AUX3_FX2_SEND",
       "mux": 1,
       "pot": 7,
       "reversed": true,
-      "centered": true
+      "centered": false
     },
     {
       "name": "AUX4_INPUT_GAIN",
@@ -273,7 +273,7 @@
       "mux": 0,
       "pot": 7,
       "reversed": true,
-      "centered": true
+      "centered": false
     },
     {
       "name": "MASTER_GAIN",
@@ -287,28 +287,28 @@
       "mux": 5,
       "pot": 4,
       "reversed": true,
-      "centered": true
+      "centered": false
     },
     {
       "name": "MASTER_EQ_SUB_GAIN",
       "mux": 4,
       "pot": 8,
       "reversed": true,
-      "centered": false
+      "centered": true
     },
     {
       "name": "MASTER_EQ_KICK_FREQ",
       "mux": 5,
       "pot": 5,
       "reversed": true,
-      "centered": true
+      "centered": false
     },
     {
       "name": "MASTER_EQ_KICK_GAIN",
       "mux": 4,
       "pot": 9,
       "reversed": true,
-      "centered": false
+      "centered": true
     },
     {
       "name": "MASTER_EQ_MID_FREQ",
@@ -336,7 +336,7 @@
       "mux": 4,
       "pot": 1,
       "reversed": true,
-      "centered": false
+      "centered": true
     },
     {
       "name": "MASTER_HPF_FREQ",
@@ -350,7 +350,7 @@
       "mux": 4,
       "pot": 5,
       "reversed": true,
-      "centered": true
+      "centered": false
     },
     {
       "name": "MASTER_LPF_FREQ",
@@ -385,49 +385,49 @@
       "mux": 5,
       "pot": 0,
       "reversed": true,
-      "centered": false
+      "centered": true
     },
     {
       "name": "BTRIM_TOP",
       "mux": 5,
       "pot": 1,
       "reversed": true,
-      "centered": false
+      "centered": true
     },
     {
       "name": "SIREN_TYPE",
       "mux": 6,
       "pot": 8,
       "reversed": true,
-      "centered": true
+      "centered": false
     },
     {
       "name": "SIREN_MOD",
       "mux": 6,
       "pot": 9,
       "reversed": true,
-      "centered": true
+      "centered": false
     },
     {
       "name": "SIREN_GAIN",
       "mux": 6,
       "pot": 0,
       "reversed": true,
-      "centered": true
+      "centered": false
     },
     {
       "name": "SIREN_FX_SEND",
       "mux": 6,
       "pot": 1,
       "reversed": true,
-      "centered": true
+      "centered": false
     },
     {
       "name": "SIREN_FX2_SEND",
       "mux": 7,
       "pot": 4,
       "reversed": true,
-      "centered": true
+      "centered": false
     },
     {
       "name": "GEQ_40HZ",
@@ -448,7 +448,7 @@
       "mux": 3,
       "pot": 0,
       "reversed": true,
-      "centered": false
+      "centered": true
     },
     {
       "name": "GEQ_100HZ",
@@ -476,28 +476,28 @@
       "mux": 1,
       "pot": 0,
       "reversed": true,
-      "centered": false
+      "centered": true
     },
     {
       "name": "GEQ_1KHZ",
       "mux": 1,
       "pot": 1,
       "reversed": true,
-      "centered": false
+      "centered": true
     },
     {
       "name": "GEQ_2KHZ",
       "mux": 0,
       "pot": 0,
       "reversed": true,
-      "centered": false
+      "centered": true
     },
     {
       "name": "GEQ_4KHZ",
       "mux": 0,
       "pot": 1,
       "reversed": true,
-      "centered": false
+      "centered": true
     },
     {
       "name": "GEQ_8KHZ",
@@ -525,7 +525,7 @@
       "mux": 7,
       "pot": 7,
       "reversed": true,
-      "centered": true
+      "centered": false
     }
   ],
   "switches": [

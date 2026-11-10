@@ -153,6 +153,14 @@ public:
             clipPending_[ch].store(true, std::memory_order_relaxed);
     }
 
+    /**
+     * Returns true once the startup LED animation has completed (or if no LEDs / no MCP).
+     * RT-safe: atomic relaxed load.
+     */
+    bool isStartupAnimationDone() const {
+        return startupAnimationDone_.load(std::memory_order_relaxed);
+    }
+
 private:
     float potValues_[kNumMux * kPotsPerMux];
     int   currentChannel_ = 0;
@@ -175,4 +183,9 @@ private:
     uint8_t              currentOlatA_   = 0x00;
     uint8_t              currentOlatB_   = 0x00;
     bool                 hasClipOutputs_ = false;
+
+    // Startup LED animation state (managed by readMcp23017 in the non-RT AuxTask)
+    std::atomic<bool>    startupAnimationDone_{false};
+    int                  startupAnimationTick_ = 0;
+    int                  startupAnimationStep_ = 0;
 };

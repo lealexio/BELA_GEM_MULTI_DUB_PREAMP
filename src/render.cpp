@@ -26,7 +26,6 @@ https://bela.io
 #include <unistd.h>
 #include <vector>
 
-
 HardwareManager gHardwareManager;
 ChannelStrip gChannelStrip;   // AUX1 left/mono
 ChannelStrip gChannelStripR;  // AUX1 right (active when AUX1_CONFIG.isStereo())
@@ -234,6 +233,7 @@ static void fillConfigMetaBuf() {
 // ---------------------------------------------------------------------------
 
 static unsigned int gClipWarnCounter = 0;
+static int gStartupDelayRemaining = 0;
 static int gStartupRampRemaining = 0;
 static int gStartupRampTotal = 0;
 
@@ -664,7 +664,8 @@ bool setup(BelaContext *context, void *userData) {
   setupMicHpf(2, AUX3_CONFIG, sr);
   setupMicHpf(3, AUX4_CONFIG, sr);
 
-  // Startup mute ramp: suppress DAC initialisation transient
+  // Startup mute & ramp: suppress DAC initialisation transient and pop
+  gStartupDelayRemaining = (int)(sr * kStartupMuteDelayMs / 1000.f);
   gStartupRampTotal = (int)(sr * kStartupRampMs / 1000.f);
   gStartupRampRemaining = gStartupRampTotal;
 
@@ -1278,13 +1279,22 @@ void render(BelaContext *context, void *userData) {
         clipMaster = true;
     }
 
-    // Startup mute ramp: linear fade 0→1 over kStartupRampMs to suppress DAC
-    // pop
-    float startupGain = 1.f;
-    if (gStartupRampRemaining > 0) {
-      startupGain =
+    // Startup mute delay & S-curve ramp: suppress DAC initialisation transient
+    // and pop while the startup LED animation runs.
+    float startupGain = 0.f;
+    if (gStartupDelayRemaining > 0 ||
+        !gHardwareManager.isStartupAnimationDone()) {
+      if (gStartupDelayRemaining > 0)
+        --gStartupDelayRemaining;
+      startupGain = 0.f;
+    } else if (gStartupRampRemaining > 0) {
+      float progress =
           1.f - (float)gStartupRampRemaining / (float)gStartupRampTotal;
+      // Smooth half-cosine S-curve: 0.5 * (1 - cos(pi * progress))
+      startupGain = 0.5f * (1.f - cosf(progress * 3.14159265358979323846f));
       --gStartupRampRemaining;
+    } else {
+      startupGain = 1.f;
     }
 
     scope.log(dry1L + dry2L + fxReturn, finalL);
@@ -1338,16 +1348,18 @@ void render(BelaContext *context, void *userData) {
   }
 
   // --- Trigger hardware clip LEDs on MCP23017 (RT-safe atomic signals) ---
-  if (clipMaster)
-    gHardwareManager.triggerClip(HardwareManager::CLIP_MASTER);
-  if (clipAux1)
-    gHardwareManager.triggerClip(HardwareManager::CLIP_AUX1);
-  if (clipAux2)
-    gHardwareManager.triggerClip(HardwareManager::CLIP_AUX2);
-  if (clipAux3)
-    gHardwareManager.triggerClip(HardwareManager::CLIP_AUX3);
-  if (clipAux4)
-    gHardwareManager.triggerClip(HardwareManager::CLIP_AUX4);
+  if (gHardwareManager.isStartupAnimationDone()) {
+    if (clipMaster)
+      gHardwareManager.triggerClip(HardwareManager::CLIP_MASTER);
+    if (clipAux1)
+      gHardwareManager.triggerClip(HardwareManager::CLIP_AUX1);
+    if (clipAux2)
+      gHardwareManager.triggerClip(HardwareManager::CLIP_AUX2);
+    if (clipAux3)
+      gHardwareManager.triggerClip(HardwareManager::CLIP_AUX3);
+    if (clipAux4)
+      gHardwareManager.triggerClip(HardwareManager::CLIP_AUX4);
+  }
 
   // --- Clip warnings (rate-limited) ---
   ++gClipWarnCounter;

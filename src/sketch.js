@@ -158,6 +158,14 @@ var __belaPreampSketch = (() => {
     "FX1_RETURN_GAIN",
     "FX2_RETURN_GAIN"
   ];
+  function isPotCentered(name) {
+    if (!name) return false;
+    if (/^AUX\d_EQ_(LOW|MID|HIGH)$/.test(name)) return true;
+    if (name.startsWith("GEQ_")) return true;
+    if (name.startsWith("BTRIM_")) return true;
+    if (/^MASTER_EQ_.*_GAIN$/.test(name)) return true;
+    return false;
+  }
   var SWITCH_NAMES = [
     "KILL_SUB",
     "KILL_KICK",
@@ -1077,6 +1085,7 @@ padding:3px 4px;border:1px solid #ddd;
 border-radius:4px;font-size:12px;font-family:inherit;
 }
 .mtable input[type=checkbox]{width:16px;height:16px;cursor:pointer;margin:0 auto;display:block}
+.mtable input[type=checkbox]:disabled{cursor:not-allowed;opacity:0.6}
 .mtable select{
 width:100%;min-width:0;max-width:100%;
 padding:3px 4px;border:1px solid #ddd;
@@ -1480,8 +1489,8 @@ border-radius:6px;background:transparent;
     "out": {
       "master": {
         "channels": [
-          0,
-          1
+          6,
+          7
         ],
         "stereo": true,
         "gain": 0
@@ -1500,15 +1509,15 @@ border-radius:6px;background:transparent;
       },
       "vuSub": {
         "channel": 4,
-        "gain": 0
+        "gain": -6
       },
       "vuKick": {
         "channel": 5,
-        "gain": 0
+        "gain": -6
       },
       "vuMid": {
         "channel": 2,
-        "gain": 0
+        "gain": -2
       },
       "vuTop": {
         "channel": 3,
@@ -2590,11 +2599,12 @@ border-radius:6px;background:transparent;
         const mux = Math.round(getContext().potMapping[i * 4 + 0]);
         const pot = Math.round(getContext().potMapping[i * 4 + 1]);
         const rev = getContext().potMapping[i * 4 + 2] > 0.5;
-        const cen = getContext().potMapping[i * 4 + 3] > 0.5;
+        const cen = isPotCentered(name);
+        getContext().potMapping[i * 4 + 3] = cen ? 1 : 0;
         const tr = document.createElement("tr");
         tr.dataset.mapTable = "pot";
         tr.dataset.mapIndex = String(i);
-        tr.innerHTML = `<td class="pname" title="${name}">${name}</td><td><input type="number" min="0" max="7"  value="${mux}" data-i="${i}" data-f="mux" class="pi"></td><td><input type="number" min="0" max="9"  value="${pot}" data-i="${i}" data-f="pot" class="pi"></td><td class="col-check"><input type="checkbox" ${rev ? "checked" : ""} data-i="${i}" data-f="rev" class="pi"></td><td class="col-check"><input type="checkbox" ${cen ? "checked" : ""} data-i="${i}" data-f="cen" class="pi"></td><td class="detect-cell"></td>`;
+        tr.innerHTML = `<td class="pname" title="${name}">${name}</td><td><input type="number" min="0" max="7"  value="${mux}" data-i="${i}" data-f="mux" class="pi"></td><td><input type="number" min="0" max="9"  value="${pot}" data-i="${i}" data-f="pot" class="pi"></td><td class="col-check"><input type="checkbox" ${rev ? "checked" : ""} data-i="${i}" data-f="rev" class="pi"></td><td class="col-check"><input type="checkbox" ${cen ? "checked" : ""} data-i="${i}" data-f="cen" class="pi" disabled title="Fix\xE9 par le DSP : ${cen ? "Centr\xE9 (bipolaire 0 dB \xE0 12h)" : "Lin\xE9aire / Unipolaire"}"></td><td class="detect-cell"></td>`;
         tr.querySelector(".detect-cell").appendChild(createDetectButton("pot", i));
         ptbody.appendChild(tr);
       });
@@ -3118,13 +3128,12 @@ border-radius:6px;background:transparent;
     const muxInp = document.querySelector(`.pi[data-i="${i}"][data-f="mux"]`);
     const potInp = document.querySelector(`.pi[data-i="${i}"][data-f="pot"]`);
     const revInp = document.querySelector(`.pi[data-i="${i}"][data-f="rev"]`);
-    const cenInp = document.querySelector(`.pi[data-i="${i}"][data-f="cen"]`);
     if (!muxInp || !potInp) return null;
     return {
       mux: parseInt(muxInp.value, 10) || 0,
       pot: parseInt(potInp.value, 10) || 0,
       rev: revInp ? revInp.checked : false,
-      cen: cenInp ? cenInp.checked : false
+      cen: isPotCentered(POT_NAMES[i])
     };
   }
   function readSwitchMappingRow(i) {
@@ -3148,7 +3157,6 @@ border-radius:6px;background:transparent;
           const src = readPotMappingRow(i);
           if (src) {
             setMappingField("pot", dst, "rev", src.rev);
-            setMappingField("pot", dst, "cen", src.cen);
           }
           break;
         }
@@ -3172,7 +3180,6 @@ border-radius:6px;background:transparent;
       setMappingField("pot", dst, "mux", src.mux);
       setMappingField("pot", dst, "pot", src.pot);
       setMappingField("pot", dst, "rev", src.rev);
-      setMappingField("pot", dst, "cen", src.cen);
       showDownloadStatus(
         "Detected " + sourceName + " \u2192 MUX " + src.mux + " / ch " + src.pot,
         false
@@ -3250,7 +3257,7 @@ border-radius:6px;background:transparent;
       mux: Math.round(pm[i * 4 + 0]),
       pot: Math.round(pm[i * 4 + 1]),
       reversed: pm[i * 4 + 2] > 0.5,
-      centered: pm[i * 4 + 3] > 0.5
+      centered: isPotCentered(name)
     }));
     const switches = SWITCH_NAMES.map((name, i) => ({
       name,

@@ -3,7 +3,7 @@ import { getContext } from '../context.js';
 import {
     POT_NAMES, SWITCH_NAMES, MUX_POTS_PER_MUX, MUX_RAW_SIZE,
     CONFIG_META, I2C_BUS, DETECT_POT_MIN_DELTA,
-    MIC_HPF_HZ_MIN, MIC_HPF_HZ_MAX
+    MIC_HPF_HZ_MIN, MIC_HPF_HZ_MAX, isPotCentered
 } from '../config.js';
 import { ROUTING_CONFIG, IGNORED_POTS_DEFAULT } from '../routing-config.js';
 import { el } from './utils.js';
@@ -527,7 +527,8 @@ export function tryBuildMappingTable() {
             const mux = Math.round(getContext().potMapping[i * 4 + 0]);
             const pot = Math.round(getContext().potMapping[i * 4 + 1]);
             const rev = getContext().potMapping[i * 4 + 2] > 0.5;
-            const cen = getContext().potMapping[i * 4 + 3] > 0.5;
+            const cen = isPotCentered(name);
+            getContext().potMapping[i * 4 + 3] = cen ? 1.0 : 0.0;
             const tr = document.createElement('tr');
             tr.dataset.mapTable = 'pot';
             tr.dataset.mapIndex = String(i);
@@ -540,7 +541,7 @@ export function tryBuildMappingTable() {
                 `<td class="col-check"><input type="checkbox" ${rev ? 'checked' : ''} ` +
                 `data-i="${i}" data-f="rev" class="pi"></td>` +
                 `<td class="col-check"><input type="checkbox" ${cen ? 'checked' : ''} ` +
-                `data-i="${i}" data-f="cen" class="pi"></td>` +
+                `data-i="${i}" data-f="cen" class="pi" disabled title="Fixé par le DSP : ${cen ? 'Centré (bipolaire 0 dB à 12h)' : 'Linéaire / Unipolaire'}"></td>` +
                 `<td class="detect-cell"></td>`;
             tr.querySelector('.detect-cell').appendChild(createDetectButton('pot', i));
             ptbody.appendChild(tr);
@@ -1182,13 +1183,12 @@ function readPotMappingRow(i) {
     const muxInp = document.querySelector(`.pi[data-i="${i}"][data-f="mux"]`);
     const potInp = document.querySelector(`.pi[data-i="${i}"][data-f="pot"]`);
     const revInp = document.querySelector(`.pi[data-i="${i}"][data-f="rev"]`);
-    const cenInp = document.querySelector(`.pi[data-i="${i}"][data-f="cen"]`);
     if (!muxInp || !potInp) return null;
     return {
         mux: parseInt(muxInp.value, 10) || 0,
         pot: parseInt(potInp.value, 10) || 0,
         rev: revInp ? revInp.checked : false,
-        cen: cenInp ? cenInp.checked : false
+        cen: isPotCentered(POT_NAMES[i])
     };
 }
 
@@ -1218,7 +1218,6 @@ function finishDetectPotFromPhysical(mux, pot, label) {
                 const src = readPotMappingRow(i);
                 if (src) {
                     setMappingField('pot', dst, 'rev', src.rev);
-                    setMappingField('pot', dst, 'cen', src.cen);
                 }
                 break;
             }
@@ -1242,7 +1241,6 @@ function finishDetect(sourceIndex, sourceName) {
         setMappingField('pot', dst, 'mux', src.mux);
         setMappingField('pot', dst, 'pot', src.pot);
         setMappingField('pot', dst, 'rev', src.rev);
-        setMappingField('pot', dst, 'cen', src.cen);
         showDownloadStatus(
             'Detected ' + sourceName + ' → MUX ' + src.mux + ' / ch ' + src.pot, false
         );
@@ -1327,7 +1325,7 @@ function buildConfigJsonText(pm, sm) {
         mux: Math.round(pm[i * 4 + 0]),
         pot: Math.round(pm[i * 4 + 1]),
         reversed: pm[i * 4 + 2] > 0.5,
-        centered: pm[i * 4 + 3] > 0.5
+        centered: isPotCentered(name)
     }));
 
     const switches = SWITCH_NAMES.map((name, i) => ({

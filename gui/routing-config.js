@@ -3,8 +3,8 @@ export const ROUTING_CONFIG = {
   "out": {
     "master": {
       "channels": [
-        0,
-        1
+        6,
+        7
       ],
       "stereo": true,
       "gain": 0
@@ -23,15 +23,15 @@ export const ROUTING_CONFIG = {
     },
     "vuSub": {
       "channel": 4,
-      "gain": 0
+      "gain": -6
     },
     "vuKick": {
       "channel": 5,
-      "gain": 0
+      "gain": -6
     },
     "vuMid": {
       "channel": 2,
-      "gain": 0
+      "gain": -2
     },
     "vuTop": {
       "channel": 3,

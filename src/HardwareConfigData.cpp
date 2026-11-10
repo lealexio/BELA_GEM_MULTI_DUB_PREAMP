@@ -96,7 +96,7 @@ PotRef AUX1_EQ_HIGH    = {0, 3, true, "AUX1_EQ_HIGH", true};
 PotRef AUX1_FX_SEND    = {0, 4, true, "AUX1_FX_SEND"};
 PotRef AUX1_FX2_SEND   = {0, 5, true, "AUX1_FX2_SEND"};
 PotRef FX1_RETURN_GAIN = {0, 6, true, "FX1_RETURN_GAIN", false};
-PotRef FX2_RETURN_GAIN = {0, 7, true, "FX2_RETURN_GAIN", true};
+PotRef FX2_RETURN_GAIN = {0, 7, true, "FX2_RETURN_GAIN", false};
 
 // --- MUX 1: AUX 2 (IN4/5) & GEQ High ---
 PotRef AUX2_INPUT_GAIN = {1, 0, true, "AUX2_INPUT_GAIN"};

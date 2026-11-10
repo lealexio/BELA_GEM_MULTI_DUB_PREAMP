@@ -431,6 +431,22 @@ static void readMasterOutEntry(JSONValue *outObj, float gainDef = 0.f) {
   }
 }
 
+static bool isInherentlyCenteredPot(const std::string &name) {
+  if (name.size() > 7 && name.compare(0, 3, "AUX") == 0 &&
+      (name.compare(name.size() - 7, 7, "_EQ_LOW") == 0 ||
+       name.compare(name.size() - 7, 7, "_EQ_MID") == 0 ||
+       name.compare(name.size() - 8, 8, "_EQ_HIGH") == 0)) {
+    return true;
+  }
+  if (name.compare(0, 4, "GEQ_") == 0) return true;
+  if (name.compare(0, 6, "BTRIM_") == 0) return true;
+  if (name.compare(0, 10, "MASTER_EQ_") == 0 && name.size() > 5 &&
+      name.compare(name.size() - 5, 5, "_GAIN") == 0) {
+    return true;
+  }
+  return false;
+}
+
 // ---------------------------------------------------------------------------
 // ConfigLoader::load
 // ---------------------------------------------------------------------------
@@ -565,7 +581,14 @@ bool ConfigLoader::load(const char *path) {
       g->mux = mux;
       g->pot = pot;
       g->reversed = boolOf(e, L"reversed", g->reversed);
-      g->centered = boolOf(e, L"centered", g->centered);
+      bool dspCentered = isInherentlyCenteredPot(name);
+      bool jsonCentered = boolOf(e, L"centered", dspCentered);
+      if (jsonCentered != dspCentered) {
+        fprintf(stderr,
+                "[ConfigLoader] Pot '%s': overriding centered=%s -> %s (enforced by DSP semantics)\n",
+                name.c_str(), jsonCentered ? "true" : "false", dspCentered ? "true" : "false");
+      }
+      g->centered = dspCentered;
 
       // Mirror the change into kAllNamedPots so getPotName() stays in sync
       PotRef *entry = findPotByName(name.c_str());

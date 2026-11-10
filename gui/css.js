@@ -651,6 +651,7 @@ padding:3px 4px;border:1px solid #ddd;
 border-radius:4px;font-size:12px;font-family:inherit;
 }
 .mtable input[type=checkbox]{width:16px;height:16px;cursor:pointer;margin:0 auto;display:block}
+.mtable input[type=checkbox]:disabled{cursor:not-allowed;opacity:0.6}
 .mtable select{
 width:100%;min-width:0;max-width:100%;
 padding:3px 4px;border:1px solid #ddd;

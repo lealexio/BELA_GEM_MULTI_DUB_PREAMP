@@ -82,6 +82,20 @@ export const POT_NAMES = [
     'FX1_RETURN_GAIN', 'FX2_RETURN_GAIN'
 ]; // 60 entries
 
+/**
+ * Returns true if a potentiometer is inherently bipolar (0 dB at 12 o'clock).
+ * Bipolar controls: AUX EQs (±6 dB), Graphic EQ (±12 dB), BandTrim (±6 dB), Master Parametric Gains (±6 dB).
+ * All other pots (frequencies, resonance, volumes, FX sends, siren) are unipolar (false).
+ */
+export function isPotCentered(name) {
+    if (!name) return false;
+    if (/^AUX\d_EQ_(LOW|MID|HIGH)$/.test(name)) return true;
+    if (name.startsWith('GEQ_')) return true;
+    if (name.startsWith('BTRIM_')) return true;
+    if (/^MASTER_EQ_.*_GAIN$/.test(name)) return true;
+    return false;
+}
+
 /** Switch names matching kGuiSwitchRefs[] order in render.cpp. */
 export const SWITCH_NAMES = [
     'KILL_SUB', 'KILL_KICK', 'KILL_MID', 'KILL_TOP',
