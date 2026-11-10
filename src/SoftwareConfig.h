@@ -80,17 +80,11 @@ constexpr float kJitterThreshold = 0.002f;
 /// all accessors benefit automatically.
 constexpr float kSnapRadiusEdge = 0.04f;
 
-/// Exponent for the power curve applied to centred pots in
-/// getCenteredPotValue(). The curve maps raw [0, 1] → output [0, 1]
-/// symmetrically around 0.5:
-///   - Near 0.5 : low sensitivity (small pot movements → minimal DSP change).
-///   - Near 0 or 1 : high sensitivity (same movement → larger DSP change).
-/// The derivative at 0.5 is zero for any exponent > 1, so ADC jitter at
-/// centre produces no audible effect — no hard snap required.
-///   1.0 → linear (no curve)
-///   2.0 → quadratic (recommended: gentle centre, fast extremes)
-///   3.0 → cubic (more pronounced)
-constexpr float kCenteredPotExponent = 2.0f;
+/// Dead-zone half-width around 0.5 for getCenteredPotValue().
+/// Any raw value within [0.5 - kSnapRadiusCenter, 0.5 + kSnapRadiusCenter]
+/// returns exactly 0.5 (neutral / 0 dB). Outside this dead-zone, the response
+/// scales continuously and linearly to 0.0 and 1.0.
+constexpr float kSnapRadiusCenter = 0.03f;
 
 // ---------------------------------------------------------------------------
 // Linear gain ranges (channels, master, FX returns)

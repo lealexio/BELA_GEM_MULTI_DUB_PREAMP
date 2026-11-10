@@ -226,13 +226,13 @@ Dans `ChannelStrip::process()` (et toutes les classes EQ), les filtres sont cont
 ### FilterSection (HPF/LPF) : bypass mou + state warm
 Les deux biquads HPF et LPF tournent **en permanence** dans `process()`, même quand leur mix cible est 0. Cela maintient leur état interne (z1/z2) à jour. La transition bypass↔actif utilise un lisseur one-pole sur le mix sec/mouillé (`kFilterBypassRampMs = 5 ms`) pour éviter tout clic à l'activation.
 
-### Courbe de puissance pour pots centrés
-`getCenteredPotValue()` applique une courbe de puissance symétrique autour de 0.5 :
+### Linéarité et aimantation au centre pour pots centrés
+`getCenteredPotValue()` applique une réponse linéaire symétrique autour de 0.5 avec une zone morte :
 ```
-t = (v - 0.5) × 2     // [-1, +1]
-output = sign(t) × |t|^kCenteredPotExponent × 0.5 + 0.5
+- Si |v - 0.5| <= kSnapRadiusCenter : output = 0.5 (aimantation au centre / 0 dB)
+- Sinon : output évolue linéairement jusqu'à 0.0 ou 1.0.
 ```
-Avec `kCenteredPotExponent = 2.0` : dérivée nulle au centre (insensible au jitter ADC sans snap artificiel), haute sensibilité aux extrêmes. Remplace l'ancien `kSnapRadiusCenter` (hard snap).
+La zone morte (`kSnapRadiusCenter = 0.03`) assure une position centrale neutre (0 dB) sans gigue ADC, remplaçant l'ancienne courbe de puissance exponentielle.
 
 ### ParametricEq : fréquence block-rate, gain per-sample
 Les changements de fréquence dans `ParametricEq::setBand()` sont traités immédiatement (taux block, ~5.8 ms) en utilisant le gain **lissé courant** (pas la cible) pour éviter une discontinuité de gain lors du recalcul. Les changements de gain sont lissés per-sample dans `process()` comme les autres EQ.

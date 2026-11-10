@@ -122,9 +122,13 @@ float HardwareManager::getPotValue(int muxId, int potId) const {
 
 float HardwareManager::getCenteredPotValue(int muxId, int potId) const {
   float v = getPotValue(muxId, potId);
-  float t = (v - 0.5f) * 2.f; // centre-relative [-1, +1]
-  float curved = (t < 0.f ? -1.f : 1.f) * powf(fabsf(t), kCenteredPotExponent);
-  return curved * 0.5f + 0.5f;
+  float delta = v - 0.5f;
+  if (fabsf(delta) <= kSnapRadiusCenter) {
+    return 0.5f;
+  }
+  float sign = (delta > 0.f) ? 1.f : -1.f;
+  float scale = 0.5f / (0.5f - kSnapRadiusCenter);
+  return 0.5f + sign * (fabsf(delta) - kSnapRadiusCenter) * scale;
 }
 
 // ---------------------------------------------------------------------------
@@ -309,18 +313,18 @@ void HardwareManager::readMcp23017() {
       uint8_t newOlatB = currentOlatB_;
 
       if (!startupAnimationDone_.load(std::memory_order_relaxed)) {
-        // --- Startup LED animation: ping-pong scan sequence (2 round-trips) ---
-        // Sequence: MASTER -> AUX1 -> AUX2 -> AUX3 -> AUX4 -> AUX3 -> AUX2 -> AUX1 (x2) -> MASTER
+        // --- Startup LED animation: ping-pong scan sequence (2 round-trips)
+        // --- Sequence: MASTER -> AUX1 -> AUX2 -> AUX3 -> AUX4 -> AUX3 -> AUX2
+        // -> AUX1 (x2) -> MASTER
         static const ClipChannel kAnimationSeq[17] = {
             // 1er aller-retour
-            CLIP_MASTER, CLIP_AUX1, CLIP_AUX2, CLIP_AUX3, CLIP_AUX4,
-            CLIP_AUX3,   CLIP_AUX2, CLIP_AUX1,
+            CLIP_MASTER, CLIP_AUX1, CLIP_AUX2, CLIP_AUX3, CLIP_AUX4, CLIP_AUX3,
+            CLIP_AUX2, CLIP_AUX1,
             // 2eme aller-retour
-            CLIP_MASTER, CLIP_AUX1, CLIP_AUX2, CLIP_AUX3, CLIP_AUX4,
-            CLIP_AUX3,   CLIP_AUX2, CLIP_AUX1,
+            CLIP_MASTER, CLIP_AUX1, CLIP_AUX2, CLIP_AUX3, CLIP_AUX4, CLIP_AUX3,
+            CLIP_AUX2, CLIP_AUX1,
             // Verrouillage final sur Master
-            CLIP_MASTER
-        };
+            CLIP_MASTER};
         constexpr int kTotalAnimSteps = 17;
         const int ticksPerStep =
             (int)(kStartupLedStepMs / 5.0f > 1.0f ? kStartupLedStepMs / 5.0f
