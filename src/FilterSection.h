@@ -24,7 +24,10 @@
  */
 class FilterSection {
 public:
-    /** Initialises both filters. Must be called before processing. */
+    /**
+     * Initialises both filters and clears their state.
+     * @param sampleRate  Audio sample rate (Hz); must be > 0
+     */
     void setup(float sampleRate);
 
     /**
@@ -43,7 +46,8 @@ public:
 
     /**
      * Process one sample through the active filters (HPF → LPF).
-     * Bypassed filters are not in the signal path — no phase coloration when OFF.
+     * Both biquads run unconditionally to keep their state warm; a one-pole
+     * dry/wet ramp handles bypass transitions without clicks.
      */
     float process(float input);
 
@@ -53,9 +57,11 @@ private:
     BiquadFilter hpf_;
     BiquadFilter lpf_;
 
-    // Coefficient tracking: true once the biquad has been computed at least once.
-    bool  hpfActive_ = false;
-    bool  lpfActive_ = false;
+    // hpfInitialised_ / lpfInitialised_: true once the biquad coefficients have been
+    // computed at least once. (Renamed from hpfActive_/lpfActive_ which was
+    // misleading — both filters run unconditionally regardless of this flag.)
+    bool  hpfInitialised_ = false;
+    bool  lpfInitialised_ = false;
 
     // Per-sample one-pole mix ramp: 0 = fully dry, 1 = fully wet.
     // Both biquads run at all times so their internal state stays warm;
@@ -70,10 +76,4 @@ private:
     float lastHpfRes_  = -1.f;
     float lastLpfFreq_ = -1.f;
     float lastLpfRes_  = -1.f;
-
-    /** Logarithmic interpolation: maps t ∈ [0,1] to [fMin, fMax] on a log scale. */
-    static float logInterp(float fMin, float fMax, float t);
-
-    /** Linear interpolation: maps t ∈ [0,1] to [qMin, qMax]. */
-    static float linInterp(float qMin, float qMax, float t);
 };

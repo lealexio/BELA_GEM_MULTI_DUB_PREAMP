@@ -12,6 +12,9 @@ void KillSwitch::setup(float sampleRate) {
         hp_[FC0][s].setHighPass(kKillFc0, kKillCrossoverQ, sampleRate_);
         hp_[FC1][s].setHighPass(kKillFc1, kKillCrossoverQ, sampleRate_);
         hp_[FC2][s].setHighPass(kKillFc2, kKillCrossoverQ, sampleRate_);
+        // Clear filter state so no transient is produced on first render block.
+        lp_[FC0][s].reset();  lp_[FC1][s].reset();  lp_[FC2][s].reset();
+        hp_[FC0][s].reset();  hp_[FC1][s].reset();  hp_[FC2][s].reset();
     }
 
     for(int i = 0; i < 4; ++i) {

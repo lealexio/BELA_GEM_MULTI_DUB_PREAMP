@@ -140,7 +140,9 @@ static void applyCodecGainsFromConfig() {
 
 // CPU temperature (°C) — written by the non-RT AuxTask, read in render for GUI.
 // Negative means "not yet read / unavailable".
-static volatile float gCpuTempC = -1.f;
+// std::atomic<float> gives correct cross-thread visibility without volatile's
+// non-standard memory-model semantics.
+static std::atomic<float> gCpuTempC{-1.f};
 static std::vector<float> gCpuTempBuf; // [1] buffer 9
 
 // Per-block peak accumulators — one entry per tracked audio channel.
@@ -271,7 +273,7 @@ void readCpuTempTask(void *) {
     if (f) {
       int milli = 0;
       if (fscanf(f, "%d", &milli) == 1)
-        gCpuTempC = milli / 1000.f;
+        gCpuTempC.store(milli / 1000.f, std::memory_order_relaxed);
       fclose(f);
     }
     usleep(kCpuTempPollUs);
@@ -782,7 +784,11 @@ bool setup(BelaContext *context, void *userData) {
           else if (root[L"masterStereo"]->IsNumber())
             st = root[L"masterStereo"]->AsNumber() > 0.5;
           gMasterStereo.store(st);
-          MASTER_STEREO = st;
+          // Note: MASTER_STEREO (the non-atomic global in HardwareConfig.h) is
+          // NOT written here — render() reads gMasterStereo (atomic) only.
+          // Writing a non-atomic global from this seasocks thread would race
+          // with any reader. The atomic store above is the single source of
+          // truth for the audio thread.
           refreshMasterMetaSlot();
           rt_printf("[GUI] Master mode → %s\n",
                     st ? "Stereo" : "Mono (Canal L + R)");
@@ -1259,7 +1265,13 @@ void render(BelaContext *context, void *userData) {
     float finalL = outL;
     float finalR = outR;
     if (!stereoOut) {
-      float outMono = gMasterFx.limitOutput(0.5f * (outL + outR));
+      // Mono fold-down: average L+R, then limit once.
+      // Important: do NOT call gMasterFx.limitOutput() again here — outL was
+      // already limited above (line ~1216). Calling the same limiter instance
+      // on a different signal corrupts its internal gain_ state.
+      // We call gMasterFxR.limitOutput() on the averaged signal instead,
+      // which has independent gain_ state and has not yet been driven.
+      float outMono = gMasterFxR.limitOutput(0.5f * (outL + outR));
       finalL = outMono;
       finalR = outMono;
       if (fabsf(outMono) >= kClipThreshold)
@@ -1417,7 +1429,7 @@ void render(BelaContext *context, void *userData) {
     gGui.sendBuffer(8, gCodecGainsBuf);
 
     // Buffer 9: CPU temperature °C (updated ~every 2 s by AuxTask; one float).
-    gCpuTempBuf[0] = gCpuTempC;
+    gCpuTempBuf[0] = gCpuTempC.load(std::memory_order_relaxed);
     gGui.sendBuffer(9, gCpuTempBuf);
 
     // Buffers 4+5+6+11: mapping + config + sample names — resend for

@@ -2,10 +2,10 @@
 #include <cmath>
 
 void NoiseGate::setup(float sampleRate) {
-    attackCoeff_  = msToCoeff(2.0f,           sampleRate);
-    releaseCoeff_ = msToCoeff(kGateReleaseMs,  sampleRate);
-    gainAttCoeff_ = msToCoeff(kGateAttackMs,   sampleRate);
-    gainRelCoeff_ = msToCoeff(kGateReleaseMs,  sampleRate);
+    attackCoeff_  = msToCoeff(kGateEnvAttackMs,   sampleRate);
+    releaseCoeff_ = msToCoeff(kGateReleaseMs,     sampleRate);
+    gainAttCoeff_ = msToCoeff(kGateAttackMs,      sampleRate);
+    gainRelCoeff_ = msToCoeff(kGateReleaseMs,     sampleRate);
     holdSamples_  = kGateHoldMs * 0.001f * sampleRate;
 }
 
@@ -23,7 +23,7 @@ float NoiseGate::process(float input) {
             break;
 
         case State::ATTACK:
-            if(gateGain_ >= 0.999f) {
+            if(gateGain_ >= kGateFullyOpenThresh) {
                 gateGain_    = 1.f;
                 holdCounter_ = holdSamples_;
                 state_       = State::HOLD;
@@ -44,7 +44,7 @@ float NoiseGate::process(float input) {
         case State::RELEASE:
             if(envelope_ >= kGateThreshold)
                 state_ = State::ATTACK;
-            else if(gateGain_ <= 0.001f) {
+            else if(gateGain_ <= kGateFullyClosedThresh) {
                 gateGain_ = 0.f;
                 state_    = State::CLOSED;
             }

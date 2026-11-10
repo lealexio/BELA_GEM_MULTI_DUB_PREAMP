@@ -97,6 +97,7 @@ export default function sketch(p) {
         if (b[4]) {
             if (!ctx.potMapping) {
                 ctx.potMapping = Float32Array.from(b[4]);
+                ctx.potMappingVersion = (ctx.potMappingVersion || 0) + 1;
                 tryBuildMappingTable();
             } else if (!ctx.mappingUserEdited) {
                 for (let i = 0; i < Math.min(b[4].length, ctx.potMapping.length); ++i) {
@@ -107,6 +108,7 @@ export default function sketch(p) {
         if (b[5]) {
             if (!ctx.switchMapping) {
                 ctx.switchMapping = Float32Array.from(b[5]);
+                ctx.potMappingVersion = (ctx.potMappingVersion || 0) + 1;
                 tryBuildMappingTable();
             } else if (!ctx.mappingUserEdited) {
                 for (let i = 0; i < Math.min(b[5].length, ctx.switchMapping.length); ++i) {
@@ -138,7 +140,9 @@ export default function sketch(p) {
         updateSampler();
         updateSwitches();
         updateMasterEq();
-        updateClipIndicators();
+        // updateClipIndicators() is already called inside updateMetersFrame() (rAF loop).
+        // Call it here only when the meter rAF is NOT running (meters tile hidden / tab inactive).
+        if (ctx.meterAnimId == null) updateClipIndicators();
         updateBadge();
 
         if (ctx.currentTab === TAB_LIVE &&

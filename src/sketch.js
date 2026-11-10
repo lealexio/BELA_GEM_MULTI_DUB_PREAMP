@@ -1428,34 +1428,51 @@ border-radius:6px;background:transparent;
   function isBelaConnected() {
     return getBelaConnState() !== "offline";
   }
+  var _connBadgeEl = null;
+  var _connBadgeLastState = "";
   function updateBadge() {
-    const badge = document.getElementById("conn-badge");
-    if (!badge) return;
+    if (!_connBadgeEl || !_connBadgeEl.isConnected)
+      _connBadgeEl = document.getElementById("conn-badge");
+    if (!_connBadgeEl) return;
     const state = getBelaConnState();
+    if (state === _connBadgeLastState) return;
+    _connBadgeLastState = state;
     if (state === "live") {
-      badge.textContent = "LIVE";
-      badge.className = "badge live";
+      _connBadgeEl.textContent = "LIVE";
+      _connBadgeEl.className = "badge live";
     } else if (state === "lag") {
-      badge.textContent = "LAG";
-      badge.className = "badge lag";
+      _connBadgeEl.textContent = "LAG";
+      _connBadgeEl.className = "badge lag";
     } else {
-      badge.textContent = "OFFLINE";
-      badge.className = "badge";
+      _connBadgeEl.textContent = "OFFLINE";
+      _connBadgeEl.className = "badge";
     }
   }
+  var _tempBadgeEl = null;
+  var _tempBadgeLastText = "";
+  var _tempBadgeLastCls = "";
   function updateTempBadge(tempC) {
-    const badge = document.getElementById("temp-badge");
-    if (!badge) return;
+    if (!_tempBadgeEl || !_tempBadgeEl.isConnected)
+      _tempBadgeEl = document.getElementById("temp-badge");
+    if (!_tempBadgeEl) return;
+    let text, cls;
     if (typeof tempC !== "number" || !isFinite(tempC) || tempC < 0) {
-      badge.textContent = "--\xB0C";
-      badge.className = "badge temp unknown";
-      return;
+      text = "--\xB0C";
+      cls = "badge temp unknown";
+    } else {
+      text = `${Math.round(tempC)}\xB0C`;
+      cls = "badge temp";
+      if (tempC >= CPU_TEMP_HOT_C) cls += " hot";
+      else if (tempC >= CPU_TEMP_WARM_C) cls += " warm";
     }
-    badge.textContent = `${Math.round(tempC)}\xB0C`;
-    let cls = "badge temp";
-    if (tempC >= CPU_TEMP_HOT_C) cls += " hot";
-    else if (tempC >= CPU_TEMP_WARM_C) cls += " warm";
-    badge.className = cls;
+    if (text !== _tempBadgeLastText) {
+      _tempBadgeLastText = text;
+      _tempBadgeEl.textContent = text;
+    }
+    if (cls !== _tempBadgeLastCls) {
+      _tempBadgeLastCls = cls;
+      _tempBadgeEl.className = cls;
+    }
   }
 
   // gui/routing-config.js
@@ -1676,6 +1693,7 @@ border-radius:6px;background:transparent;
   }
   var _masterStereoBtn = null;
   var _masterStereoSyncHoldUntil = 0;
+  var _masterStereoMapCb = null;
   var MASTER_STEREO_SYNC_HOLD_MS = 2500;
   function _sendMasterStereo(payload) {
     if (!belaControlReady()) return;
@@ -2177,7 +2195,7 @@ border-radius:6px;background:transparent;
         _setMasterStereoBtnState(_masterStereoBtn, remoteIsStereo);
       }
     }
-    const mapCb = document.querySelector('.ri-stereo[data-key="master"]');
+    const mapCb = _masterStereoMapCb && _masterStereoMapCb.isConnected ? _masterStereoMapCb : _masterStereoMapCb = document.querySelector('.ri-stereo[data-key="master"]');
     if (mapCb && now >= _masterStereoSyncHoldUntil) {
       mapCb.checked = remoteIsStereo;
     }
@@ -3308,6 +3326,20 @@ border-radius:6px;background:transparent;
   }
 
   // gui/dom/console.js
+  var _switchTiles = [];
+  var _potMuxChannelCache = null;
+  var _potMuxChannelCacheVersion = -1;
+  function getPotMuxChannelCache() {
+    const v = getContext().potMappingVersion || 0;
+    if (_potMuxChannelCache && _potMuxChannelCacheVersion === v)
+      return _potMuxChannelCache;
+    const n = POT_NAMES.length;
+    _potMuxChannelCache = new Array(n);
+    for (let i = 0; i < n; i++)
+      _potMuxChannelCache[i] = getPotMuxChannel(i);
+    _potMuxChannelCacheVersion = v;
+    return _potMuxChannelCache;
+  }
   function buildConsoleCard(listId) {
     const card = el("div", { className: "card live-tile" });
     card.dataset.tile = "console";
@@ -3338,6 +3370,7 @@ border-radius:6px;background:transparent;
     return card;
   }
   function buildSwitchesCard() {
+    _switchTiles.length = 0;
     const swCard = el("div", { className: "card live-tile" });
     swCard.dataset.tile = "switches";
     swCard.appendChild(cardTitle("Switches"));
@@ -3374,6 +3407,7 @@ border-radius:6px;background:transparent;
     lbl.textContent = switchDisplayName(name);
     tile.appendChild(led);
     tile.appendChild(lbl);
+    _switchTiles[index] = { tile, lastOn: null };
     return tile;
   }
   function syncConsolePotBaselines() {
@@ -3607,9 +3641,10 @@ border-radius:6px;background:transparent;
     const unmappedPotDelta = isNormal ? 0.035 : CONSOLE_POT_MIN_DELTA_DETAILED;
     const potPrev = isNormal ? getContext().prevPotValuesNormal : getContext().prevPotValues;
     const changes = [];
+    const muxCache = getPotMuxChannelCache();
     const mappedChannels = /* @__PURE__ */ new Set();
     for (let i = 0; i < POT_NAMES.length; i++) {
-      const coords = getPotMuxChannel(i);
+      const coords = muxCache[i];
       if (coords) {
         mappedChannels.add(`${coords.mux}:${coords.pot}`);
       }
@@ -3745,11 +3780,16 @@ border-radius:6px;background:transparent;
     });
   }
   function updateSwitches() {
-    document.querySelectorAll(".sw-tile[data-sw-index]").forEach((tile) => {
-      const i = parseInt(tile.getAttribute("data-sw-index"), 10);
-      if (!isNaN(i))
-        tile.classList.toggle("on", getContext().switchStates[i] > 0.5);
-    });
+    const sw = getContext().switchStates;
+    for (let i = 0; i < _switchTiles.length; i++) {
+      const entry = _switchTiles[i];
+      if (!entry || !entry.tile.isConnected) continue;
+      const on = sw[i] > 0.5;
+      if (entry.lastOn !== on) {
+        entry.lastOn = on;
+        entry.tile.classList.toggle("on", on);
+      }
+    }
   }
 
   // gui/dom/masterEq.js
@@ -4101,11 +4141,58 @@ border-radius:6px;background:transparent;
       if (t.canvas && t.ctx) drawMasterEqOnCanvas(t.canvas, t.ctx);
     });
   }
+  var _masterEqLastHash = 0;
+  function _masterEqHash(pots, switches) {
+    const p = MASTER_EQ_CONFIG.POT;
+    const potIdxs = [
+      p.PE_SUB_FREQ,
+      p.PE_SUB_GAIN,
+      p.PE_KICK_FREQ,
+      p.PE_KICK_GAIN,
+      p.PE_MID_FREQ,
+      p.PE_MID_GAIN,
+      p.PE_TOP_FREQ,
+      p.PE_TOP_GAIN,
+      p.HPF_FREQ,
+      p.HPF_RES,
+      p.LPF_FREQ,
+      p.LPF_RES,
+      p.BTRIM_SUB,
+      p.BTRIM_KICK,
+      p.BTRIM_MID,
+      p.BTRIM_TOP,
+      p.GEQ_BASE,
+      p.GEQ_BASE + 1,
+      p.GEQ_BASE + 2,
+      p.GEQ_BASE + 3,
+      p.GEQ_BASE + 4,
+      p.GEQ_BASE + 5,
+      p.GEQ_BASE + 6,
+      p.GEQ_BASE + 7,
+      p.GEQ_BASE + 8,
+      p.GEQ_BASE + 9,
+      p.GEQ_BASE + 10,
+      p.GEQ_BASE + 11
+    ];
+    let h = 0;
+    for (let i = 0; i < potIdxs.length; i++)
+      h = h * 31 + Math.round(pots[potIdxs[i]] * 1e3) | 0;
+    for (let s = 0; s < 4; s++)
+      h = h * 31 + (switches[s] > 0.5 ? 1 : 0) | 0;
+    return h;
+  }
   function updateMasterEq() {
-    computeMasterCurve(getContext().potValues, getContext().switchStates);
-    const liveHasEq = isLiveTileOn(getContext().liveLayoutPrefs, "masterEq");
-    if (liveHasEq && getContext().currentTab === TAB_LIVE)
+    const ctx = getContext();
+    const liveHasEq = isLiveTileOn(ctx.liveLayoutPrefs, "masterEq");
+    const visible = liveHasEq && ctx.currentTab === TAB_LIVE;
+    const h = _masterEqHash(ctx.potValues, ctx.switchStates);
+    if (h !== _masterEqLastHash) {
+      _masterEqLastHash = h;
+      computeMasterCurve(ctx.potValues, ctx.switchStates);
+      if (visible) drawMasterEqCurve();
+    } else if (visible) {
       drawMasterEqCurve();
+    }
   }
   function resizeMasterEqCanvas() {
     drawMasterEqCurve();
@@ -4676,19 +4763,32 @@ border-radius:6px;background:transparent;
     }
   }
   function updateSiren() {
-    if (!getContext().sirenPresetPills || !getContext().sirenPresetPills.length)
+    const ctx = getContext();
+    if (!ctx.sirenPresetPills || !ctx.sirenPresetPills.length)
       return;
-    const idx = Math.max(0, Math.min(Math.round(getContext().sirenState[0]), SIREN_PRESETS.length - 1));
-    const gate = getContext().sirenState[1] > 0.5;
-    const mod = getContext().sirenState[2];
-    getContext().sirenPresetPills.forEach((pill, i) => {
-      const isActive = i === idx;
-      pill.className = "spreset" + (isActive ? " active" : "") + (isActive && gate ? " gate" : "");
-    });
-    if (getContext().sirenNameEl) getContext().sirenNameEl.textContent = SIREN_PRESETS[idx];
-    if (getContext().sirenGateEl) getContext().sirenGateEl.className = gate ? "on" : "";
-    if (getContext().sirenModFill) getContext().sirenModFill.style.width = (mod * 100).toFixed(1) + "%";
-    if (getContext().sirenModLbl) getContext().sirenModLbl.textContent = Math.round(mod * 100) + "%";
+    const idx = Math.max(0, Math.min(Math.round(ctx.sirenState[0]), SIREN_PRESETS.length - 1));
+    const gate = ctx.sirenState[1] > 0.5;
+    const mod = ctx.sirenState[2];
+    if (idx !== ctx._sirenLastIdx || gate !== ctx._sirenLastGate) {
+      ctx._sirenLastIdx = idx;
+      ctx._sirenLastGate = gate;
+      ctx.sirenPresetPills.forEach((pill, i) => {
+        const isActive = i === idx;
+        pill.classList.toggle("active", isActive);
+        pill.classList.toggle("gate", isActive && gate);
+      });
+      if (ctx.sirenNameEl) ctx.sirenNameEl.textContent = SIREN_PRESETS[idx];
+    }
+    if (gate !== ctx._sirenLastGateDot) {
+      ctx._sirenLastGateDot = gate;
+      if (ctx.sirenGateEl) ctx.sirenGateEl.className = gate ? "on" : "";
+    }
+    const modPct = (mod * 100).toFixed(1) + "%";
+    if (modPct !== ctx._sirenLastModPct) {
+      ctx._sirenLastModPct = modPct;
+      if (ctx.sirenModFill) ctx.sirenModFill.style.width = modPct;
+      if (ctx.sirenModLbl) ctx.sirenModLbl.textContent = Math.round(mod * 100) + "%";
+    }
   }
 
   // gui/dom/shell.js
@@ -4846,6 +4946,7 @@ border-radius:6px;background:transparent;
       if (b[4]) {
         if (!ctx.potMapping) {
           ctx.potMapping = Float32Array.from(b[4]);
+          ctx.potMappingVersion = (ctx.potMappingVersion || 0) + 1;
           tryBuildMappingTable();
         } else if (!ctx.mappingUserEdited) {
           for (let i = 0; i < Math.min(b[4].length, ctx.potMapping.length); ++i) {
@@ -4856,6 +4957,7 @@ border-radius:6px;background:transparent;
       if (b[5]) {
         if (!ctx.switchMapping) {
           ctx.switchMapping = Float32Array.from(b[5]);
+          ctx.potMappingVersion = (ctx.potMappingVersion || 0) + 1;
           tryBuildMappingTable();
         } else if (!ctx.mappingUserEdited) {
           for (let i = 0; i < Math.min(b[5].length, ctx.switchMapping.length); ++i) {
@@ -4881,7 +4983,7 @@ border-radius:6px;background:transparent;
       updateSampler();
       updateSwitches();
       updateMasterEq();
-      updateClipIndicators();
+      if (ctx.meterAnimId == null) updateClipIndicators();
       updateBadge();
       if (ctx.currentTab === TAB_LIVE && isLiveTileOn(ctx.liveLayoutPrefs, "meters") && ctx.meterAnimId == null)
         startMeterAnim();

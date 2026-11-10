@@ -1,5 +1,6 @@
 #pragma once
 #include "Biquad.h"
+#include "DspUtils.h"
 
 /**
  * 12-band fixed-frequency graphic EQ (peaking biquads).
@@ -8,10 +9,10 @@
  *
  * Each band is an independent peaking biquad (Audio EQ Cookbook).
  * Gain per band is set via setBandGainDb(); coefficients are recomputed only
- * when the gain changes beyond kGEqUpdateEpsilonDb to minimise RT overhead.
+ * when the gain changes beyond kEqGainEpsilonDb to minimise RT overhead.
  *
- * The band is skipped in the signal path when its gain is within epsilon of 0 dB,
- * so the EQ is phase-transparent at rest.
+ * All 12 filters run unconditionally in process() so their state stays warm —
+ * this avoids a click when a band is re-engaged after being at 0 dB.
  *
  * Usage pattern:
  *   1. Call setup() once with the audio sample rate.
@@ -22,20 +23,23 @@ class GraphicEq {
 public:
     static constexpr int kNumBands = 12;
 
-    /** Initialises all bands at 0 dB (transparent). */
+    /**
+     * Initialises all bands at 0 dB (transparent) and clears filter state.
+     * @param sampleRate  Audio sample rate (Hz); must be > 0
+     */
     void setup(float sampleRate);
 
     /**
      * Updates one band's gain. Recomputes the peaking biquad only when the gain
-     * has changed by more than kGEqUpdateEpsilonDb.
-     * @param band    Band index (0 = 40 Hz … 11 = 16 kHz)
+     * has changed by more than kEqGainEpsilonDb.
+     * @param band    Band index (0 = 40 Hz … 11 = 16 kHz); out-of-range is silently ignored
      * @param gainDb  Gain in dB; 0.0 = transparent
      */
     void setBandGainDb(int band, float gainDb);
 
     /**
-     * Processes one sample through all active bands in series.
-     * Bands at 0 dB are skipped (no phase coloration at rest).
+     * Processes one sample through all 12 bands in series.
+     * Bands at 0 dB have transparent coefficients and add no audible coloration.
      */
     float process(float input);
 
@@ -48,7 +52,4 @@ private:
     float targetGainDb_[kNumBands] = {}; // targets from setBandGainDb()
     float smoothGainDb_[kNumBands] = {}; // per-sample smoothed gains
     float lastGainDb_  [kNumBands] = {}; // gains at last biquad recompute
-
-    /** Centre frequency for each band index. */
-    static float bandFreq(int band);
 };

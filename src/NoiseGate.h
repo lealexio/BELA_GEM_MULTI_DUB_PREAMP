@@ -22,14 +22,16 @@
  *   2. Call process() once per sample inside the render loop.
  */
 struct NoiseGate {
-    /** Initialises timing coefficients. Must be called before processing. */
+    /** Initialises timing coefficients.
+     *  @param sampleRate  Audio sample rate (Hz); must be > 0
+     */
     void setup(float sampleRate);
 
     /** Process one sample and return the gated output. */
     float process(float input);
 
-    /** Returns true while the gate is open (signal above threshold). */
-    bool isOpen() const { return gateGain_ > 0.5f; }
+    /** Returns true while the gate is audibly open (gain above kGateOpenThresh). */
+    bool isOpen() const { return gateGain_ > kGateOpenThresh; }
 
 private:
     enum class State { CLOSED, ATTACK, HOLD, RELEASE };

@@ -1,25 +1,17 @@
 #include "FilterSection.h"
+#include "DspUtils.h"
 #include <cmath>
-
-static constexpr float kEpsilonFreq = 0.005f; // ~0.5% pot travel — avoids recomputing on noise
-static constexpr float kEpsilonRes  = 0.005f;
-
-float FilterSection::logInterp(float fMin, float fMax, float t) {
-    return fMin * powf(fMax / fMin, t);
-}
-
-float FilterSection::linInterp(float qMin, float qMax, float t) {
-    return qMin + t * (qMax - qMin);
-}
 
 void FilterSection::setup(float sampleRate) {
     sampleRate_      = sampleRate;
-    hpfActive_       = false;
-    lpfActive_       = false;
+    hpfInitialised_  = false;
+    lpfInitialised_  = false;
     hpfMix_ = hpfTarget_ = 0.f;
     lpfMix_ = lpfTarget_ = 0.f;
     lastHpfFreq_ = lastHpfRes_ = lastLpfFreq_ = lastLpfRes_ = -1.f;
-    bypassRampCoeff_ = 1.f - expf(-1.f / (kFilterBypassRampMs * 0.001f * sampleRate));
+    bypassRampCoeff_ = onePoleLpCoeff(kFilterBypassRampMs, sampleRate_);
+    hpf_.reset();
+    lpf_.reset();
 }
 
 void FilterSection::setHpf(float freqPot, float resPot) {
@@ -28,16 +20,16 @@ void FilterSection::setHpf(float freqPot, float resPot) {
         return;
     }
 
-    bool freqChanged = fabsf(freqPot - lastHpfFreq_) > kEpsilonFreq;
-    bool resChanged  = fabsf(resPot  - lastHpfRes_)  > kEpsilonRes;
+    bool freqChanged = fabsf(freqPot - lastHpfFreq_) > kPotEpsilon;
+    bool resChanged  = fabsf(resPot  - lastHpfRes_)  > kPotEpsilon;
 
-    if(!hpfActive_ || freqChanged || resChanged) {
+    if(!hpfInitialised_ || freqChanged || resChanged) {
         float fc = logInterp(kHpfFMin, kHpfFMax, freqPot);
         float q  = linInterp(kFilterQMin, kFilterQMax, resPot);
         hpf_.setHighPass(fc, q, sampleRate_);
         lastHpfFreq_ = freqPot;
         lastHpfRes_  = resPot;
-        hpfActive_   = true;
+        hpfInitialised_ = true;
     }
     hpfTarget_ = 1.f;
 }
@@ -48,17 +40,17 @@ void FilterSection::setLpf(float freqPot, float resPot) {
         return;
     }
 
-    bool freqChanged = fabsf(freqPot - lastLpfFreq_) > kEpsilonFreq;
-    bool resChanged  = fabsf(resPot  - lastLpfRes_)  > kEpsilonRes;
+    bool freqChanged = fabsf(freqPot - lastLpfFreq_) > kPotEpsilon;
+    bool resChanged  = fabsf(resPot  - lastLpfRes_)  > kPotEpsilon;
 
-    if(!lpfActive_ || freqChanged || resChanged) {
+    if(!lpfInitialised_ || freqChanged || resChanged) {
         // Inverted mapping: pot near 0 = filter wide open (fMax), pot at 1 = maximum cut (fMin)
         float fc = logInterp(kLpfFMax, kLpfFMin, freqPot);
         float q  = linInterp(kFilterQMin, kFilterQMax, resPot);
         lpf_.setLowPass(fc, q, sampleRate_);
         lastLpfFreq_ = freqPot;
         lastLpfRes_  = resPot;
-        lpfActive_   = true;
+        lpfInitialised_ = true;
     }
     lpfTarget_ = 1.f;
 }

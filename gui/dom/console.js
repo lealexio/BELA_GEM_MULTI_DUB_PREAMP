@@ -11,6 +11,37 @@ import {
     getPotMuxChannel
 } from './mapping.js';
 
+/**
+ * Cached switch tile elements — indexed by switch index.
+ * Each entry: { tile: Element, lastOn: boolean|null }.
+ * Populated in buildSwitchesCard(); cleared when card is rebuilt.
+ */
+const _switchTiles = [];
+
+/**
+ * Pre-built cache of getPotMuxChannel() results.
+ * Index = pot index (0-59); value = { mux, pot } | null.
+ * Built lazily once potMapping is ready; invalidated when mapping changes.
+ */
+let _potMuxChannelCache = null;
+let _potMuxChannelCacheVersion = -1;
+
+/**
+ * Returns the mux/channel cache, rebuilding it when the mapping version changes.
+ * @returns {Array<{mux:number,pot:number}|null>}
+ */
+function getPotMuxChannelCache() {
+    const v = getContext().potMappingVersion || 0;
+    if (_potMuxChannelCache && _potMuxChannelCacheVersion === v)
+        return _potMuxChannelCache;
+    const n = POT_NAMES.length;
+    _potMuxChannelCache = new Array(n);
+    for (let i = 0; i < n; i++)
+        _potMuxChannelCache[i] = getPotMuxChannel(i);
+    _potMuxChannelCacheVersion = v;
+    return _potMuxChannelCache;
+}
+
 /** Builds the console "last change" card.
  * @param {string} [listId='console-list']
  */
@@ -47,6 +78,7 @@ export function buildConsoleCard(listId) {
 
 /** Builds the switches status card. */
 export function buildSwitchesCard() {
+    _switchTiles.length = 0;
     const swCard = el('div', { className: 'card live-tile' });
     swCard.dataset.tile = 'switches';
     swCard.appendChild(cardTitle('Switches'));
@@ -81,7 +113,7 @@ function switchDisplayName(name) {
     return name.replace(/_/g, ' ');
 }
 
-/** Builds one switch status tile with LED indicator. */
+/** Builds one switch status tile with LED indicator and caches its reference. */
 function buildSwitchTile(index, name, type) {
     const tile = el('div', { className: 'sw-tile sw-tile-' + type });
     tile.dataset.swIndex = String(index);
@@ -90,6 +122,7 @@ function buildSwitchTile(index, name, type) {
     lbl.textContent = switchDisplayName(name);
     tile.appendChild(led);
     tile.appendChild(lbl);
+    _switchTiles[index] = { tile, lastOn: null };
     return tile;
 }
 
@@ -391,10 +424,11 @@ export function updateConsole() {
 
     const changes = [];
 
-    // Cache current pot channel coordinates and track all mapped MUX channels
+    // Use the cached pot→mux/channel table instead of querying the DOM 60×/frame.
+    const muxCache = getPotMuxChannelCache();
     const mappedChannels = new Set();
     for (let i = 0; i < POT_NAMES.length; i++) {
-        const coords = getPotMuxChannel(i);
+        const coords = muxCache[i];
         if (coords) {
             mappedChannels.add(`${coords.mux}:${coords.pot}`);
         }
@@ -564,11 +598,16 @@ export function renderConsole() {
     });
 }
 
-/** Updates all switch tiles in the document from switchStates. */
+/** Updates all switch tiles from switchStates — uses cached refs, writes only on change. */
 export function updateSwitches() {
-    document.querySelectorAll('.sw-tile[data-sw-index]').forEach(tile => {
-        const i = parseInt(tile.getAttribute('data-sw-index'), 10);
-        if (!isNaN(i))
-            tile.classList.toggle('on', getContext().switchStates[i] > 0.5);
-    });
+    const sw = getContext().switchStates;
+    for (let i = 0; i < _switchTiles.length; i++) {
+        const entry = _switchTiles[i];
+        if (!entry || !entry.tile.isConnected) continue;
+        const on = sw[i] > 0.5;
+        if (entry.lastOn !== on) {
+            entry.lastOn = on;
+            entry.tile.classList.toggle('on', on);
+        }
+    }
 }

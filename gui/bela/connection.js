@@ -65,37 +65,59 @@ export function isBelaConnected() {
     return getBelaConnState() !== 'offline';
 }
 
+/** Cached conn-badge element (resolved once on first call). */
+let _connBadgeEl = null;
+let _connBadgeLastState = '';
+
 export function updateBadge() {
-    const badge = document.getElementById('conn-badge');
-    if(!badge) return;
+    if (!_connBadgeEl || !_connBadgeEl.isConnected)
+        _connBadgeEl = document.getElementById('conn-badge');
+    if (!_connBadgeEl) return;
     const state = getBelaConnState();
-    if(state === 'live') {
-        badge.textContent = 'LIVE';
-        badge.className   = 'badge live';
-    } else if(state === 'lag') {
-        badge.textContent = 'LAG';
-        badge.className   = 'badge lag';
+    if (state === _connBadgeLastState) return;
+    _connBadgeLastState = state;
+    if (state === 'live') {
+        _connBadgeEl.textContent = 'LIVE';
+        _connBadgeEl.className   = 'badge live';
+    } else if (state === 'lag') {
+        _connBadgeEl.textContent = 'LAG';
+        _connBadgeEl.className   = 'badge lag';
     } else {
-        badge.textContent = 'OFFLINE';
-        badge.className   = 'badge';
+        _connBadgeEl.textContent = 'OFFLINE';
+        _connBadgeEl.className   = 'badge';
     }
 }
+
+/** Cached temp-badge element and last displayed values. */
+let _tempBadgeEl = null;
+let _tempBadgeLastText = '';
+let _tempBadgeLastCls = '';
 
 /**
  * Updates the CPU temperature bubble from GUI buffer 9 (°C).
  * @param {number|undefined} tempC - Celsius, or negative / NaN if unavailable
  */
 export function updateTempBadge(tempC) {
-    const badge = document.getElementById('temp-badge');
-    if(!badge) return;
-    if(typeof tempC !== 'number' || !isFinite(tempC) || tempC < 0) {
-        badge.textContent = '--°C';
-        badge.className   = 'badge temp unknown';
-        return;
+    if (!_tempBadgeEl || !_tempBadgeEl.isConnected)
+        _tempBadgeEl = document.getElementById('temp-badge');
+    if (!_tempBadgeEl) return;
+
+    let text, cls;
+    if (typeof tempC !== 'number' || !isFinite(tempC) || tempC < 0) {
+        text = '--°C';
+        cls  = 'badge temp unknown';
+    } else {
+        text = `${Math.round(tempC)}°C`;
+        cls  = 'badge temp';
+        if (tempC >= CPU_TEMP_HOT_C)       cls += ' hot';
+        else if (tempC >= CPU_TEMP_WARM_C) cls += ' warm';
     }
-    badge.textContent = `${Math.round(tempC)}°C`;
-    let cls = 'badge temp';
-    if(tempC >= CPU_TEMP_HOT_C)       cls += ' hot';
-    else if(tempC >= CPU_TEMP_WARM_C) cls += ' warm';
-    badge.className = cls;
+    if (text !== _tempBadgeLastText) {
+        _tempBadgeLastText = text;
+        _tempBadgeEl.textContent = text;
+    }
+    if (cls !== _tempBadgeLastCls) {
+        _tempBadgeLastCls = cls;
+        _tempBadgeEl.className = cls;
+    }
 }

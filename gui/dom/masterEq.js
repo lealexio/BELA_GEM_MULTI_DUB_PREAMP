@@ -393,12 +393,49 @@ export function drawMasterEqCurve() {
     });
 }
 
+/** Lightweight hash over the EQ-relevant pot/switch indices for dirty-checking. */
+let _masterEqLastHash = 0;
+
+function _masterEqHash(pots, switches) {
+    const p = MASTER_EQ_CONFIG.POT;
+    // Pot indices that affect the master-bus frequency curve
+    const potIdxs = [
+        p.PE_SUB_FREQ, p.PE_SUB_GAIN,
+        p.PE_KICK_FREQ, p.PE_KICK_GAIN,
+        p.PE_MID_FREQ, p.PE_MID_GAIN,
+        p.PE_TOP_FREQ, p.PE_TOP_GAIN,
+        p.HPF_FREQ, p.HPF_RES,
+        p.LPF_FREQ, p.LPF_RES,
+        p.BTRIM_SUB, p.BTRIM_KICK, p.BTRIM_MID, p.BTRIM_TOP,
+        p.GEQ_BASE, p.GEQ_BASE+1, p.GEQ_BASE+2, p.GEQ_BASE+3,
+        p.GEQ_BASE+4, p.GEQ_BASE+5, p.GEQ_BASE+6, p.GEQ_BASE+7,
+        p.GEQ_BASE+8, p.GEQ_BASE+9, p.GEQ_BASE+10, p.GEQ_BASE+11
+    ];
+    let h = 0;
+    for (let i = 0; i < potIdxs.length; i++)
+        h = (h * 31 + Math.round(pots[potIdxs[i]] * 1000)) | 0;
+    // Kill-switch indices 0-3
+    for (let s = 0; s < 4; s++)
+        h = (h * 31 + (switches[s] > 0.5 ? 1 : 0)) | 0;
+    return h;
+}
+
 /** Recomputes and redraws the master EQ curve when inputs change. */
 export function updateMasterEq() {
-    computeMasterCurve(getContext().potValues, getContext().switchStates);
-    const liveHasEq = isLiveTileOn(getContext().liveLayoutPrefs, 'masterEq');
-    if (liveHasEq && getContext().currentTab === TAB_LIVE)
+    const ctx = getContext();
+    const liveHasEq = isLiveTileOn(ctx.liveLayoutPrefs, 'masterEq');
+    const visible = liveHasEq && ctx.currentTab === TAB_LIVE;
+
+    const h = _masterEqHash(ctx.potValues, ctx.switchStates);
+    if (h !== _masterEqLastHash) {
+        _masterEqLastHash = h;
+        computeMasterCurve(ctx.potValues, ctx.switchStates);
+        if (visible) drawMasterEqCurve();
+    } else if (visible) {
+        // No pot change — but canvas may have been resized; draw() is cheap when
+        // the curve buffer hasn't changed (same pixel output each call).
         drawMasterEqCurve();
+    }
 }
 
 /** Resizes the master EQ canvas to its CSS layout box. */

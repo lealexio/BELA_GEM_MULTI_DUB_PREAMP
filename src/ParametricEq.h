@@ -28,12 +28,17 @@ public:
     enum Band { SUB = 0, KICK = 1, MID = 2, TOP = 3 };
     static constexpr int kNumBands = 4;
 
-    /** Initialises all filters at 0 dB (transparent). */
+    /**
+     * Initialises all filters at 0 dB (transparent) and clears filter state.
+     * @param sampleRate  Audio sample rate (Hz); must be > 0
+     */
     void setup(float sampleRate);
 
     /**
      * Updates one band's peaking filter. Coefficients are recomputed only when
-     * frequency or gain has changed beyond a small epsilon.
+     * frequency or gain has changed beyond a small epsilon (kPotEpsilon /
+     * kEqGainEpsilonDb), so ADC jitter on a steady pot does not trigger
+     * redundant trig calls.
      *
      * @param band     Target band (SUB / KICK / MID / TOP)
      * @param freqPot  Raw pot value [0.0–1.0] → mapped logarithmically to band range
@@ -57,10 +62,4 @@ private:
     float targetGainDb_ [kNumBands] = {};  // targets from setBand()
     float smoothGainDb_ [kNumBands] = {};  // per-sample smoothed gains
     float lastGainDb_   [kNumBands] = {};  // gains at last biquad recompute
-
-    /**
-     * Logarithmic interpolation: maps t ∈ [0,1] to [fMin, fMax] on a log scale.
-     * Ensures equal perceptual travel per octave across the pot range.
-     */
-    static float logInterp(float fMin, float fMax, float t);
 };

@@ -122,6 +122,20 @@ constexpr float kGateReleaseMs = 150.0f;
 /// Prevents chatter on melodic content with brief inter-note silence.
 constexpr float kGateHoldMs = 100.0f;
 
+/// Envelope-follower attack time (ms). This is the speed at which the
+/// peak follower reacts to rising signal — distinct from kGateAttackMs
+/// (the gain-ramp attack). Both happen to be 2 ms by design.
+constexpr float kGateEnvAttackMs = 2.0f;
+
+/// Gate-gain thresholds used by the state machine to detect "fully open"
+/// and "fully closed" states. Below these the gate transitions between
+/// ATTACK↔HOLD and RELEASE↔CLOSED respectively.
+constexpr float kGateFullyOpenThresh   = 0.999f;
+constexpr float kGateFullyClosedThresh = 0.001f;
+
+/// Threshold above which isOpen() reports the gate as audibly open.
+constexpr float kGateOpenThresh = 0.5f;
+
 // ---------------------------------------------------------------------------
 // Master parametric EQ (ParametricEq — 4 bands, inserted before kills)
 // ---------------------------------------------------------------------------
@@ -229,7 +243,20 @@ constexpr float kBandTrimKickQ = 1.0f;
 constexpr float kBandTrimMidQ = 0.7f;
 
 /// Minimum gain change (dB) that triggers a biquad coefficient recompute.
-constexpr float kBandTrimEpsilonDb = 0.05f;
+/// Used by BandTrim, GraphicEq, ParametricEq and ChannelStrip — single
+/// source of truth so all EQ classes respond consistently to jitter.
+constexpr float kEqGainEpsilonDb = 0.05f;
+
+/// Keep the old names as aliases so existing code compiles unchanged until
+/// each class is updated to use kEqGainEpsilonDb directly.
+/// @deprecated  Use kEqGainEpsilonDb instead.
+constexpr float kBandTrimEpsilonDb    = kEqGainEpsilonDb;
+constexpr float kGEqUpdateEpsilonDb   = kEqGainEpsilonDb;
+
+/// Minimum pot-travel change (0–1) that triggers a filter frequency recompute.
+/// Used by ParametricEq and FilterSection — prevents unnecessary trig work
+/// from ADC jitter on frequency/resonance pots.
+constexpr float kPotEpsilon = 0.005f;
 
 // ---------------------------------------------------------------------------
 // Graphic EQ (GraphicEq — 12 fixed bands in master bus, after ParametricEq)
@@ -241,10 +268,6 @@ constexpr float kGEqGainRangeDb = 12.f;
 /// Q factor for all 12 peaking bands.
 /// √2 ≈ 1.41 is the standard octave-band graphic EQ value (flat summing).
 constexpr float kGEqQ = 1.41f;
-
-/// Minimum gain change (dB) that triggers a biquad coefficient recompute.
-/// Prevents unnecessary DSP work from ADC jitter.
-constexpr float kGEqUpdateEpsilonDb = 0.05f;
 
 // ---------------------------------------------------------------------------
 // Dub Siren (DubSiren)

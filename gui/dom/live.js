@@ -507,21 +507,38 @@ export function syncMicInputs(meta) {
     }
 }
 
-/** Updates siren hero / presets from sirenState buffer. */
+/** Updates siren hero / presets from sirenState buffer — writes only on change. */
 export function updateSiren() {
-    if (!getContext().sirenPresetPills || !getContext().sirenPresetPills.length)
+    const ctx = getContext();
+    if (!ctx.sirenPresetPills || !ctx.sirenPresetPills.length)
         return;
-    const idx  = Math.max(0, Math.min(Math.round(getContext().sirenState[0]), SIREN_PRESETS.length - 1));
-    const gate = getContext().sirenState[1] > 0.5;
-    const mod  = getContext().sirenState[2];
+    const idx  = Math.max(0, Math.min(Math.round(ctx.sirenState[0]), SIREN_PRESETS.length - 1));
+    const gate = ctx.sirenState[1] > 0.5;
+    const mod  = ctx.sirenState[2];
 
-    getContext().sirenPresetPills.forEach((pill, i) => {
-        const isActive = (i === idx);
-        pill.className = 'spreset' + (isActive ? ' active' : '') + (isActive && gate ? ' gate' : '');
-    });
+    // Only rewrite pill classes when preset index or gate state changes
+    if (idx !== ctx._sirenLastIdx || gate !== ctx._sirenLastGate) {
+        ctx._sirenLastIdx = idx;
+        ctx._sirenLastGate = gate;
+        ctx.sirenPresetPills.forEach((pill, i) => {
+            const isActive = (i === idx);
+            pill.classList.toggle('active', isActive);
+            pill.classList.toggle('gate', isActive && gate);
+        });
+        if (ctx.sirenNameEl) ctx.sirenNameEl.textContent = SIREN_PRESETS[idx];
+    }
 
-    if (getContext().sirenNameEl)  getContext().sirenNameEl.textContent  = SIREN_PRESETS[idx];
-    if (getContext().sirenGateEl)  getContext().sirenGateEl.className     = gate ? 'on' : '';
-    if (getContext().sirenModFill) getContext().sirenModFill.style.width  = (mod * 100).toFixed(1) + '%';
-    if (getContext().sirenModLbl)  getContext().sirenModLbl.textContent   = Math.round(mod * 100) + '%';
+    // Gate dot — write only on change
+    if (gate !== ctx._sirenLastGateDot) {
+        ctx._sirenLastGateDot = gate;
+        if (ctx.sirenGateEl) ctx.sirenGateEl.className = gate ? 'on' : '';
+    }
+
+    // Mod fill — compare formatted string to avoid sub-pixel writes
+    const modPct = (mod * 100).toFixed(1) + '%';
+    if (modPct !== ctx._sirenLastModPct) {
+        ctx._sirenLastModPct = modPct;
+        if (ctx.sirenModFill) ctx.sirenModFill.style.width = modPct;
+        if (ctx.sirenModLbl)  ctx.sirenModLbl.textContent  = Math.round(mod * 100) + '%';
+    }
 }

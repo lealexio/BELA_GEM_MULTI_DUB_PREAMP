@@ -70,6 +70,7 @@ function _sendGain(payload) {
 
 let _masterStereoBtn = null;
 let _masterStereoSyncHoldUntil = 0;
+let _masterStereoMapCb = null;  // cached `.ri-stereo[data-key="master"]` checkbox
 const MASTER_STEREO_SYNC_HOLD_MS = 2500;
 
 function _sendMasterStereo(payload) {
@@ -714,7 +715,9 @@ export function syncMasterStereo(meta) {
             _setMasterStereoBtnState(_masterStereoBtn, remoteIsStereo);
         }
     }
-    const mapCb = document.querySelector('.ri-stereo[data-key="master"]');
+    const mapCb = _masterStereoMapCb && _masterStereoMapCb.isConnected
+        ? _masterStereoMapCb
+        : (_masterStereoMapCb = document.querySelector('.ri-stereo[data-key="master"]'));
     if (mapCb && now >= _masterStereoSyncHoldUntil) {
         mapCb.checked = remoteIsStereo;
     }
