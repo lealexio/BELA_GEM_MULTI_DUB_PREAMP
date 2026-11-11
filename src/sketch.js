@@ -231,7 +231,9 @@ var __belaPreampSketch = (() => {
     Y_MIN_DB: -18,
     Y_MAX_DB: 18,
     GAIN_EPSILON_DB: 0.05,
-    FILTER_OFF_THRESHOLD: 0.01,
+    FILTER_ON_THRESHOLD: 0.012,
+    FILTER_OFF_THRESHOLD: 8e-3,
+    POT_EPSILON: 4e-3,
     POT: {
       PE_SUB_FREQ: 25,
       PE_SUB_GAIN: 26,
@@ -3967,6 +3969,12 @@ border-radius:6px;background:transparent;
     }
     return h;
   }
+  var _hpfActive = false;
+  var _lpfActive = false;
+  var _prevHpfActive = false;
+  var _prevLpfActive = false;
+  var _stableEqPots = null;
+  var _stableSwitches = new Uint8Array(4);
   function computeMasterCurve(pots, switches) {
     const cfg = MASTER_EQ_CONFIG;
     const fs = cfg.SAMPLE_RATE;
@@ -3998,16 +4006,14 @@ border-radius:6px;background:transparent;
       masterEqPotToGainDb(pots[p.BTRIM_MID], cfg.BAND_TRIM_GAIN_DB),
       masterEqPotToGainDb(pots[p.BTRIM_TOP], cfg.BAND_TRIM_GAIN_DB)
     ];
-    const hpfActive = pots[p.HPF_FREQ] >= cfg.FILTER_OFF_THRESHOLD;
-    const lpfActive = pots[p.LPF_FREQ] >= cfg.FILTER_OFF_THRESHOLD;
     let hpfCoeffs = null;
     let lpfCoeffs = null;
-    if (hpfActive) {
+    if (_hpfActive) {
       const fc = masterEqLogInterp(cfg.HPF_FMIN, cfg.HPF_FMAX, pots[p.HPF_FREQ]);
       const q = masterEqLinInterp(cfg.FILTER_QMIN, cfg.FILTER_QMAX, pots[p.HPF_RES]);
       hpfCoeffs = biquadHighPass(fc, q, fs);
     }
-    if (lpfActive) {
+    if (_lpfActive) {
       const fc = masterEqLogInterp(cfg.LPF_FMAX, cfg.LPF_FMIN, pots[p.LPF_FREQ]);
       const q = masterEqLinInterp(cfg.FILTER_QMIN, cfg.FILTER_QMAX, pots[p.LPF_RES]);
       lpfCoeffs = biquadLowPass(fc, q, fs);
@@ -4109,6 +4115,7 @@ border-radius:6px;background:transparent;
       canvas.width = pixW;
       canvas.height = pixH;
     }
+    canvas._eqDrawn = true;
     ctx2d.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx2d.clearRect(0, 0, cssW, cssH);
     const padL = 44;
@@ -4198,10 +4205,9 @@ border-radius:6px;background:transparent;
       if (t.canvas && t.ctx) drawMasterEqOnCanvas(t.canvas, t.ctx);
     });
   }
-  var _masterEqLastHash = 0;
-  function _masterEqHash(pots, switches) {
+  var _EQ_POT_INDICES = (function() {
     const p = MASTER_EQ_CONFIG.POT;
-    const potIdxs = [
+    return [
       p.PE_SUB_FREQ,
       p.PE_SUB_GAIN,
       p.PE_KICK_FREQ,
@@ -4231,24 +4237,91 @@ border-radius:6px;background:transparent;
       p.GEQ_BASE + 10,
       p.GEQ_BASE + 11
     ];
-    let h = 0;
-    for (let i = 0; i < potIdxs.length; i++)
-      h = h * 31 + Math.round(pots[potIdxs[i]] * 1e3) | 0;
-    for (let s = 0; s < 4; s++)
-      h = h * 31 + (switches[s] > 0.5 ? 1 : 0) | 0;
-    return h;
+  })();
+  function _syncStableInputs(pots, switches) {
+    const cfg = MASTER_EQ_CONFIG;
+    const eps = cfg.POT_EPSILON;
+    const p = cfg.POT;
+    let dirty = false;
+    if (!pots || !pots.length) return false;
+    if (!_stableEqPots || _stableEqPots.length < pots.length) {
+      _stableEqPots = new Float32Array(pots.length);
+      for (let i = 0; i < pots.length; i++) _stableEqPots[i] = pots[i];
+      if (switches) {
+        for (let s = 0; s < 4; s++) _stableSwitches[s] = switches[s] > 0.5 ? 1 : 0;
+      }
+      _hpfActive = _stableEqPots[p.HPF_FREQ] >= cfg.FILTER_ON_THRESHOLD;
+      _lpfActive = _stableEqPots[p.LPF_FREQ] >= cfg.FILTER_ON_THRESHOLD;
+      _prevHpfActive = _hpfActive;
+      _prevLpfActive = _lpfActive;
+      return true;
+    }
+    for (let i = 0; i < _EQ_POT_INDICES.length; i++) {
+      const idx = _EQ_POT_INDICES[i];
+      const v = pots[idx];
+      const prev = _stableEqPots[idx];
+      if (Math.abs(v - prev) >= eps) {
+        _stableEqPots[idx] = v;
+        dirty = true;
+      }
+    }
+    const hpfVal = _stableEqPots[p.HPF_FREQ];
+    if (!_hpfActive && hpfVal >= cfg.FILTER_ON_THRESHOLD) {
+      _hpfActive = true;
+    } else if (_hpfActive && hpfVal < cfg.FILTER_OFF_THRESHOLD) {
+      _hpfActive = false;
+    }
+    if (_hpfActive !== _prevHpfActive) {
+      _prevHpfActive = _hpfActive;
+      dirty = true;
+    }
+    const lpfVal = _stableEqPots[p.LPF_FREQ];
+    if (!_lpfActive && lpfVal >= cfg.FILTER_ON_THRESHOLD) {
+      _lpfActive = true;
+    } else if (_lpfActive && lpfVal < cfg.FILTER_OFF_THRESHOLD) {
+      _lpfActive = false;
+    }
+    if (_lpfActive !== _prevLpfActive) {
+      _prevLpfActive = _lpfActive;
+      dirty = true;
+    }
+    if (switches) {
+      for (let s = 0; s < 4; s++) {
+        const st = switches[s] > 0.5 ? 1 : 0;
+        if (st !== _stableSwitches[s]) {
+          _stableSwitches[s] = st;
+          dirty = true;
+        }
+      }
+    }
+    return dirty;
   }
   function updateMasterEq() {
     const ctx = getContext();
     const liveHasEq = isLiveTileOn(ctx.liveLayoutPrefs, "masterEq");
     const visible = liveHasEq && ctx.currentTab === TAB_LIVE;
-    const h = _masterEqHash(ctx.potValues, ctx.switchStates);
-    if (h !== _masterEqLastHash) {
-      _masterEqLastHash = h;
-      computeMasterCurve(ctx.potValues, ctx.switchStates);
+    const dirty = _syncStableInputs(ctx.potValues, ctx.switchStates);
+    if (dirty) {
+      computeMasterCurve(_stableEqPots, _stableSwitches);
       if (visible) drawMasterEqCurve();
     } else if (visible) {
-      drawMasterEqCurve();
+      const targets = ctx.masterEqTargets || [];
+      const dpr = window.devicePixelRatio || 1;
+      let needsRedraw = false;
+      for (let i = 0; i < targets.length; i++) {
+        const c = targets[i].canvas;
+        if (c && c.isConnected) {
+          const pixW = Math.round((c.clientWidth || 800) * dpr);
+          const pixH = Math.round((c.clientHeight || 240) * dpr);
+          if (c.width !== pixW || c.height !== pixH || !c._eqDrawn) {
+            needsRedraw = true;
+            break;
+          }
+        }
+      }
+      if (needsRedraw) {
+        drawMasterEqCurve();
+      }
     }
   }
   function resizeMasterEqCanvas() {

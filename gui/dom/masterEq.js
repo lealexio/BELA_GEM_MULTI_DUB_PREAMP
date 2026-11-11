@@ -123,15 +123,15 @@ function killBandMagLinear(band, f, fs, cfg) {
     const st = cfg.KILL_FILTER_STAGES;
     const fc = cfg.KILL_FC;
     let h = 1;
-    if(band === 'sub') {
+    if (band === 'sub') {
         const c = biquadLowPass(fc[0], q, fs);
         h = Math.pow(biquadMagLinear(c, f, fs), st);
-    } else if(band === 'kick') {
+    } else if (band === 'kick') {
         const hp = biquadHighPass(fc[0], q, fs);
         const lp = biquadLowPass(fc[1], q, fs);
         h = Math.pow(biquadMagLinear(hp, f, fs), st) *
             Math.pow(biquadMagLinear(lp, f, fs), st);
-    } else if(band === 'mid') {
+    } else if (band === 'mid') {
         const hp = biquadHighPass(fc[1], q, fs);
         const lp = biquadLowPass(fc[2], q, fs);
         h = Math.pow(biquadMagLinear(hp, f, fs), st) *
@@ -142,6 +142,13 @@ function killBandMagLinear(band, f, fs, cfg) {
     }
     return h;
 }
+
+let _hpfActive = false;
+let _lpfActive = false;
+let _prevHpfActive = false;
+let _prevLpfActive = false;
+let _stableEqPots = null;
+let _stableSwitches = new Uint8Array(4);
 
 /**
  * Computes the master-bus dry-chain magnitude curve in dB (20 Hz–20 kHz).
@@ -167,7 +174,7 @@ function computeMasterCurve(pots, switches) {
     ];
 
     const geqGainDb = [];
-    for(let i = 0; i < cfg.GEQ_FREQS.length; i++)
+    for (let i = 0; i < cfg.GEQ_FREQS.length; i++)
         geqGainDb[i] = masterEqPotToGainDb(
             pots[p.GEQ_BASE + i], cfg.GEQ_GAIN_RANGE_DB);
 
@@ -178,17 +185,14 @@ function computeMasterCurve(pots, switches) {
         masterEqPotToGainDb(pots[p.BTRIM_TOP], cfg.BAND_TRIM_GAIN_DB)
     ];
 
-    const hpfActive = pots[p.HPF_FREQ] >= cfg.FILTER_OFF_THRESHOLD;
-    const lpfActive = pots[p.LPF_FREQ] >= cfg.FILTER_OFF_THRESHOLD;
-
     let hpfCoeffs = null;
     let lpfCoeffs = null;
-    if(hpfActive) {
+    if (_hpfActive) {
         const fc = masterEqLogInterp(cfg.HPF_FMIN, cfg.HPF_FMAX, pots[p.HPF_FREQ]);
         const q = masterEqLinInterp(cfg.FILTER_QMIN, cfg.FILTER_QMAX, pots[p.HPF_RES]);
         hpfCoeffs = biquadHighPass(fc, q, fs);
     }
-    if(lpfActive) {
+    if (_lpfActive) {
         const fc = masterEqLogInterp(cfg.LPF_FMAX, cfg.LPF_FMIN, pots[p.LPF_FREQ]);
         const q = masterEqLinInterp(cfg.FILTER_QMIN, cfg.FILTER_QMAX, pots[p.LPF_RES]);
         lpfCoeffs = biquadLowPass(fc, q, fs);
@@ -196,20 +200,20 @@ function computeMasterCurve(pots, switches) {
 
     const kill = cfg.KILL_SWITCH;
     const anyKill = switches[kill.SUB] > 0.5 || switches[kill.KICK] > 0.5 ||
-                    switches[kill.MID] > 0.5 || switches[kill.TOP] > 0.5;
+        switches[kill.MID] > 0.5 || switches[kill.TOP] > 0.5;
     const bandGain = [
-        switches[kill.SUB]  > 0.5 ? 0 : 1,
+        switches[kill.SUB] > 0.5 ? 0 : 1,
         switches[kill.KICK] > 0.5 ? 0 : 1,
-        switches[kill.MID]  > 0.5 ? 0 : 1,
-        switches[kill.TOP]  > 0.5 ? 0 : 1
+        switches[kill.MID] > 0.5 ? 0 : 1,
+        switches[kill.TOP] > 0.5 ? 0 : 1
     ];
 
-    for(let i = 0; i < n; i++) {
+    for (let i = 0; i < n; i++) {
         const f = masterEqFreqs[i];
         let h = 1;
 
-        for(let b = 0; b < 4; b++) {
-            if(Math.abs(peGainDb[b]) > eps) {
+        for (let b = 0; b < 4; b++) {
+            if (Math.abs(peGainDb[b]) > eps) {
                 const fc = masterEqLogInterp(
                     cfg.MASTER_EQ_FMIN[b], cfg.MASTER_EQ_FMAX[b], peFreqPot[b]);
                 const c = biquadPeaking(fc, peGainDb[b], cfg.MASTER_EQ_Q, fs);
@@ -217,36 +221,36 @@ function computeMasterCurve(pots, switches) {
             }
         }
 
-        for(let b = 0; b < cfg.GEQ_FREQS.length; b++) {
-            if(Math.abs(geqGainDb[b]) > eps) {
+        for (let b = 0; b < cfg.GEQ_FREQS.length; b++) {
+            if (Math.abs(geqGainDb[b]) > eps) {
                 const c = biquadPeaking(cfg.GEQ_FREQS[b], geqGainDb[b], cfg.GEQ_Q, fs);
                 h *= biquadMagLinear(c, f, fs);
             }
         }
 
-        if(hpfCoeffs) h *= biquadMagLinear(hpfCoeffs, f, fs);
-        if(lpfCoeffs) h *= biquadMagLinear(lpfCoeffs, f, fs);
+        if (hpfCoeffs) h *= biquadMagLinear(hpfCoeffs, f, fs);
+        if (lpfCoeffs) h *= biquadMagLinear(lpfCoeffs, f, fs);
 
-        if(Math.abs(btrimGainDb[0]) > eps)
+        if (Math.abs(btrimGainDb[0]) > eps)
             h *= biquadMagLinear(biquadLowShelf(cfg.KILL_FC[0], btrimGainDb[0], fs), f, fs);
-        if(Math.abs(btrimGainDb[1]) > eps)
+        if (Math.abs(btrimGainDb[1]) > eps)
             h *= biquadMagLinear(
                 biquadPeaking(cfg.BAND_TRIM_KICK_FREQ, btrimGainDb[1],
-                              cfg.BAND_TRIM_KICK_Q, fs), f, fs);
-        if(Math.abs(btrimGainDb[2]) > eps)
+                    cfg.BAND_TRIM_KICK_Q, fs), f, fs);
+        if (Math.abs(btrimGainDb[2]) > eps)
             h *= biquadMagLinear(
                 biquadPeaking(cfg.BAND_TRIM_MID_FREQ, btrimGainDb[2],
-                              cfg.BAND_TRIM_MID_Q, fs), f, fs);
-        if(Math.abs(btrimGainDb[3]) > eps)
+                    cfg.BAND_TRIM_MID_Q, fs), f, fs);
+        if (Math.abs(btrimGainDb[3]) > eps)
             h *= biquadMagLinear(biquadHighShelf(cfg.KILL_FC[2], btrimGainDb[3], fs), f, fs);
 
-        if(anyKill) {
-            const hSub  = killBandMagLinear('sub',  f, fs, cfg);
+        if (anyKill) {
+            const hSub = killBandMagLinear('sub', f, fs, cfg);
             const hKick = killBandMagLinear('kick', f, fs, cfg);
-            const hMid  = killBandMagLinear('mid',  f, fs, cfg);
-            const hTop  = killBandMagLinear('top',  f, fs, cfg);
+            const hMid = killBandMagLinear('mid', f, fs, cfg);
+            const hTop = killBandMagLinear('top', f, fs, cfg);
             h *= bandGain[0] * hSub + bandGain[1] * hKick +
-                 bandGain[2] * hMid + bandGain[3] * hTop;
+                bandGain[2] * hMid + bandGain[3] * hTop;
         }
 
         out[i] = 20 * Math.log10(Math.max(h, 1e-12));
@@ -256,7 +260,7 @@ function computeMasterCurve(pots, switches) {
 
 /** Formats a frequency tick label for the master EQ X axis. */
 function formatMasterEqFreqLabel(hz) {
-    if(hz >= 1000) {
+    if (hz >= 1000) {
         const k = hz / 1000;
         const n = k % 1 === 0 ? k.toFixed(0) : k.toFixed(1);
         return n + 'kHz';
@@ -268,7 +272,7 @@ function formatMasterEqFreqLabel(hz) {
 function masterEqFreqToX(f, plotX, plotW) {
     const cfg = MASTER_EQ_CONFIG;
     const t = (Math.log10(f) - Math.log10(cfg.FREQ_MIN)) /
-              (Math.log10(cfg.FREQ_MAX) - Math.log10(cfg.FREQ_MIN));
+        (Math.log10(cfg.FREQ_MAX) - Math.log10(cfg.FREQ_MIN));
     return plotX + t * plotW;
 }
 
@@ -293,6 +297,7 @@ function drawMasterEqOnCanvas(canvas, ctx2d) {
         canvas.width = pixW;
         canvas.height = pixH;
     }
+    canvas._eqDrawn = true;
 
     ctx2d.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx2d.clearRect(0, 0, cssW, cssH);
@@ -374,9 +379,9 @@ function drawMasterEqOnCanvas(canvas, ctx2d) {
         else ctx2d.lineTo(x, y);
     }
     ctx2d.lineTo(masterEqFreqToX(masterEqFreqs[cfg.CURVE_POINTS - 1], plotX, plotW),
-               masterEqDbToY(cfg.Y_MIN_DB, plotY, plotH));
+        masterEqDbToY(cfg.Y_MIN_DB, plotY, plotH));
     ctx2d.lineTo(masterEqFreqToX(masterEqFreqs[0], plotX, plotW),
-               masterEqDbToY(cfg.Y_MIN_DB, plotY, plotH));
+        masterEqDbToY(cfg.Y_MIN_DB, plotY, plotH));
     ctx2d.closePath();
     ctx2d.globalAlpha = 0.08;
     ctx2d.fill();
@@ -393,13 +398,9 @@ export function drawMasterEqCurve() {
     });
 }
 
-/** Lightweight hash over the EQ-relevant pot/switch indices for dirty-checking. */
-let _masterEqLastHash = 0;
-
-function _masterEqHash(pots, switches) {
+const _EQ_POT_INDICES = (function () {
     const p = MASTER_EQ_CONFIG.POT;
-    // Pot indices that affect the master-bus frequency curve
-    const potIdxs = [
+    return [
         p.PE_SUB_FREQ, p.PE_SUB_GAIN,
         p.PE_KICK_FREQ, p.PE_KICK_GAIN,
         p.PE_MID_FREQ, p.PE_MID_GAIN,
@@ -407,17 +408,78 @@ function _masterEqHash(pots, switches) {
         p.HPF_FREQ, p.HPF_RES,
         p.LPF_FREQ, p.LPF_RES,
         p.BTRIM_SUB, p.BTRIM_KICK, p.BTRIM_MID, p.BTRIM_TOP,
-        p.GEQ_BASE, p.GEQ_BASE+1, p.GEQ_BASE+2, p.GEQ_BASE+3,
-        p.GEQ_BASE+4, p.GEQ_BASE+5, p.GEQ_BASE+6, p.GEQ_BASE+7,
-        p.GEQ_BASE+8, p.GEQ_BASE+9, p.GEQ_BASE+10, p.GEQ_BASE+11
+        p.GEQ_BASE, p.GEQ_BASE + 1, p.GEQ_BASE + 2, p.GEQ_BASE + 3,
+        p.GEQ_BASE + 4, p.GEQ_BASE + 5, p.GEQ_BASE + 6, p.GEQ_BASE + 7,
+        p.GEQ_BASE + 8, p.GEQ_BASE + 9, p.GEQ_BASE + 10, p.GEQ_BASE + 11
     ];
-    let h = 0;
-    for (let i = 0; i < potIdxs.length; i++)
-        h = (h * 31 + Math.round(pots[potIdxs[i]] * 1000)) | 0;
-    // Kill-switch indices 0-3
-    for (let s = 0; s < 4; s++)
-        h = (h * 31 + (switches[s] > 0.5 ? 1 : 0)) | 0;
-    return h;
+})();
+
+function _syncStableInputs(pots, switches) {
+    const cfg = MASTER_EQ_CONFIG;
+    const eps = cfg.POT_EPSILON;
+    const p = cfg.POT;
+    let dirty = false;
+
+    if (!pots || !pots.length) return false;
+
+    if (!_stableEqPots || _stableEqPots.length < pots.length) {
+        _stableEqPots = new Float32Array(pots.length);
+        for (let i = 0; i < pots.length; i++) _stableEqPots[i] = pots[i];
+        if (switches) {
+            for (let s = 0; s < 4; s++) _stableSwitches[s] = switches[s] > 0.5 ? 1 : 0;
+        }
+        _hpfActive = _stableEqPots[p.HPF_FREQ] >= cfg.FILTER_ON_THRESHOLD;
+        _lpfActive = _stableEqPots[p.LPF_FREQ] >= cfg.FILTER_ON_THRESHOLD;
+        _prevHpfActive = _hpfActive;
+        _prevLpfActive = _lpfActive;
+        return true;
+    }
+
+    for (let i = 0; i < _EQ_POT_INDICES.length; i++) {
+        const idx = _EQ_POT_INDICES[i];
+        const v = pots[idx];
+        const prev = _stableEqPots[idx];
+        if (Math.abs(v - prev) >= eps) {
+            _stableEqPots[idx] = v;
+            dirty = true;
+        }
+    }
+
+    // Schmitt trigger for HPF / LPF activation
+    const hpfVal = _stableEqPots[p.HPF_FREQ];
+    if (!_hpfActive && hpfVal >= cfg.FILTER_ON_THRESHOLD) {
+        _hpfActive = true;
+    } else if (_hpfActive && hpfVal < cfg.FILTER_OFF_THRESHOLD) {
+        _hpfActive = false;
+    }
+    if (_hpfActive !== _prevHpfActive) {
+        _prevHpfActive = _hpfActive;
+        dirty = true;
+    }
+
+    const lpfVal = _stableEqPots[p.LPF_FREQ];
+    if (!_lpfActive && lpfVal >= cfg.FILTER_ON_THRESHOLD) {
+        _lpfActive = true;
+    } else if (_lpfActive && lpfVal < cfg.FILTER_OFF_THRESHOLD) {
+        _lpfActive = false;
+    }
+    if (_lpfActive !== _prevLpfActive) {
+        _prevLpfActive = _lpfActive;
+        dirty = true;
+    }
+
+    // Switches
+    if (switches) {
+        for (let s = 0; s < 4; s++) {
+            const st = switches[s] > 0.5 ? 1 : 0;
+            if (st !== _stableSwitches[s]) {
+                _stableSwitches[s] = st;
+                dirty = true;
+            }
+        }
+    }
+
+    return dirty;
 }
 
 /** Recomputes and redraws the master EQ curve when inputs change. */
@@ -426,15 +488,29 @@ export function updateMasterEq() {
     const liveHasEq = isLiveTileOn(ctx.liveLayoutPrefs, 'masterEq');
     const visible = liveHasEq && ctx.currentTab === TAB_LIVE;
 
-    const h = _masterEqHash(ctx.potValues, ctx.switchStates);
-    if (h !== _masterEqLastHash) {
-        _masterEqLastHash = h;
-        computeMasterCurve(ctx.potValues, ctx.switchStates);
+    const dirty = _syncStableInputs(ctx.potValues, ctx.switchStates);
+    if (dirty) {
+        computeMasterCurve(_stableEqPots, _stableSwitches);
         if (visible) drawMasterEqCurve();
     } else if (visible) {
-        // No pot change — but canvas may have been resized; draw() is cheap when
-        // the curve buffer hasn't changed (same pixel output each call).
-        drawMasterEqCurve();
+        // Redraw only if a target canvas has resized or has not yet been drawn
+        const targets = ctx.masterEqTargets || [];
+        const dpr = window.devicePixelRatio || 1;
+        let needsRedraw = false;
+        for (let i = 0; i < targets.length; i++) {
+            const c = targets[i].canvas;
+            if (c && c.isConnected) {
+                const pixW = Math.round((c.clientWidth || 800) * dpr);
+                const pixH = Math.round((c.clientHeight || 240) * dpr);
+                if (c.width !== pixW || c.height !== pixH || !c._eqDrawn) {
+                    needsRedraw = true;
+                    break;
+                }
+            }
+        }
+        if (needsRedraw) {
+            drawMasterEqCurve();
+        }
     }
 }
 
@@ -457,18 +533,18 @@ export function buildMasterEqCard(opts) {
     card.dataset.tile = 'masterEq';
     card.appendChild(cardTitle('Master EQ — frequency response'));
 
-    const notice = el('div', {className: 'master-eq-notice'});
+    const notice = el('div', { className: 'master-eq-notice' });
     notice.textContent =
         'Theoretical representation — the curve is recalculated from pot values, not a measurement of the actual audio signal.';
     card.appendChild(notice);
 
-    const caption = el('div', {className: 'master-eq-caption'});
+    const caption = el('div', { className: 'master-eq-caption' });
     caption.textContent =
         'Dry master chain: Parametric EQ → Graphic EQ → HPF/LPF → Band Trim → Kill switches. Excludes master gain and FX returns.';
     card.appendChild(caption);
 
-    const wrap = el('div', {className: 'master-eq-wrap'});
-    const canvas = el('canvas', {id: canvasId, className: 'master-eq-canvas'});
+    const wrap = el('div', { className: 'master-eq-wrap' });
+    const canvas = el('canvas', { id: canvasId, className: 'master-eq-canvas' });
     canvas.width = 800;
     canvas.height = 320;
     const ctx2d = canvas.getContext('2d');
