@@ -311,7 +311,14 @@ function drawMasterEqOnCanvas(canvas, ctx2d) {
     const plotW = cssW - padL - padR;
     const plotH = cssH - padT - padB;
 
-    ctx2d.strokeStyle = '#e8e8ec';
+    const isDark = document.documentElement.dataset.theme === 'dark';
+    const gridColor = isDark ? '#242c3b' : '#e8e8ec';
+    const zeroLineColor = isDark ? '#475569' : '#bbb';
+    const frameColor = isDark ? '#334155' : '#ccc';
+    const textColor = isDark ? '#8b949e' : '#888';
+    const curveColor = isDark ? '#ff5447' : '#e74c3c';
+
+    ctx2d.strokeStyle = gridColor;
     ctx2d.lineWidth = 1;
     for (let db = cfg.Y_MIN_DB; db <= cfg.Y_MAX_DB; db += 6) {
         const y = masterEqDbToY(db, plotY, plotH);
@@ -329,7 +336,7 @@ function drawMasterEqOnCanvas(canvas, ctx2d) {
         ctx2d.stroke();
     });
 
-    ctx2d.strokeStyle = '#bbb';
+    ctx2d.strokeStyle = zeroLineColor;
     ctx2d.setLineDash([4, 4]);
     const y0 = masterEqDbToY(0, plotY, plotH);
     ctx2d.beginPath();
@@ -338,10 +345,10 @@ function drawMasterEqOnCanvas(canvas, ctx2d) {
     ctx2d.stroke();
     ctx2d.setLineDash([]);
 
-    ctx2d.strokeStyle = '#ccc';
+    ctx2d.strokeStyle = frameColor;
     ctx2d.strokeRect(plotX, plotY, plotW, plotH);
 
-    ctx2d.fillStyle = '#888';
+    ctx2d.fillStyle = textColor;
     ctx2d.font = '10px monospace';
     ctx2d.textAlign = 'right';
     ctx2d.textBaseline = 'middle';
@@ -359,7 +366,7 @@ function drawMasterEqOnCanvas(canvas, ctx2d) {
     });
 
     const curve = getContext().masterEqCurveDb;
-    ctx2d.strokeStyle = '#e74c3c';
+    ctx2d.strokeStyle = curveColor;
     ctx2d.lineWidth = 2;
     ctx2d.beginPath();
     for (let i = 0; i < cfg.CURVE_POINTS; i++) {
@@ -370,7 +377,7 @@ function drawMasterEqOnCanvas(canvas, ctx2d) {
     }
     ctx2d.stroke();
 
-    ctx2d.fillStyle = '#e74c3c';
+    ctx2d.fillStyle = curveColor;
     ctx2d.beginPath();
     for (let i = 0; i < cfg.CURVE_POINTS; i++) {
         const x = masterEqFreqToX(masterEqFreqs[i], plotX, plotW);
@@ -383,7 +390,7 @@ function drawMasterEqOnCanvas(canvas, ctx2d) {
     ctx2d.lineTo(masterEqFreqToX(masterEqFreqs[0], plotX, plotW),
         masterEqDbToY(cfg.Y_MIN_DB, plotY, plotH));
     ctx2d.closePath();
-    ctx2d.globalAlpha = 0.08;
+    ctx2d.globalAlpha = isDark ? 0.14 : 0.08;
     ctx2d.fill();
     ctx2d.globalAlpha = 1;
 }

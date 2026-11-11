@@ -1,6 +1,6 @@
-/** Top-level UI shell: header, tabs, tab switching. */
+/** Top-level UI shell: header, tabs, tab switching, theme toggle. */
 import { getContext } from '../context.js';
-import { TAB_LIVE, TAB_MAPPING } from '../config.js';
+import { TAB_LIVE, TAB_MAPPING, THEME_STORAGE_KEY } from '../config.js';
 import { el, projectFileUrl } from './utils.js';
 import {
     buildLivePane,
@@ -13,8 +13,60 @@ import { startMeterAnim, stopMeterAnim } from './meters.js';
 import { drawMasterEqCurve } from './masterEq.js';
 import { buildMappingPane, cancelDetect } from './mapping.js';
 
+let _currentTheme = 'dark';
+let _themeToggleBtn = null;
+
+/** Returns the active theme ('dark' | 'light'). */
+export function getActiveTheme() {
+    return _currentTheme;
+}
+
+/** Determines initial theme from localStorage or system preference (defaults to 'dark'). */
+export function getInitialTheme() {
+    try {
+        const stored = localStorage.getItem(THEME_STORAGE_KEY);
+        if (stored === 'dark' || stored === 'light') return stored;
+    } catch (_) {}
+    if (typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches) {
+        return 'light';
+    }
+    return 'dark';
+}
+
+/** Updates the visual label/tooltip of the theme toggle button. */
+export function updateThemeButton() {
+    if (!_themeToggleBtn) return;
+    const isDark = _currentTheme === 'dark';
+    _themeToggleBtn.innerHTML = (isDark ? '🌙' : '☀️') + '<span class="theme-btn-lbl"> ' + (isDark ? 'Dark' : 'Light') + '</span>';
+    _themeToggleBtn.title = isDark ? 'Mode sombre actif (cliquer pour mode clair)' : 'Mode clair actif (cliquer pour mode sombre)';
+    _themeToggleBtn.setAttribute('aria-label', isDark ? 'Passer en mode clair' : 'Passer en mode sombre');
+}
+
+/** Applies a theme ('dark' | 'light'), persists to localStorage and redraws canvas if needed. */
+export function setTheme(theme) {
+    _currentTheme = (theme === 'light') ? 'light' : 'dark';
+    document.documentElement.dataset.theme = _currentTheme;
+    try {
+        localStorage.setItem(THEME_STORAGE_KEY, _currentTheme);
+    } catch (_) {}
+    updateThemeButton();
+    try {
+        const ctx = getContext();
+        if (ctx && ctx.currentTab === TAB_LIVE && isLiveTileOn(ctx.liveLayoutPrefs, 'masterEq')) {
+            drawMasterEqCurve();
+        }
+    } catch (_) {}
+}
+
+/** Toggles between 'dark' and 'light' theme. */
+export function toggleTheme() {
+    setTheme(_currentTheme === 'dark' ? 'light' : 'dark');
+}
+
 /** Builds the full DOM tree (header, tabs, all panes). */
 export function buildUI() {
+    setTheme(getInitialTheme());
+
     document.body.innerHTML = '';
 
     const root = el('div', {id: 'bela-gui'});
@@ -53,6 +105,16 @@ export function buildUI() {
     });
 
     tabBar.appendChild(el('span', {className: 'tab-bar-spacer'}));
+
+    const themeBtn = el('button', {
+        type: 'button',
+        id: 'theme-toggle-btn',
+        className: 'theme-toggle-btn'
+    });
+    themeBtn.addEventListener('click', () => toggleTheme());
+    _themeToggleBtn = themeBtn;
+    updateThemeButton();
+    tabBar.appendChild(themeBtn);
 
     const gear = el('button', {
         type: 'button',

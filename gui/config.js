@@ -29,6 +29,8 @@ export const SAMPLER_PAD_LABEL_LEN = 20;
 /** localStorage keys for Live layout prefs (v2 = enabled + order). */
 export const LIVE_LAYOUT_STORAGE_KEY_V1 = 'belaDubPreamp.liveLayout.v1';
 export const LIVE_LAYOUT_STORAGE_KEY = 'belaDubPreamp.liveLayout.v2';
+/** localStorage key for UI theme ('dark' | 'light'). */
+export const THEME_STORAGE_KEY = 'belaDubPreamp.theme';
 
 /** Minimum pot travel (0–1) required to accept a detect hit. */
 export const DETECT_POT_MIN_DELTA = 0.25;
