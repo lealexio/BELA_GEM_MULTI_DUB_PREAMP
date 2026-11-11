@@ -71,6 +71,13 @@ constexpr float kShutdownRampMs = 30.f;
 // Potentiometer processing
 // ---------------------------------------------------------------------------
 
+/// One-pole low-pass (EMA) smoothing coefficient applied to raw pot ADC readings in scanStep().
+/// Formule: potValues_[idx] += kPotSmoothingCoeff * (raw - potValues_[idx])
+/// Higher = faster response; lower = stronger noise/jitter suppression.
+/// At ~275 Hz pot sampling rate (16 audio frames * 10 channels), 0.15 provides ~24 ms
+/// time constant, eliminating ADC jitter (~22 dB noise rejection) with zero perceptible lag.
+constexpr float kPotSmoothingCoeff = 0.15f;
+
 /// Minimum change on an ADC reading to update the stored pot value.
 /// Suppresses quantisation / jitter noise without degrading responsiveness.
 constexpr float kJitterThreshold = 0.002f;

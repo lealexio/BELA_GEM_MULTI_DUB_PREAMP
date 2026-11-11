@@ -21,8 +21,10 @@ static constexpr uint8_t MCP_OLATB = 0x15;  // Output Latch port B
 constexpr int HardwareManager::addressPins_[4];
 
 HardwareManager::HardwareManager() {
-  for (int i = 0; i < kNumMux * kPotsPerMux; i++)
+  for (int i = 0; i < kNumMux * kPotsPerMux; i++) {
     potValues_[i] = 0.f;
+    potInitialised_[i] = false;
+  }
   for (int i = 0; i < kNumClipChannels; i++) {
     clipPending_[i].store(false);
     clipHoldTicks_[i] = 0;
@@ -48,6 +50,10 @@ bool HardwareManager::setup(BelaContext *context) {
 
   for (int i = 0; i < 4; i++) {
     pinMode(context, 0, addressPins_[i], OUTPUT);
+  }
+  for (int i = 0; i < kNumMux * kPotsPerMux; i++) {
+    potValues_[i] = 0.f;
+    potInitialised_[i] = false;
   }
   currentChannel_ = 0;
   sampleCount_ = 0;
@@ -103,8 +109,18 @@ void HardwareManager::scanStep(BelaContext *context) {
           raw = 1.f;
 
         int idx = m * kPotsPerMux + currentChannel_;
-        if (fabsf(raw - potValues_[idx]) >= kJitterThreshold)
+        if (!potInitialised_[idx]) {
           potValues_[idx] = raw;
+          potInitialised_[idx] = true;
+        } else {
+          potValues_[idx] += kPotSmoothingCoeff * (raw - potValues_[idx]);
+
+          // Snap to clean boundaries when reaching extremities
+          if (raw == 0.f && potValues_[idx] < 0.002f)
+            potValues_[idx] = 0.f;
+          else if (raw == 1.f && potValues_[idx] > 0.998f)
+            potValues_[idx] = 1.f;
+        }
       }
 
       // Advance to next channel (0 to kPotsPerMux - 1)

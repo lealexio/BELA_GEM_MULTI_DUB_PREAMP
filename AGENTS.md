@@ -186,6 +186,7 @@ IN → × inputGain_ → NoiseGate → EQ (low shelf / mid peak / high shelf) �
 | `kFilterOffThreshold` | 0.01 | Pot en dessous → filtre bypasse |
 | `kFilterBypassRampMs` | 5 ms | Durée fondu bypass HPF/LPF (anti-clic) |
 | `kCenteredPotExponent` | 2.0 | Exposant courbe puissance pots centrés |
+| `kPotSmoothingCoeff` | 0.15 | Coefficient lissage passe-bas EMA pots (anti-gigue) |
 | `kSirenGateAttackMs` | 5 ms | Attaque gate sirène |
 | `kSirenGateReleaseMs` | 80 ms | Release gate sirène |
 | `kSirenGainScale` | 0.1 | Niveau sirène relatif aux canaux |
@@ -233,6 +234,9 @@ Les deux biquads HPF et LPF tournent **en permanence** dans `process()`, même q
 - Sinon : output évolue linéairement jusqu'à 0.0 ou 1.0.
 ```
 La zone morte (`kSnapRadiusCenter = 0.03`) assure une position centrale neutre (0 dB) sans gigue ADC, remplaçant l'ancienne courbe de puissance exponentielle.
+
+### Lissage EMA des potentiomètres (HardwareManager)
+Un filtre passe-bas du 1er ordre (EMA / One-pole, `kPotSmoothingCoeff = 0.15`) est appliqué directement sur chaque lecture de potentiomètre dans `HardwareManager::scanStep()`. Cela élimine le bruit ADC haute fréquence (~22 dB d'atténuation) et supprime les sauts de valeurs (ex: 0.433 ↔ 0.435) sur potentiomètres immobiles tout en garantissant un ressenti analogique immédiat (temps de montée ~70 ms). Le premier scan initialise directement la valeur sans rampe au boot, et les butées (0.0 / 1.0) bénéficient d'une extinction franche.
 
 ### ParametricEq : fréquence block-rate, gain per-sample
 Les changements de fréquence dans `ParametricEq::setBand()` sont traités immédiatement (taux block, ~5.8 ms) en utilisant le gain **lissé courant** (pas la cible) pour éviter une discontinuité de gain lors du recalcul. Les changements de gain sont lissés per-sample dans `process()` comme les autres EQ.

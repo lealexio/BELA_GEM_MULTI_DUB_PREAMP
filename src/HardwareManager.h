@@ -25,7 +25,8 @@
  *
  * Pot processing pipeline (scanStep):
  *   raw ADC → × kPotScaleRecovery → clamp [kPotMin, kPotMax] → normalise [0, 1]
- *   → jitter filter (kJitterThreshold) → stored in potValues_[]
+ *   → edge snap (kSnapRadiusEdge) → EMA low-pass filter (kPotSmoothingCoeff)
+ *   → stored in potValues_[]
  *
  * Usage pattern:
  *   setup()         : call once in Bela setup()
@@ -170,6 +171,7 @@ public:
 
 private:
   float potValues_[kNumMux * kPotsPerMux];
+  bool potInitialised_[kNumMux * kPotsPerMux] = {};
   int currentChannel_ = 0;
   int sampleCount_ = 0;
 
