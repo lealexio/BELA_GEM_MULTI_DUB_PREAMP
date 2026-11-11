@@ -41,7 +41,7 @@ export const ROUTING_CONFIG = {
   "in": {
     "fx1Return": {
       "channels": [
-        0
+        1
       ],
       "mic": false,
       "hpf": 0,
@@ -49,7 +49,7 @@ export const ROUTING_CONFIG = {
     },
     "fx2Return": {
       "channels": [
-        1
+        0
       ],
       "mic": false,
       "hpf": 0,

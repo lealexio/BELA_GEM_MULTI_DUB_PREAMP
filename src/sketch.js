@@ -1577,7 +1577,7 @@ border-radius:6px;background:transparent;
     "in": {
       "fx1Return": {
         "channels": [
-          0
+          1
         ],
         "mic": false,
         "hpf": 0,
@@ -1585,7 +1585,7 @@ border-radius:6px;background:transparent;
       },
       "fx2Return": {
         "channels": [
-          1
+          0
         ],
         "mic": false,
         "hpf": 0,

@@ -384,6 +384,30 @@ constexpr float kLimiterReleaseMs = 100.f;
 constexpr bool kLimiterEnabled = true;
 
 // ---------------------------------------------------------------------------
+// Mono fold-down & Air compensation (Master output)
+// ---------------------------------------------------------------------------
+
+/// Fold-down gain coefficient when summing L + R into mono.
+/// - 0.7071f (~ -3 dB) : Constant power law (AES/EBU pro standard). Preserves
+///   perceived acoustic loudness of stereo/side elements (reverbs, delays, panned hats).
+/// - 0.5000f (-6 dB)   : Linear voltage average.
+constexpr float kMonoFoldDownGain = 0.7071f;
+
+/// When true, enables a subtle high-shelf filter on the mono master output
+/// to compensate for comb-filtering phase cancellation in the highs (5k-16kHz).
+constexpr bool kMonoAirCompEnabled = true;
+
+/// Frequency of the high-shelf mono air compensation filter (Hz).
+constexpr float kMonoAirCompFreqHz = 8000.f;
+
+/// Boost gain (dB) of the high-shelf mono air compensation filter.
+/// 1.5 dB gently restores presence without sounding harsh.
+constexpr float kMonoAirCompGainDb = 1.5f;
+
+/// Crossfade duration (ms) when switching live between Stereo and Mono.
+constexpr float kMonoCrossfadeMs = 20.f;
+
+// ---------------------------------------------------------------------------
 // FX return routing
 // ---------------------------------------------------------------------------
 

@@ -1,264 +1,253 @@
-# AGENTS.md — Contexte de travail pour agent IA
+# AGENTS.md — Working Context & Ground Truth for AI Agents
 
-Ce fichier est la source de vérité pour tout agent IA travaillant sur ce projet.
-Lire ce fichier en entier avant de toucher au code.
-
----
-
-## Projet
-
-**Nom :** Dub Preamp BELA GEM MULTI
-**Plateforme :** Bela Gem Multi (ARM Linux, audio temps réel, 44.1 kHz)  
-**Langage :** C++11  
-**Compilateur cible :** cross-compilation ARM — le linter local (Windows/Clang) peut signaler de faux positifs sur `<cmath>`, `M_PI`, etc. Ignorer ces warnings.
+This file serves as the definitive source of truth for any AI agent or developer working on this codebase.  
+Read this document completely before modifying any code.
 
 ---
 
-## Structure des fichiers
+## 1. Project Overview & Platform Constraints
+
+- **Project Name:** Dub Preamp BELA GEM MULTI
+- **Hardware Platform:** Bela Gem Multi (ARM Cortex-A8 Linux, Xenomai real-time co-kernel, 44.1 kHz, 10-in / 10-out audio codec)
+- **Language Standard:** C++11
+- **Target Toolchain:** ARM cross-compilation on Bela. Local linters (e.g. Clang / MSVC on host systems) may report false positives for `<cmath>`, `M_PI`, etc. — ignore those specific warnings.
+
+---
+
+## 2. Directory & Source File Map
 
 ```
-render.cpp              Point d'entrée Bela (setup / render / cleanup)
-HardwareManager.h/cpp   Scan MUX + lecture MCP23017 I2C
-ChannelStrip.h/cpp      Tranche de canal : gain → gate → EQ → FX send
-MasterFx.h/cpp          Bus master : orchestre tous les modules DSP du bus
-DubSiren.h/cpp          Sirène dub monophonique : OSC phase + LFO + enveloppe pitch
-SamplePlayer.h/cpp      One-shots WAV/MP3 (samples/), mixés au même point que la Dub Siren
-ParametricEq.h/cpp      EQ paramétrique 4 bandes (SUB/KICK/MID/TOP, freq sweepable)
-GraphicEq.h/cpp         EQ graphique 12 bandes fixes (40 Hz … 16 kHz)
-FilterSection.h/cpp     HPF + LPF master avec fréquence et résonance réglables
-BandTrim.h/cpp          Gain trim 4 bandes ±6 dB (SUB/KICK/MID/TOP)
-KillSwitch.h/cpp        Kill 4 bandes sans clics (crossover parallèle LP/HP)
-NoiseGate.h/cpp         Gate professionnel (peak follower + state machine)
-Biquad.h/cpp            Filtre biquad IIR 2nd ordre (shelf, peak, LP, HP)
-HardwareConfig.h        Constantes PHYSIQUES : mapping pots/switches, routing I/O, I2C
-SoftwareConfig.h        Constantes DSP/COMPORTEMENT : EQ, gate, kills, siren, debug
-gui/                    Sources GUI Bela (ES modules) — éditer ici, pas sketch.js directement
-src/sketch.js           Bundle GUI généré (esbuild) — déployé sur Bela, ne pas éditer à la main
-src/samples/            Fichiers WAV/MP3 one-shot (chargés au boot via AudioFileUtilities)
+src/
+├── render.cpp              # Bela lifecycle entry point (setup / render / cleanup)
+├── HardwareManager.h/.cpp  # Multiplexer scanning (CD74HC4067) + I2C GPIO expander (MCP23017)
+├── HardwareConfig.h        # Physical wiring declarations: PotRef, SwitchRef, ClipLedRef, I/O routing
+├── HardwareConfigData.cpp  # Default hardware mapping definitions & fallback runtime arrays
+├── SoftwareConfig.h        # DSP behavior & sound parameters: EQ, gates, kills, siren, debug
+├── ConfigLoader.h/.cpp     # Dynamic JSON loader for config.json (boot fallback to hardcoded defaults)
+├── ChannelStrip.h/.cpp     # Channel strip processing: input gain → noise gate → 3-band EQ → FX sends
+├── MasterFx.h/.cpp         # Master bus orchestrator: ParamEQ → GraphicEQ → Filter → Trim → Kills → Master Gain
+├── DubSiren.h/.cpp         # Monophonic dub siren: phase accumulator OSC + LFO + pitch drop envelope
+├── SamplePlayer.h/.cpp     # One-shot WAV/MP3 player (src/samples/), mixed at siren point
+├── ParametricEq.h/.cpp     # 4-band master parametric EQ (SUB/KICK/MID/TOP, sweepable frequencies)
+├── GraphicEq.h/.cpp        # 12-band fixed-frequency graphic EQ (40 Hz … 16 kHz)
+├── FilterSection.h/.cpp    # Master resonant HPF + LPF with soft crossfade bypass
+├── BandTrim.h/.cpp         # 4-band gain trim (±6 dB) post-crossover (SUB/KICK/MID/TOP)
+├── KillSwitch.h/.cpp       # Click-free 4-band parallel crossover kill (24 dB/oct)
+├── NoiseGate.h/.cpp        # Downward gate: peak follower + ATTACK/HOLD/RELEASE state machine
+├── Biquad.h/.cpp           # 2nd-order IIR biquad filter (shelf, peak, LP, HP)
+├── BrickwallLimiter.h      # Output peak limiter / safety guard
+├── DspUtils.h              # DSP helper functions (interpolation, conversions, smoothing)
+└── samples/                # Directory containing one-shot audio samples (*.wav, *.mp3)
+
+gui/                        # ES6 source modules for Bela Web GUI (edit here!)
+src/sketch.js               # Bundled GUI output generated via esbuild (do not edit manually!)
+docs/                       # Modular technical documentation
+config.json                 # Optional runtime hardware/routing override configuration
 ```
 
-**Règle de séparation des configs :**
-- Tout ce qui dépend du câblage physique → `HardwareConfig.h`
-- Tout ce qui dépend du comportement DSP ou des préférences sonores → `SoftwareConfig.h`
-- Aucune valeur magique dans le code source (`.cpp` / `.h`)
+### Configuration Separation Rule
+- **Physical Wiring & Hardware:** Belong exclusively in `HardwareConfig.h` / `HardwareConfigData.cpp` / `config.json`.
+- **DSP Behavior & Audio Tuning:** Belong exclusively in `SoftwareConfig.h`.
+- **No Magic Numbers:** All values must be named constants or configurable parameters.
 
 ---
 
-## Threading model (CRITIQUE)
+## 3. Real-Time Threading Model (CRITICAL RULES)
 
-| Thread | Priorité | Ce qui s'y exécute |
+The Bela system executes with strict real-time guarantees under Xenomai Linux:
+
+| Thread | Priority | Permitted Operations |
 |---|---|---|
-| RT `render()` | 95+ | `scanStep()`, `getPotValue()`, `getSwitchState()`, tout le DSP |
-| `AuxiliaryTask` | 50 | `readMcp23017()` uniquement (I2C bloquant) |
-| Système | std | IDE Web Bela, oscilloscope, logs noyau |
+| **Audio RT `render()`** | 95+ (Xenomai) | `scanStep()`, `getPotValue()`, `getSwitchState()`, and all audio DSP |
+| **`AuxiliaryTask`** | 50 (Linux RT) | `readMcp23017()` exclusively (blocking I2C transactions) |
+| **System / Browser** | Standard | Bela Web IDE, oscilloscope, kernel logs, WebSocket server |
 
-**Interdictions absolues dans `render()` :**
-- Appels I2C ou tout I/O bloquant
-- `malloc` / `new` / `delete`
-- `printf` standard (utiliser `rt_printf`)
-- `std::vector`, `std::string`, ou tout conteneur à allocation dynamique
+### Absolute Prohibitions in `render()`:
+1. **Never make I2C calls or any blocking I/O calls.**
+2. **Never invoke dynamic memory allocations (`malloc`, `free`, `new`, `delete`).**
+3. **Never use `printf` standard output — use `rt_printf` instead.**
+4. **Never instantiate dynamic STL containers (`std::vector`, `std::string`, `std::map`, etc.). Preallocate all storage during `setup()`.**
 
 ---
 
-## Chaîne de signal complète
+## 4. Signal Flow & Routing Architecture
 
 ```
-IN0 ──► ChannelStrip 1 ──► dry1 ──┐
-IN1 ──► ChannelStrip 2 ──► dry2 ──┤ fxSend (sum)
-IN2 ──► ChannelStrip 3 ──► dry3 ──┤ ──► filtré par mode FX switch ──► OUT2
-IN3 ──► ChannelStrip 4 ──► dry4 ──┤
-         DubSiren ─────► sirenOut ─┤
-         SamplePlayer ► samplerOut─┘  (même gain / FX send que la sirène ; trigger UI only)
-                                   │
-                               dry mix
-                                   │
-IN9 (retour FX) ──► NoiseGate ────►┤
-                   (fxReturnGate_) │
-                                   ▼
-                           MasterFx.process()
-                            ParametricEq (4 bandes peaking, freq log-sweepable)
-                            → GraphicEq  (12 bandes peaking fixes)
-                            → FilterSection (HPF → LPF, bypass mou sur activation)
-                            → BandTrim   (4 bandes ±6 dB, shelf+peaking)
-                            → KillSwitch (crossover parallèle 4 bandes)
-                            → × masterGain
-                                   │
-                         gMasterFx (L)    gMasterFxR (R) [si MASTER_OUTS_COUNT ≥ 2]
-                                   │              │
-                             OUT0 (L)         OUT1 (R)  (mono si MASTER_OUTS_COUNT=1)
+IN2,3 (AUX1 L/R) ──► ChannelStrip 1 ──► dry1 ──┐
+IN4,5 (AUX2 L/R) ──► ChannelStrip 2 ──► dry2 ──┤ fxSend1 (sum) ──► mode filter ──► OUT0 (FX1 Send)
+IN6,7 (AUX3 L/R) ──► ChannelStrip 3 ──► dry3 ──┤ fxSend2 (sum) ──► mode filter ──► OUT1 (FX2 Send)
+IN8,9 (AUX4 L/R) ──► ChannelStrip 4 ──► dry4 ──┤
+                      DubSiren ───────► siren ─┤
+                      SamplePlayer ───► sample ┘ (shares siren gain / FX sends; UI triggered)
+                                               │
+                                            dry sum
+                                               │
+IN0 (FX1 Return) ──► NoiseGate (fx1Gate_) ────►┤
+IN1 (FX2 Return) ──► NoiseGate (fx2Gate_) ────►┤
+                                               ▼
+                                      MasterFx.process()
+                                       ParametricEq (4 sweepable peaking bands)
+                                       → GraphicEq (12 fixed peaking bands)
+                                       → FilterSection (resonant HPF → LPF, warm soft-bypass)
+                                       → BandTrim (4 bands ±6 dB)
+                                       → KillSwitch (4-band parallel crossover 24 dB/oct)
+                                       → × masterGain
+                                               │
+                                     gMasterFx (L)    gMasterFxR (R)
+                                               │              │
+                                         OUT2 (L)          OUT3 (R)  (mono summed if MASTER_STEREO=false)
 
-VU meter (post-master, par bande) :
+VU Meter (post-master, band-split analog/PWM outputs):
   OUT6 TOP  (> 1200 Hz)
   OUT7 MID  (200–1200 Hz)
   OUT8 KICK (80–200 Hz)
   OUT9 SUB  (< 80 Hz)
 ```
 
-**Règles stéréo (entrées) :**
-- `audioIns = [N, -1]` → mono : même sample traité par gChannelStripX (L) et gChannelStripXR (R)
-- `audioIns = [L, R]` → stéréo : gChannelStripX traite IN_L, gChannelStripXR traite IN_R indépendamment
-- Dans `config.json` : `"aux1": { "channels": [2, 3], ... }` pour activer le mode stéréo (ou `[N]` / `[N, -1]` pour mono)
-
-**Règles stéréo (sortie master) :**
-- `MASTER_OUTS = [N]` ou `[N, -1]` → mono (1 seule sortie physique)
-- `MASTER_OUTS = [L, R]` avec `stereo: true` → stéréo : MASTER_OUTS[0]=L, MASTER_OUTS[1]=R (2 buses MasterFx indépendants)
-- `MASTER_OUTS = [L, R]` avec `stereo: false` (ou `mono: true`) → mono : MASTER_OUTS[0] et MASTER_OUTS[1] diffusent le signal sommé `0.5 * (outL + outR)`
-- Dans `config.json` : `"master": { "channels": [0, 1], "stereo": true, "gain": 0 }`
-- Bascule en direct sans reboot : bouton STÉRÉO / MONO dans la tuile VU meters (onglet Live) ou case à cocher Stereo dans l'onglet Mapping (WebSocket `Bela.control` : `{ event: 'custom', masterStereo: bool }`)
-
-**Chaque ChannelStrip :**
+### ChannelStrip Signal Flow:
 ```
-IN → × inputGain_ → NoiseGate → EQ (low shelf / mid peak / high shelf) → dry OUT
-                                        └──────── × fxSendLevel_ ──► fxOut()
+IN → × inputGain_ → NoiseGate → 3-Band EQ (low shelf / mid peak / high shelf) → Dry Output
+                                         └─────────── × fxSendLevel_ ─────────► FX Send Out
 ```
+
+### Stereo & Mono Topologies:
+- **Input Channels:**
+  - `audioIns = [N, -1]` (Mono): Same physical input channel processed by left and right channel strips.
+  - `audioIns = [L, R]` (Stereo): `gChannelStripX` processes `IN_L`, `gChannelStripXR` processes `IN_R`.
+  - Configurable via `config.json` (`"channels": [2, 3]`).
+- **Master Output:**
+  - `MASTER_OUTS = [L, R]` with `MASTER_STEREO = true`: `OUT2 = Left`, `OUT3 = Right` (two independent `MasterFx` engines).
+  - `MASTER_OUTS = [L, R]` with `MASTER_STEREO = false`: Both outputs deliver constant-power summed mono: `kMonoFoldDownGain * (outL + outR)` (0.7071f / -3 dB, AES standard) with optional high-shelf air compensation filter (`kMonoAirCompEnabled = true`, 8 kHz, +1.5 dB) and a dedicated brickwall limiter.
+  - Can be toggled on-the-fly without reboot via Web GUI (`Bela.control`: `{ event: 'custom', masterStereo: bool }`) using a click-free 20 ms crossfade (`kMonoCrossfadeMs`).
 
 ---
 
-## Routing audio (Bela Gem Multi — 10 I/O)
+## 5. Physical Audio Routing (Bela Gem Multi — 10 I/O)
 
-| Signal | I/O Bela | Constante dans HardwareConfig.h |
+| Signal | Bela Gem Multi I/O | HardwareConfig Constant |
 |---|---|---|
-| Retour FX 1 | IN0 | `FX1_RETURN_IN` |
-| Retour FX 2 | IN1 | `FX2_RETURN_IN` |
-| Source AUX 1 (L/R) | IN2, IN3 | `AUX1_CONFIG.audioIns[0, 1]` |
-| Source AUX 2 (L/R) | IN4, IN5 | `AUX2_CONFIG.audioIns[0, 1]` |
-| Source AUX 3 (L/R) | IN6, IN7 | `AUX3_CONFIG.audioIns[0, 1]` |
-| Source AUX 4 (L/R) | IN8, IN9 | `AUX4_CONFIG.audioIns[0, 1]` |
-| Départ FX 1 | OUT0 | `FX1_SEND_OUT` |
-| Départ FX 2 | OUT1 | `FX2_SEND_OUT` |
-| Sortie master L | OUT2 | `MASTER_OUTS[0]` |
-| Sortie master R | OUT3 | `MASTER_OUTS[1]` (actif si `MASTER_OUTS_COUNT >= 2`) |
-| VU TOP | OUT6 | `VU_TOP_OUT` |
-| VU MID | OUT7 | `VU_MID_OUT` |
-| VU KICK | OUT8 | `VU_KICK_OUT` |
-| VU SUB | OUT9 | `VU_SUB_OUT` |
+| **FX 1 Return** | IN0 | `FX1_RETURN_IN` |
+| **FX 2 Return** | IN1 | `FX2_RETURN_IN` |
+| **AUX 1 Source (L/R)** | IN2, IN3 | `AUX1_CONFIG.audioIns[0, 1]` |
+| **AUX 2 Source (L/R)** | IN4, IN5 | `AUX2_CONFIG.audioIns[0, 1]` |
+| **AUX 3 Source (L/R)** | IN6, IN7 | `AUX3_CONFIG.audioIns[0, 1]` |
+| **AUX 4 Source (L/R)** | IN8, IN9 | `AUX4_CONFIG.audioIns[0, 1]` |
+| **FX 1 Send** | OUT0 | `FX1_SEND_OUT` |
+| **FX 2 Send** | OUT1 | `FX2_SEND_OUT` |
+| **Master Left** | OUT2 | `MASTER_OUTS[0]` |
+| **Master Right** | OUT3 | `MASTER_OUTS[1]` (active when `MASTER_OUTS_COUNT >= 2`) |
+| **VU Meter TOP** | OUT6 | `VU_TOP_OUT` (> 1200 Hz) |
+| **VU Meter MID** | OUT7 | `VU_MID_OUT` (200–1200 Hz) |
+| **VU Meter KICK** | OUT8 | `VU_KICK_OUT` (80–200 Hz) |
+| **VU Meter SUB** | OUT9 | `VU_SUB_OUT` (< 80 Hz) |
 
 ---
 
-## Mapping hardware actuel
+## 6. Hardware Mapping & Topologies
 
-`kActiveMux = 8` (8 multiplexeurs 10 voies, canaux 0 à 9). La liste exhaustive des `PotRef` et `SwitchRef` est dans `HardwareConfig.h` — c'est la source de vérité pour les numéros de MUX/canal. Ne pas dupliquer ici.
+- **Multiplexers:** 8 active CD74HC4067 chips (`kActiveMux = 8`, 10 channels each, channels 0..9).
+  - MUX 0: AUX 1 (Gain, EQ 3-band, FX Send 1 & 2) + FX Return Gains (1 & 2)
+  - MUX 1: AUX 2 (Gain, EQ 3-band, FX Send 1 & 2) + Graphic EQ (1 kHz, 2 kHz)
+  - MUX 2: AUX 3 (Gain, EQ 3-band, FX Send 1 & 2) + Graphic EQ (4 kHz, 8 kHz)
+  - MUX 3: AUX 4 (Gain, EQ 3-band, FX Send 1 & 2) + Graphic EQ (16 kHz)
+  - MUX 4: Master Parametric EQ (Freq + Gain × 4) + Master HPF (Freq + Res)
+  - MUX 5: Master LPF (Freq + Res) + Band Trim (4 bands) + Master Gain + Graphic EQ (250 Hz, 500 Hz)
+  - MUX 6: Dub Siren (Type, Mod, Gain, FX Send 1 & 2) + Graphic EQ (40 Hz .. 125 Hz)
+  - MUX 7: Expansion / Aux channels (0 to 9)
 
-**Groupes fonctionnels par MUX (vue d'ensemble) :**
-- MUX 0 : AUX 1 (Gain, EQ 3 bandes, FX Send 1 & 2) + Gains retour FX 1 & 2
-- MUX 1 : AUX 2 (Gain, EQ 3 bandes, FX Send 1 & 2) + Graphic EQ 1 kHz & 2 kHz
-- MUX 2 : AUX 3 (Gain, EQ 3 bandes, FX Send 1 & 2) + Graphic EQ 4 kHz & 8 kHz
-- MUX 3 : AUX 4 (Gain, EQ 3 bandes, FX Send 1 & 2) + Graphic EQ 16 kHz
-- MUX 4 : EQ paramétrique master (freq + gain × 4) + HPF master (freq + res)
-- MUX 5 : LPF master (freq + res) + Band Trim (4 bandes) + Master Gain + Graphic EQ 250 Hz & 500 Hz
-- MUX 6 : Dub Siren (Type, Mod, Gain, FX Send 1 & 2) + Graphic EQ 40 Hz à 125 Hz
-- MUX 7 : Extension / canaux additionnels (0 à 9)
+- **Switches (MCP23017 I2C GPIO expander, 0x20..0x27):**
+  - 4 Kills: `KILL_SUB`, `KILL_KICK`, `KILL_MID`, `KILL_TOP`
+  - 2 Modes FX1 Send: `FX_FILTER_MIDS`, `FX_FILTER_TOPS`
+  - 2 Modes FX2 Send: `FX2_FILTER_MIDS`, `FX2_FILTER_TOPS`
+  - 1 Siren Gate: `SIREN_TRIGGER`
 
-> Les `PotRef` avec le flag `centered = true` passent automatiquement par la courbe de puissance (`kCenteredPotExponent`). Pots ignorés : voir `kIgnoredPots` dans `HardwareConfig.h`.
-
-**Switches (MCP23017 ports A & B, auto-détection d'adresse 0x20..0x27) :**
-- 4 kills (SUB/KICK/MID/TOP)
-- 2 modes FX send 1 (MIDS only, TOPS only)
-- 2 modes FX send 2 (MIDS only, TOPS only)
-- 1 gate sirène (SIREN_TRIGGER)
+- **Hardware Clip LEDs (MCP23017 outputs):**
+  - `CLIP_LED_MASTER`, `CLIP_LED_AUX1`, `CLIP_LED_AUX2`, `CLIP_LED_AUX3`, `CLIP_LED_AUX4`
 
 ---
 
-## Paramètres DSP clés (SoftwareConfig.h)
+## 7. Key DSP Parameters (SoftwareConfig.h)
 
-| Constante | Valeur | Rôle |
+| Constant | Value | Purpose |
 |---|---|---|
-| `kGateThreshold` | 0.001 | Seuil d'ouverture du gate (≈ -60 dBFS) |
-| `kGateAttackMs` | 2 ms | Vitesse d'ouverture du gate |
-| `kGateHoldMs` | 100 ms | Temps de maintien avant fermeture |
-| `kGateReleaseMs` | 150 ms | Vitesse de fermeture |
-| `kKillRampMs` | 30 ms | Durée fondu activation/désactivation kill |
-| `kKillFilterStages` | 2 | Pentes : 2 × 12 = 24 dB/oct par bande |
-| `kKillFc0` | 80 Hz | Frontière SUB/KICK |
-| `kKillFc1` | 200 Hz | Frontière KICK/MID |
-| `kKillFc2` | 1200 Hz | Frontière MID/TOP |
-| `kEqLowFreq` | 250 Hz | Fréquence low shelf EQ canal |
-| `kEqMidFreq` | 1000 Hz | Fréquence mid peak EQ canal |
-| `kEqHighFreq` | 4000 Hz | Fréquence high shelf EQ canal |
-| `kEqGainRangeDb` | 6 dB | Plage EQ canal (±6 dB) |
-| `kEqGainSmoothMs` | 5 ms | Lissage des gains EQ (anti-clic sur sweep) |
-| `kMasterEqGainRangeDb` | 6 dB | Plage EQ paramétrique master |
-| `kGEqGainRangeDb` | 12 dB | Plage EQ graphique master |
-| `kBandTrimGainDb` | 6 dB | Plage Band Trim (±6 dB) |
-| `kHpfFMin/FMax` | 20–2000 Hz | Plage HPF |
-| `kLpfFMin/FMax` | 200–20000 Hz | Plage LPF |
-| `kFilterQMin/Max` | 0.7–4.5 | Plage résonance HPF/LPF |
-| `kFilterOffThreshold` | 0.01 | Pot en dessous → filtre bypasse |
-| `kFilterBypassRampMs` | 5 ms | Durée fondu bypass HPF/LPF (anti-clic) |
-| `kCenteredPotExponent` | 2.0 | Exposant courbe puissance pots centrés |
-| `kPotSmoothingCoeff` | 0.15 | Coefficient lissage passe-bas EMA pots (anti-gigue) |
-| `kSirenGateAttackMs` | 5 ms | Attaque gate sirène |
-| `kSirenGateReleaseMs` | 80 ms | Release gate sirène |
-| `kSirenGainScale` | 0.1 | Niveau sirène relatif aux canaux |
-| `kSamplerGainScale` | 0.35 | Niveau WAV sampler (mixé au point sirène) |
-| `kFxMidLowFreq` | 250 Hz | Borne basse mode MIDS (FX send) |
-| `kFxMidHighFreq` | 4000 Hz | Borne haute mode MIDS / seuil TOPS |
-| `kDebug` | true | Active le log des pots/switches dans render() |
+| `kGateThreshold` | 0.001 | Gate opening threshold (≈ -60 dBFS) |
+| `kGateAttackMs` | 2 ms | Gate opening ramp speed |
+| `kGateHoldMs` | 100 ms | Gate hold duration before starting release |
+| `kGateReleaseMs` | 150 ms | Gate closing ramp speed |
+| `kKillRampMs` | 30 ms | Fade duration when toggling band kills |
+| `kKillFilterStages` | 2 | Crossover slope: 2 stages = 24 dB/oct per band |
+| `kKillFc0` | 80 Hz | Crossover boundary SUB / KICK |
+| `kKillFc1` | 200 Hz | Crossover boundary KICK / MID |
+| `kKillFc2` | 1200 Hz | Crossover boundary MID / TOP |
+| `kEqLowFreq` | 250 Hz | Channel low shelf frequency |
+| `kEqMidFreq` | 1000 Hz | Channel mid peak frequency |
+| `kEqHighFreq` | 4000 Hz | Channel high shelf frequency |
+| `kEqGainRangeDb` | 6 dB | Channel EQ gain range (±6 dB) |
+| `kEqGainSmoothMs` | 5 ms | Gain change smoothing to prevent audible clicks |
+| `kMasterEqGainRangeDb` | 6 dB | Master parametric EQ range (±6 dB) |
+| `kGEqGainRangeDb` | 12 dB | Master graphic EQ range (±12 dB) |
+| `kBandTrimGainDb` | 6 dB | Band Trim range (±6 dB) |
+| `kHpfFMin` / `FMax` | 20–2000 Hz | Master HPF sweepable range |
+| `kLpfFMin` / `FMax` | 200–20000 Hz | Master LPF sweepable range |
+| `kFilterQMin` / `Max` | 0.7–4.5 | Master filter resonance range |
+| `kFilterOffThreshold` | 0.01 | Pot threshold below which filter is bypassed |
+| `kFilterBypassRampMs` | 5 ms | Crossfade ramp time for filter soft-bypass |
+| `kSnapRadiusCenter` | 0.03 | Center deadband radius for centered pots (snaps to 0.5) |
+| `kPotSmoothingCoeff` | 0.15 | 1st-order EMA low-pass filter coefficient for ADC reads |
+| `kSirenGateAttackMs` | 5 ms | Dub Siren gate attack time |
+| `kSirenGateReleaseMs`| 80 ms | Dub Siren gate release time |
+| `kSirenGainScale` | 0.1 | Siren volume scaling relative to audio channels |
+| `kSamplerGainScale` | 0.35 | WAV sampler volume scaling (mixed with siren) |
+| `kFxMidLowFreq` | 250 Hz | Lower cutoff for FX send MIDS mode |
+| `kFxMidHighFreq` | 4000 Hz | Upper cutoff for FX send MIDS / threshold for TOPS |
+| `kDebug` | true | Controls real-time terminal debug logging |
 
 ---
 
-## Conventions de code à respecter
+## 8. Non-Negotiable Architectural Decisions (ADRs)
 
-1. **Documentation** : chaque méthode publique a un doc-comment court **en anglais**.
-2. **Un objet = une mission.** Si une classe grossit, extraire dans un objet dédié.
-3. **Pas de copier-coller.** Factoriser dans des objets ou des fonctions helper.
-4. **Flexibilité** : tout paramètre numérique doit être une constante nommée dans `HardwareConfig.h` ou `SoftwareConfig.h`.
-5. **Nommage** : membres privés avec underscore final (`gain_`), constantes avec préfixe `k` (`kGateThreshold`), configs hardware en MAJUSCULES (`MASTER_OUT_L`, `CH1_INPUT_GAIN`).
-
----
-
-## Décisions d'architecture importantes (ne pas réverter)
-
-### Scan MUX dans render() — pas dans AuxiliaryTask
-Le scan des MUX utilise `analogRead()` et `digitalWrite()` qui requièrent un `BelaContext*` valide. Ces fonctions ne sont RT-safe que dans `render()`. Toute tentative de les appeler depuis une AuxTask produit des valeurs aléatoires.
-
-### Kill switches : crossover parallèle + double ramp
-Le KillSwitch utilise un crossover **parallèle** (4 extractions indépendantes du même signal, pas sériel) pour éviter le bleed entre bandes. La transition bypass↔crossover utilise un `crossoverMix_` (ramp par sample) en plus du `bandGain_` pour éliminer les clics à l'activation du premier kill.
-
-### NoiseGate : un seul seuil (pas d'hystérésis)
-L'hystérésis (deux seuils open/close) a été implémentée puis révoquée car elle coupait les signaux faibles. Le comportement actuel (seuil unique + hold long) est validé et stable.
-
-### EQ gain smoothing (anti-clic sur potards)
-Dans toutes les classes EQ (`ChannelStrip`, `ParametricEq`, `GraphicEq`, `BandTrim`), les gains ne sont **pas** appliqués directement aux biquads. Un lisseur one-pole per-sample converge vers la cible (`kEqGainSmoothMs = 5 ms`). Les coefficients biquad ne sont recalculés que lorsque le gain lissé a bougé de plus de ~0.05 dB. Cela élimine les clics lors du sweep des potards.
-
-### EQ bypass automatique (ChannelStrip et autres)
-Dans `ChannelStrip::process()` (et toutes les classes EQ), les filtres sont contournés lorsque les **gains lissés** (`smoothLow_`, `smoothMid_`, `smoothHigh_`) sont tous en dessous de `kGainEpsilonDb` (0.05 dB). Utilise les valeurs lissées, pas les cibles brutes — cela évite un bypass prématuré pendant la décroissance vers 0 dB.
-
-### FilterSection (HPF/LPF) : bypass mou + state warm
-Les deux biquads HPF et LPF tournent **en permanence** dans `process()`, même quand leur mix cible est 0. Cela maintient leur état interne (z1/z2) à jour. La transition bypass↔actif utilise un lisseur one-pole sur le mix sec/mouillé (`kFilterBypassRampMs = 5 ms`) pour éviter tout clic à l'activation.
-
-### Linéarité et aimantation au centre pour pots centrés
-`getCenteredPotValue()` applique une réponse linéaire symétrique autour de 0.5 avec une zone morte :
-```
-- Si |v - 0.5| <= kSnapRadiusCenter : output = 0.5 (aimantation au centre / 0 dB)
-- Sinon : output évolue linéairement jusqu'à 0.0 ou 1.0.
-```
-La zone morte (`kSnapRadiusCenter = 0.03`) assure une position centrale neutre (0 dB) sans gigue ADC, remplaçant l'ancienne courbe de puissance exponentielle.
-
-### Lissage EMA des potentiomètres (HardwareManager)
-Un filtre passe-bas du 1er ordre (EMA / One-pole, `kPotSmoothingCoeff = 0.15`) est appliqué directement sur chaque lecture de potentiomètre dans `HardwareManager::scanStep()`. Cela élimine le bruit ADC haute fréquence (~22 dB d'atténuation) et supprime les sauts de valeurs (ex: 0.433 ↔ 0.435) sur potentiomètres immobiles tout en garantissant un ressenti analogique immédiat (temps de montée ~70 ms). Le premier scan initialise directement la valeur sans rampe au boot, et les butées (0.0 / 1.0) bénéficient d'une extinction franche.
-
-### ParametricEq : fréquence block-rate, gain per-sample
-Les changements de fréquence dans `ParametricEq::setBand()` sont traités immédiatement (taux block, ~5.8 ms) en utilisant le gain **lissé courant** (pas la cible) pour éviter une discontinuité de gain lors du recalcul. Les changements de gain sont lissés per-sample dans `process()` comme les autres EQ.
+1. **MUX Scanning in `render()`, NEVER in an `AuxiliaryTask`:**  
+   `analogRead()` and `digitalWrite()` require a valid `BelaContext*` and must execute in the hard real-time audio thread. Calling them from an auxiliary task causes non-deterministic values and ADC corruption.
+2. **Parallel Crossover with Dual Ramping for Kill Switches:**  
+   The crossover extracts all 4 bands in parallel directly from the input signal (never chained in series) to guarantee zero inter-band bleed. Switching between global bypass and the crossover uses a per-sample smooth ramp (`crossoverMix_`) alongside individual `bandGain_` ramps to avoid switching pops.
+3. **Single-Threshold Noise Gate (No Hysteresis):**  
+   Dual-threshold hysteresis was evaluated and deliberately removed because it chopped off low-level audio tails. A single threshold combined with a generous hold time (`kGateHoldMs = 100 ms`) is confirmed stable and musically transparent.
+4. **Per-Sample EQ Gain Smoothing:**  
+   In all EQ classes (`ChannelStrip`, `ParametricEq`, `GraphicEq`, `BandTrim`), gains are smoothed using a one-pole low-pass filter (`kEqGainSmoothMs = 5 ms`). Biquad coefficients are recalculated only when smoothed gain drifts by more than `kGainEpsilonDb` (0.05 dB), eliminating zipper noise during sweeps.
+5. **Automatic Filter Bypass in EQ:**  
+   When all smoothed gains are within `kGainEpsilonDb`, the biquad calculation loop is cleanly bypassed. This decision uses smoothed gains (not raw targets) to avoid premature bypass during decay.
+6. **FilterSection Soft Bypass with Warm Filter State:**  
+   Both HPF and LPF biquads run continuously in `FilterSection::process()`, even when dry/wet mix is zero. This keeps their internal delay lines ($z_1, z_2$) updated and prevents clicks upon re-engagement. Transitions are smoothed over 5 ms.
+7. **Center Snapping & Linear Response for Centered Pots:**  
+   `getCenteredPotValue()` applies a symmetrical linear response around 0.5 with a dedicated deadband:
+   - If $|v - 0.5| \le kSnapRadiusCenter$ (0.03): output snaps strictly to `0.5` (0 dB center detent).
+   - Otherwise: evolves linearly towards `0.0` or `1.0`.  
+   *(Replaces legacy quadratic power curves).*
+8. **ADC Potentiometer EMA Low-Pass Filtering:**  
+   A 1st-order EMA filter (`kPotSmoothingCoeff = 0.15`) attenuates high-frequency ADC noise by ~22 dB in `HardwareManager::scanStep()`, eliminating jitter without perceptible latency (~70 ms rise time). First scan initializes directly without ramping, and hard limits (0.0 and 1.0) snap cleanly.
+9. **Parametric EQ: Block-Rate Frequency Recalculation:**  
+   Frequency sweeps update filter coefficients at block-rate (~5.8 ms) using the *current smoothed gain* rather than the target gain to avoid gain discontinuities.
 
 ---
 
-## GUI Bela (sketch.js)
+## 9. Bela Web GUI Workflow
 
-L'IDE Bela ne charge que `src/sketch.js`. Les sources vivent dans `gui/` à la racine (modules ES6, hors `src/` car non déployées).
+- The browser GUI lives at `http://bela.local/gui/`.
+- Bela IDE loads exclusively from `src/sketch.js`. It does not support ES6 modules natively in browser context.
+- **Workflow:**
+  1. Edit modular source files in `gui/` (`main.js`, `config.js`, `dom/*`, `bela/*`).
+  2. Run `npm run build:gui` to compile bundle into `src/sketch.js` via esbuild.
+  3. Deploy the project to Bela.
+- **Sample Player:** Loads audio files from `src/samples/*.{wav,mp3}` during `setup()` via `AudioFileUtilities`. Samples are triggered via WebSocket messages (`{ event: 'custom', samplerPlay: index }`).
 
-**Workflow :**
-1. Éditer les fichiers dans `gui/` (`main.js`, `config.js`, `dom/*`, `bela/*`)
-2. `npm run build:gui` — regénère `src/sketch.js` via esbuild
-3. Déployer / synchroniser le projet Bela (comme avant)
+---
 
-**Structure GUI :**
-- `config.js` — constantes (must match `render.cpp` / `SoftwareConfig.h`)
-- `state.js` + `context.js` — état mutable partagé
-- `dom/` — onglets Live (tuiles Siren, Mic, Sampler, Meters…), Master EQ, Mapping, shell
-- `dom/sampler.js` — tuile Sampler (liste WAV + trigger via `Bela.control`)
-- `bela/connection.js` — badge LIVE/LAG/OFFLINE
+## 10. Code & Quality Conventions
 
-**Sampler :** charge `src/samples/*.{wav,mp3}` au boot via `AudioFileUtilities::load` (`SamplePlayer`). La tuile Live liste les fichiers (buffers GUI 10/11) ; un clic envoie `{ event:'custom', samplerPlay: i }`. Sortie mixée avec la Dub Siren (pots `SIREN_GAIN` / FX send, pas le trigger hardware).
-
-`npm run watch:gui` pour rebuild automatique en dev local.
+1. **Documentation:** All public class methods must include concise doc-comments in **English**.
+2. **Single Responsibility:** Classes should have a single well-defined mission.
+3. **No Duplication:** Common logic must be factored into reusable utilities or objects (`DspUtils`).
+4. **Naming Standards:**
+   - Private member variables: trailing underscore (`gain_`, `smoothLow_`).
+   - Software/DSP constants: `k`-prefix in camelCase (`kGateThreshold`, `kKillRampMs`).
+   - Hardware pins and config references: uppercase (`MASTER_OUTS`, `AUX1_CONFIG`, `KILL_SUB`).

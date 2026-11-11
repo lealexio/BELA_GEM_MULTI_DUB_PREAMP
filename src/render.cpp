@@ -72,6 +72,14 @@ bool gMicHpfActive[4] = {false, false, false, false};
 static std::atomic<uint8_t> gMicHpfPendingMask{0};
 static std::atomic<bool> gMasterStereo{true};
 
+// Dedicated brickwall limiter for mono fold-down master output.
+static BrickwallLimiter gMonoLimiter;
+// Mono high-shelf air compensation filter to counteract comb-filtering loss.
+static BiquadFilter gMonoAirFilter;
+// Smooth crossfade state between Stereo (1.f) and Mono (0.f).
+static float gStereoMonoMix = 1.f;
+static float gStereoMonoSlewCoeff = 0.f;
+
 Scope scope;
 
 // ---------------------------------------------------------------------------
@@ -653,6 +661,13 @@ bool setup(BelaContext *context, void *userData) {
   gChannelStrip4R.setup(context->audioSampleRate);
   gMasterFx.setup(context->audioSampleRate);
   gMasterFxR.setup(context->audioSampleRate);
+  gMonoLimiter.setup(context->audioSampleRate);
+  if (kMonoAirCompEnabled) {
+    gMonoAirFilter.setHighShelf(kMonoAirCompFreqHz, kMonoAirCompGainDb,
+                                context->audioSampleRate);
+  }
+  gStereoMonoSlewCoeff =
+      1.f - expf(-1.f / (kMonoCrossfadeMs * 0.001f * context->audioSampleRate));
   gDubSiren.setup(context->audioSampleRate);
   gSamplePlayer.setup(context->audioSampleRate, context->projectName);
 
@@ -729,6 +744,7 @@ bool setup(BelaContext *context, void *userData) {
   }
 
   gMasterStereo.store(MASTER_STEREO);
+  gStereoMonoMix = ((MASTER_OUTS_COUNT >= 2) && MASTER_STEREO) ? 1.f : 0.f;
   fillConfigMetaBuf();
   fillSamplerNamesBuf();
 
@@ -1194,10 +1210,21 @@ void render(BelaContext *context, void *userData) {
     float sirenOut = gDubSiren.process();
     float samplerOut = gSamplePlayer.process();
 
-    // FX send 1: use left-bus fxOut() (mono FX bus) — filtered by mode → OUT2
-    float fxSend = gChannelStrip.fxOut() + gChannelStrip2.fxOut() +
-                   gChannelStrip3.fxOut() + gChannelStrip4.fxOut() +
-                   gDubSiren.fxOut() + gSamplePlayer.fxOut();
+    // FX send 1: sum AUX channels (averaging L+R for stereo channels) + Siren + Sampler
+    float fx1_1 = AUX1_CONFIG.isStereo()
+                      ? 0.5f * (gChannelStrip.fxOut() + gChannelStripR.fxOut())
+                      : gChannelStrip.fxOut();
+    float fx1_2 = AUX2_CONFIG.isStereo()
+                      ? 0.5f * (gChannelStrip2.fxOut() + gChannelStrip2R.fxOut())
+                      : gChannelStrip2.fxOut();
+    float fx1_3 = AUX3_CONFIG.isStereo()
+                      ? 0.5f * (gChannelStrip3.fxOut() + gChannelStrip3R.fxOut())
+                      : gChannelStrip3.fxOut();
+    float fx1_4 = AUX4_CONFIG.isStereo()
+                      ? 0.5f * (gChannelStrip4.fxOut() + gChannelStrip4R.fxOut())
+                      : gChannelStrip4.fxOut();
+    float fxSend = fx1_1 + fx1_2 + fx1_3 + fx1_4 + gDubSiren.fxOut() +
+                   gSamplePlayer.fxOut();
     if (fxModeTops)
       fxSend = gFxHpf4k.process(fxSend); // > 4 kHz only
     else if (fxModeMids)
@@ -1206,9 +1233,20 @@ void render(BelaContext *context, void *userData) {
       fxSend = gFxMidHpf.process(fxSend); // > 250 Hz (MID+TOP)
 
     // FX send 2: mono FX bus → OUT3
-    float fxSend2 = gChannelStrip.fxOut2() + gChannelStrip2.fxOut2() +
-                    gChannelStrip3.fxOut2() + gChannelStrip4.fxOut2() +
-                    gDubSiren.fxOut2() + gSamplePlayer.fxOut2();
+    float fx2_1 = AUX1_CONFIG.isStereo()
+                      ? 0.5f * (gChannelStrip.fxOut2() + gChannelStripR.fxOut2())
+                      : gChannelStrip.fxOut2();
+    float fx2_2 = AUX2_CONFIG.isStereo()
+                      ? 0.5f * (gChannelStrip2.fxOut2() + gChannelStrip2R.fxOut2())
+                      : gChannelStrip2.fxOut2();
+    float fx2_3 = AUX3_CONFIG.isStereo()
+                      ? 0.5f * (gChannelStrip3.fxOut2() + gChannelStrip3R.fxOut2())
+                      : gChannelStrip3.fxOut2();
+    float fx2_4 = AUX4_CONFIG.isStereo()
+                      ? 0.5f * (gChannelStrip4.fxOut2() + gChannelStrip4R.fxOut2())
+                      : gChannelStrip4.fxOut2();
+    float fxSend2 = fx2_1 + fx2_2 + fx2_3 + fx2_4 + gDubSiren.fxOut2() +
+                    gSamplePlayer.fxOut2();
     if (fx2ModeTops)
       fxSend2 = gFx2Hpf4k.process(fxSend2); // > 4 kHz only
     else if (fx2ModeMids)
@@ -1224,7 +1262,7 @@ void render(BelaContext *context, void *userData) {
         audioRead(context, n, FX2_RETURN_IN) * fx2ReturnGain);
     const float monoExtras = sirenOut + samplerOut;
 
-    // ---- Left master bus ----
+    // ---- Left master bus (unlimited raw linear output) ----
     // Routing controlled by kFxReturnPostMaster (SoftwareConfig.h).
     // Mic-mode AUX dry: bypasses ParamEq / HPF-LPF / kills; still gets GEQ +
     // BandTrim + gain.
@@ -1247,24 +1285,20 @@ void render(BelaContext *context, void *userData) {
       dryNormalL += dry4L;
     dryNormalL += monoExtras;
 
-    float outL;
+    float rawOutL;
     if (kFxReturnPostMaster) {
-      outL = gMasterFx.process(dryNormalL);
+      rawOutL = gMasterFx.process(dryNormalL);
       if (anyMic)
-        outL += gMasterFx.processMicPath(dryMicL);
-      outL += (fxReturn + fxReturn2) * gMasterFx.getMasterGain();
+        rawOutL += gMasterFx.processMicPath(dryMicL);
+      rawOutL += (fxReturn + fxReturn2) * gMasterFx.getMasterGain();
     } else {
-      outL = gMasterFx.process(dryNormalL + fxReturn + fxReturn2);
+      rawOutL = gMasterFx.process(dryNormalL + fxReturn + fxReturn2);
       if (anyMic)
-        outL += gMasterFx.processMicPath(dryMicL);
+        rawOutL += gMasterFx.processMicPath(dryMicL);
     }
-    if (fabsf(outL) >= kClipThreshold)
-      clipMaster = true;
-    outL = gMasterFx.limitOutput(outL);
 
-    // ---- Right master bus (when stereo output or folding stereo inputs to
-    // mono) ----
-    float outR;
+    // ---- Right master bus (unlimited raw linear output) ----
+    float rawOutR;
     if (needRightBus) {
       float dryNormalR = 0.f, dryMicR = 0.f;
       if (AUX1_CONFIG.micMode)
@@ -1286,36 +1320,57 @@ void render(BelaContext *context, void *userData) {
       dryNormalR += monoExtras;
 
       if (kFxReturnPostMaster) {
-        outR = gMasterFxR.process(dryNormalR);
+        rawOutR = gMasterFxR.process(dryNormalR);
         if (anyMic)
-          outR += gMasterFxR.processMicPath(dryMicR);
-        outR += (fxReturn + fxReturn2) * gMasterFxR.getMasterGain();
+          rawOutR += gMasterFxR.processMicPath(dryMicR);
+        rawOutR += (fxReturn + fxReturn2) * gMasterFxR.getMasterGain();
       } else {
-        outR = gMasterFxR.process(dryNormalR + fxReturn + fxReturn2);
+        rawOutR = gMasterFxR.process(dryNormalR + fxReturn + fxReturn2);
         if (anyMic)
-          outR += gMasterFxR.processMicPath(dryMicR);
+          rawOutR += gMasterFxR.processMicPath(dryMicR);
       }
-      if (fabsf(outR) >= kClipThreshold)
-        clipMaster = true;
-      outR = gMasterFxR.limitOutput(outR);
     } else {
-      outR = outL; // unused when mono, but keep consistent
+      rawOutR = rawOutL;
     }
 
-    // Final Master outputs (Stereo vs Mono Canal L + R)
-    float finalL = outL;
-    float finalR = outR;
-    if (!stereoOut) {
-      // Mono fold-down: average L+R, then limit once.
-      // Important: do NOT call gMasterFx.limitOutput() again here — outL was
-      // already limited above (line ~1216). Calling the same limiter instance
-      // on a different signal corrupts its internal gain_ state.
-      // We call gMasterFxR.limitOutput() on the averaged signal instead,
-      // which has independent gain_ state and has not yet been driven.
-      float outMono = gMasterFxR.limitOutput(0.5f * (outL + outR));
+    // Advance smooth crossfade between Stereo (1.f) and Mono (0.f)
+    const float targetStereoMix = stereoOut ? 1.f : 0.f;
+    gStereoMonoMix += gStereoMonoSlewCoeff * (targetStereoMix - gStereoMonoMix);
+
+    // Final Master outputs (Professional Stereo vs Fold-down Mono)
+    float finalL, finalR;
+    if (gStereoMonoMix >= 0.999f) {
+      // Pure Stereo mode: independent L & R limiters
+      finalL = gMasterFx.limitOutput(rawOutL);
+      finalR = gMasterFxR.limitOutput(rawOutR);
+      if (fabsf(rawOutL) >= kClipThreshold || fabsf(rawOutR) >= kClipThreshold ||
+          fabsf(finalL) >= kClipThreshold || fabsf(finalR) >= kClipThreshold)
+        clipMaster = true;
+    } else if (gStereoMonoMix <= 0.001f) {
+      // Pure Mono mode: sum raw outputs with constant power law, apply Air compensation, limit once
+      float monoSum = kMonoFoldDownGain * (rawOutL + rawOutR);
+      if (kMonoAirCompEnabled)
+        monoSum = gMonoAirFilter.process(monoSum);
+      float outMono = gMonoLimiter.process(monoSum);
       finalL = outMono;
       finalR = outMono;
-      if (fabsf(outMono) >= kClipThreshold)
+      if (fabsf(rawOutL) >= kClipThreshold || fabsf(rawOutR) >= kClipThreshold ||
+          fabsf(outMono) >= kClipThreshold)
+        clipMaster = true;
+    } else {
+      // Crossfade transition: smooth anti-click interpolation between stereo and mono
+      float stereoL = gMasterFx.limitOutput(rawOutL);
+      float stereoR = gMasterFxR.limitOutput(rawOutR);
+
+      float monoSum = kMonoFoldDownGain * (rawOutL + rawOutR);
+      if (kMonoAirCompEnabled)
+        monoSum = gMonoAirFilter.process(monoSum);
+      float outMono = gMonoLimiter.process(monoSum);
+
+      finalL = gStereoMonoMix * stereoL + (1.f - gStereoMonoMix) * outMono;
+      finalR = gStereoMonoMix * stereoR + (1.f - gStereoMonoMix) * outMono;
+      if (fabsf(rawOutL) >= kClipThreshold || fabsf(rawOutR) >= kClipThreshold ||
+          fabsf(finalL) >= kClipThreshold || fabsf(finalR) >= kClipThreshold)
         clipMaster = true;
     }
 
