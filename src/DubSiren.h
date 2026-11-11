@@ -3,21 +3,21 @@
 /**
  * Monophonic dub siren: phase-accumulator oscillator modulated by an LFO.
  *
- * Eight factory presets are selectable via a pot (0.0–1.0 → 8 positions).
+ * Six factory presets are selectable via a pot (0.0–1.0 → 6 positions).
  * The Mod pot interpolates LFO depth between a per-preset minimum (mod=0)
  * and maximum (mod=1), ensuring the siren is always modulated — no pure
  * continuous tone is ever produced. LFO rate follows the same interpolation.
  *
  * A pitch-drop envelope is triggered on each gate rising edge, adding
- * a short downward sweep that decays back to the base pitch.
+ * a short sweep that decays back to the base pitch.
  *
  * Signal flow (per sample):
  *   gate ramp  ──► amp envelope
  *   LFO        ──► pitch (semitones)
  *   drop env   ──► pitch (semitones)
- *   OSC ──► × amp ──► × gain  ──► dry out
- *                            ├─────► × fxSend  ──► fx1 out
- *                            └─────► × fxSend2 ──► fx2 out
+ *   OSC ──► LPF ──► × amp ──► × gain  ──► dry out
+ *                                    ├─────► × fxSend  ──► fx1 out
+ *                                    └─────► × fxSend2 ──► fx2 out
  *
  * Usage pattern:
  *   1. Call setup() once with the audio sample rate.
@@ -27,76 +27,78 @@
  */
 class DubSiren {
 public:
-    /** Total number of factory presets. */
-    static constexpr int kNumPresets = 6;
+  /** Total number of factory presets. */
+  static constexpr int kNumPresets = 6;
 
-    /** Initialises oscillator, LFO, and envelope state. */
-    void setup(float sampleRate);
+  /** Initialises oscillator, LFO, filter, and envelope state. */
+  void setup(float sampleRate);
 
-    /**
-     * Caches all control values for the upcoming render block.
-     * A preset change resets oscillator and LFO phases to avoid a click.
-     *
-     * @param typePot     [0.0–1.0] quantised to one of kNumPresets
-     * @param modPot      [0.0–1.0] LFO intensity (depth + rate)
-     * @param gainPot     [0.0–1.0] output gain
-     * @param fxSendPot   [0.0–1.0] FX send 1 level (post-gain)
-     * @param fxSend2Pot  [0.0–1.0] FX send 2 level (post-gain)
-     * @param gate        true = siren active; false = fade to silence
-     */
-    void setControls(float typePot, float modPot, float gainPot,
-                     float fxSendPot, float fxSend2Pot, bool gate);
+  /**
+   * Caches all control values for the upcoming render block.
+   *
+   * @param typePot     [0.0–1.0] quantised to one of kNumPresets
+   * @param modPot      [0.0–1.0] LFO intensity (depth + rate)
+   * @param gainPot     [0.0–1.0] output gain
+   * @param fxSendPot   [0.0–1.0] FX send 1 level (post-gain)
+   * @param fxSend2Pot  [0.0–1.0] FX send 2 level (post-gain)
+   * @param gate        true = siren active; false = fade to silence
+   */
+  void setControls(float typePot, float modPot, float gainPot, float fxSendPot,
+                   float fxSend2Pot, bool gate);
 
-    /**
-     * Processes one audio sample.
-     * @return Siren output with gain applied.
-     */
-    float process();
+  /**
+   * Processes one audio sample.
+   * @return Siren output with gain applied.
+   */
+  float process();
 
-    /** Returns the FX send 1 sample for the last process() call. */
-    float fxOut()  const { return lastFxOut_;  }
+  /** Returns the FX send 1 sample for the last process() call. */
+  float fxOut() const { return lastFxOut_; }
 
-    /** Returns the FX send 2 sample for the last process() call. */
-    float fxOut2() const { return lastFxOut2_; }
+  /** Returns the FX send 2 sample for the last process() call. */
+  float fxOut2() const { return lastFxOut2_; }
 
-    /** Returns the name of the currently selected preset (never nullptr). */
-    const char* getPresetName() const;
+  /** Returns the name of the currently selected preset (never nullptr). */
+  const char *getPresetName() const;
 
 private:
-    float sampleRate_     = 44100.f;
+  float sampleRate_ = 44100.f;
 
-    // --- Active oscillator state ---
-    float oscPhase_       = 0.f;  // oscillator phase [0, 1)
-    float lfoPhase_       = 0.f;  // LFO phase [0, 1)
-    float pitchDropSemi_  = 0.f;  // decaying pitch offset in semitones
-    float dropDecayCoeff_ = 0.f;  // per-sample exponential decay for pitch drop
+  // --- Active oscillator state ---
+  float oscPhase_ = 0.f;       // oscillator phase [0, 1)
+  float lfoPhase_ = 0.f;       // LFO phase [0, 1)
+  float pitchDropSemi_ = 0.f;  // decaying pitch offset in semitones
+  float dropDecayCoeff_ = 0.f; // per-sample exponential decay for pitch drop
 
-    // --- Previous oscillator state (kept alive during crossfade) ---
-    int   prevPresetIdx_      = -1;
-    float prevOscPhase_       = 0.f;
-    float prevLfoPhase_       = 0.f;
-    float prevPitchDropSemi_  = 0.f;
-    float prevDropDecayCoeff_ = 0.f;
+  // --- Previous oscillator state (kept alive during crossfade) ---
+  int prevPresetIdx_ = -1;
+  float prevOscPhase_ = 0.f;
+  float prevLfoPhase_ = 0.f;
+  float prevPitchDropSemi_ = 0.f;
+  float prevDropDecayCoeff_ = 0.f;
 
-    // --- Crossfade ramp: 0.0 = fully old preset, 1.0 = fully new preset ---
-    float crossfade_     = 1.f;   // starts at 1 (no crossfade active)
-    float crossfadeStep_ = 0.f;   // per-sample linear increment
+  // --- Crossfade ramp: 0.0 = fully old preset, 1.0 = fully new preset ---
+  float crossfade_ = 1.f;     // starts at 1 (no crossfade active)
+  float crossfadeStep_ = 0.f; // per-sample linear increment
 
-    float gateSmooth_     = 0.f;  // smoothed gate amplitude [0, 1]
-    float attackCoeff_    = 0.f;
-    float releaseCoeff_   = 0.f;
+  float gateSmooth_ = 0.f; // smoothed gate amplitude [0, 1]
+  float attackCoeff_ = 0.f;
+  float releaseCoeff_ = 0.f;
 
-    bool  prevGate_       = false;
-    int   presetIdx_      = -1;   // -1 forces first-run preset load
-    float mod_            = 0.f;
-    float gain_           = 0.f;
-    float fxSend_         = 0.f;
-    float fxSend2_        = 0.f;
-    bool  gate_           = false;
+  float lpfState_ = 0.f; // one-pole low-pass filter state
+  float lpfCoeff_ = 0.f; // low-pass filter coefficient (~2.8 kHz)
 
-    float lastFxOut_      = 0.f;
-    float lastFxOut2_     = 0.f;
+  bool prevGate_ = false;
+  int presetIdx_ = -1; // -1 forces first-run preset load
+  float mod_ = 0.f;
+  float gain_ = 0.f;
+  float fxSend_ = 0.f;
+  float fxSend2_ = 0.f;
+  bool gate_ = false;
 
-    static float oscSample (int wave,  float phase);
-    static float lfoSample (int shape, float phase);
+  float lastFxOut_ = 0.f;
+  float lastFxOut2_ = 0.f;
+
+  static float oscSample(int wave, float phase);
+  static float lfoSample(int shape, float phase);
 };
