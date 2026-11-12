@@ -58,8 +58,8 @@ private:
     BiquadFilter lpf_;
 
     // hpfInitialised_ / lpfInitialised_: true once the biquad coefficients have been
-    // computed at least once. (Renamed from hpfActive_/lpfActive_ which was
-    // misleading — both filters run unconditionally regardless of this flag.)
+    // computed. Initialised to true in setup() with baseline filter coefficients
+    // (HPF @ 20 Hz, LPF @ 20 kHz) to ensure delay lines stay warm from boot.
     bool  hpfInitialised_ = false;
     bool  lpfInitialised_ = false;
 

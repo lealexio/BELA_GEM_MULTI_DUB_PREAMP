@@ -4,14 +4,26 @@
 
 void FilterSection::setup(float sampleRate) {
     sampleRate_      = sampleRate;
-    hpfInitialised_  = false;
-    lpfInitialised_  = false;
     hpfMix_ = hpfTarget_ = 0.f;
     lpfMix_ = lpfTarget_ = 0.f;
-    lastHpfFreq_ = lastHpfRes_ = lastLpfFreq_ = lastLpfRes_ = -1.f;
+    lastHpfFreq_ = 0.f;
+    lastHpfRes_  = 0.f;
+    lastLpfFreq_ = 0.f;
+    lastLpfRes_  = 0.f;
     bypassRampCoeff_ = onePoleLpCoeff(kFilterBypassRampMs, sampleRate_);
+
+    // Pre-warm biquads at their neutral baseline filter frequencies:
+    // HPF at minimum cutoff (kHpfFMin = 20 Hz, flat Q = kFilterQMin)
+    // LPF at maximum cutoff (kLpfFMax = 20000 Hz, flat Q = kFilterQMin)
+    // Both biquads run unconditionally from boot so their internal delay
+    // lines (z1, z2) stay warm at all times, eliminating coefficient-jump
+    // transients and pops on first activation (ADR 6).
+    hpf_.setHighPass(kHpfFMin, kFilterQMin, sampleRate_);
+    lpf_.setLowPass(kLpfFMax, kFilterQMin, sampleRate_);
     hpf_.reset();
     lpf_.reset();
+    hpfInitialised_  = true;
+    lpfInitialised_  = true;
 }
 
 void FilterSection::setHpf(float freqPot, float resPot) {
