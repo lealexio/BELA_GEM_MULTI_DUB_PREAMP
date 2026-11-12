@@ -201,8 +201,8 @@ export const METER_ATTACK = 0.55;  // fast rise (~60 fps LED ballistic)
 export const METER_RELEASE = 0.12;  // slow fall
 export const PEAK_HOLD_MS = 750;
 export const PEAK_DECAY = 0.94;
-/** Clip detection — must match kClipThreshold in SoftwareConfig.h. */
-export const CLIP_THRESHOLD = 0.99;
+/** Clip detection — must match kClipThreshold in SoftwareConfig.h (≈ -0.5 dBFS). */
+export const CLIP_THRESHOLD = 0.9441;
 export const CLIP_HOLD_MS = 1500;
 /** Canvas VU meter layout — matches vumeter.js style. */
 export const VU_BOX_COUNT = 30;

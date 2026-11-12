@@ -27,7 +27,11 @@ HardwareManager::HardwareManager() {
   }
   for (int i = 0; i < kNumClipChannels; i++) {
     clipPending_[i].store(false);
+    signalPending_[i].store(false);
     clipHoldTicks_[i] = 0;
+    signalFlashTicks_[i] = 0;
+    signalCycleTicks_[i] = 0;
+    signalSilenceTicks_[i] = 0;
   }
   startupAnimationDone_.store(false);
   startupAnimationTick_ = 0;
@@ -85,7 +89,8 @@ void HardwareManager::scanStep(BelaContext *context) {
 
     sampleCount_++;
 
-    // Leave kMuxSettleFrames audio frames (~0.36 ms) for the multiplexers to settle voltage
+    // Leave kMuxSettleFrames audio frames (~0.36 ms) for the multiplexers to
+    // settle voltage
     if (sampleCount_ >= kMuxSettleFrames && (n % analogFrameRatio == 0)) {
       unsigned int analogFrame = n / analogFrameRatio;
       if (analogFrame >= context->analogFrames)
@@ -375,6 +380,13 @@ void HardwareManager::readMcp23017() {
           if (++startupAnimationStep_ >= kStartupLedAnimSteps) {
             // Animation complete: turn off all LEDs and mark done
             for (int i = 0; i < kNumClipChannels; ++i) {
+              clipPending_[i].store(false, std::memory_order_relaxed);
+              signalPending_[i].store(false, std::memory_order_relaxed);
+              clipHoldTicks_[i] = 0;
+              signalFlashTicks_[i] = 0;
+              signalCycleTicks_[i] = 0;
+              signalSilenceTicks_[i] = 0;
+
               const ClipLedRef *r = refs[i];
               if (!r || !r->enabled || r->pin < 0 || r->pin > 7)
                 continue;
@@ -396,91 +408,152 @@ void HardwareManager::readMcp23017() {
           }
         }
       } else {
-        // --- Normal clip LED monitoring ---
-        const int holdTicks =
-            (int)(kClipLedHoldMs / 5.0f > 1.0f ? kClipLedHoldMs / 5.0f : 1.0f);
+        // --- Normal dual-function LED monitoring: Signal Present & Clip ---
+        const int holdTicksClip =
+            (int)(kClipLedHoldMs / kMcpPollIntervalMs > 1.0f
+                      ? kClipLedHoldMs / kMcpPollIntervalMs
+                      : 1.0f);
+        const int flashTicksSignal =
+            (int)(kSignalFlashDurationMs / kMcpPollIntervalMs > 1.0f
+                      ? kSignalFlashDurationMs / kMcpPollIntervalMs
+                      : 1.0f);
+        const int periodTicksSignal =
+            (int)(kSignalFlashPeriodMs / kMcpPollIntervalMs > 1.0f
+                      ? kSignalFlashPeriodMs / kMcpPollIntervalMs
+                      : 1.0f);
+        const int silenceTicksWindow =
+            (int)(kSignalSilenceWindowMs / kMcpPollIntervalMs > 1.0f
+                      ? kSignalSilenceWindowMs / kMcpPollIntervalMs
+                      : 1.0f);
 
         for (int i = 0; i < kNumClipChannels; ++i) {
           const ClipLedRef *r = refs[i];
           if (!r || !r->enabled || r->pin < 0 || r->pin > 7)
             continue;
 
-          if (clipPending_[i].exchange(false, std::memory_order_relaxed)) {
-            clipHoldTicks_[i] = holdTicks;
-          } else if (clipHoldTicks_[i] > 0) {
-            clipHoldTicks_[i]--;
+            bool clip =
+                clipPending_[i].exchange(false, std::memory_order_relaxed);
+            bool sig =
+                signalPending_[i].exchange(false, std::memory_order_relaxed);
+
+            // 1. Digital Clip management (absolute priority: solid ON
+            // for 1.0–1.5s)
+            if (clip) {
+              clipHoldTicks_[i] = holdTicksClip;
+              signalFlashTicks_[i] = 0;
+              signalCycleTicks_[i] = 0;
+              signalSilenceTicks_[i] = 0;
+            }
+
+            bool active = false;
+
+            if (clipHoldTicks_[i] > 0) {
+              clipHoldTicks_[i]--;
+              active = true;
+            } else {
+              // 2. Signal Present management (brief 35 ms impulse / slow 1 Hz
+              // rhythm)
+              if (sig) {
+                signalSilenceTicks_[i] = 0;
+              } else {
+                signalSilenceTicks_[i]++;
+              }
+
+              if (signalCycleTicks_[i] == 0) {
+                // Idle state: immediate flash upon rising edge of audio signal
+                if (sig) {
+                  signalFlashTicks_[i] = flashTicksSignal;
+                  signalCycleTicks_[i] = periodTicksSignal;
+                  active = true;
+                }
+              } else {
+                // Active 1 Hz periodic cycle
+                if (signalFlashTicks_[i] > 0) {
+                  signalFlashTicks_[i]--;
+                  active = true;
+                }
+                signalCycleTicks_[i]--;
+
+                // End of 1 Hz cycle: repeat flash if audio was recently active
+                if (signalCycleTicks_[i] == 0) {
+                  if (signalSilenceTicks_[i] < silenceTicksWindow) {
+                    signalFlashTicks_[i] = flashTicksSignal;
+                    signalCycleTicks_[i] = periodTicksSignal;
+                    active = true;
+                  }
+                }
+              }
+            }
+
+            bool pinHigh = r->activeLow ? !active : active;
+            uint8_t bit = (1 << r->pin);
+
+            if (!r->portB) {
+              if (pinHigh)
+                newOlatA |= bit;
+              else
+                newOlatA &= ~bit;
+            } else {
+              if (pinHigh)
+                newOlatB |= bit;
+              else
+                newOlatB &= ~bit;
+            }
           }
+        }
 
-          bool active = (clipHoldTicks_[i] > 0);
-          bool pinHigh = r->activeLow ? !active : active;
-          uint8_t bit = (1 << r->pin);
-
-          if (!r->portB) {
-            if (pinHigh)
-              newOlatA |= bit;
-            else
-              newOlatA &= ~bit;
-          } else {
-            if (pinHigh)
-              newOlatB |= bit;
-            else
-              newOlatB &= ~bit;
+        // Only write to I2C if the output latch state has changed
+        if (newOlatA != currentOlatA_) {
+          uint8_t wBuf[2] = {MCP_OLATA, newOlatA};
+          if (write(i2cFd_, wBuf, 2) == 2) {
+            currentOlatA_ = newOlatA;
+          }
+        }
+        if (newOlatB != currentOlatB_) {
+          uint8_t wBuf[2] = {MCP_OLATB, newOlatB};
+          if (write(i2cFd_, wBuf, 2) == 2) {
+            currentOlatB_ = newOlatB;
           }
         }
       }
-
-      // Only write to I2C if the output latch state has changed
-      if (newOlatA != currentOlatA_) {
-        uint8_t wBuf[2] = {MCP_OLATA, newOlatA};
-        if (write(i2cFd_, wBuf, 2) == 2) {
-          currentOlatA_ = newOlatA;
-        }
+    } else {
+      mcpConsecutiveErrors_++;
+      if (mcpConsecutiveErrors_ >= kMcpMaxConsecutiveErrors) {
+        rt_fprintf(stderr, "HardwareManager: MCP23017 connection lost\n");
+        closeMcp23017();
       }
-      if (newOlatB != currentOlatB_) {
-        uint8_t wBuf[2] = {MCP_OLATB, newOlatB};
-        if (write(i2cFd_, wBuf, 2) == 2) {
-          currentOlatB_ = newOlatB;
-        }
-      }
-    }
-  } else {
-    mcpConsecutiveErrors_++;
-    if (mcpConsecutiveErrors_ >= kMcpMaxConsecutiveErrors) {
-      rt_fprintf(stderr, "HardwareManager: MCP23017 connection lost\n");
-      closeMcp23017();
     }
   }
-}
 
-bool HardwareManager::getSwitchState(int pin) const {
-  if (!mcpConnected_.load() || pin < 0 || pin > 7)
-    return false;
-  return (mcpPortA_.load() >> pin) & 1;
-}
-
-bool HardwareManager::getSwitchStateB(int pin) const {
-  if (!mcpConnected_.load() || pin < 0 || pin > 7)
-    return false;
-  return (mcpPortB_.load() >> pin) & 1;
-}
-
-void HardwareManager::closeMcp23017() {
-  startupAnimationDone_.store(true);
-  if (i2cFd_ >= 0) {
-    if (hasClipOutputs_) {
-      uint8_t buf[2];
-      buf[0] = MCP_OLATA;
-      buf[1] = 0x00;
-      write(i2cFd_, buf, 2);
-      buf[0] = MCP_OLATB;
-      buf[1] = 0x00;
-      write(i2cFd_, buf, 2);
-    }
-    close(i2cFd_);
-    i2cFd_ = -1;
+  bool HardwareManager::getSwitchState(int pin) const {
+    if (!mcpConnected_.load() || pin < 0 || pin > 7)
+      return false;
+    return (mcpPortA_.load() >> pin) & 1;
   }
-  mcpConnected_.store(false);
-  mcpConsecutiveErrors_ = 0;
-  mcpPortA_.store(0xFF);
-  mcpPortB_.store(0xFF);
-}
+
+  bool HardwareManager::getSwitchStateB(int pin) const {
+    if (!mcpConnected_.load() || pin < 0 || pin > 7)
+      return false;
+    return (mcpPortB_.load() >> pin) & 1;
+  }
+
+  void HardwareManager::closeMcp23017() {
+    startupAnimationDone_.store(true);
+    if (i2cFd_ >= 0) {
+      if (hasClipOutputs_) {
+        uint8_t buf[2];
+        buf[0] = MCP_OLATA;
+        buf[1] = 0x00;
+        write(i2cFd_, buf, 2);
+        buf[0] = MCP_OLATB;
+        buf[1] = 0x00;
+        write(i2cFd_, buf, 2);
+      }
+      close(i2cFd_);
+      i2cFd_ = -1;
+    }
+    mcpConnected_.store(false);
+    mcpConsecutiveErrors_ = 0;
+    mcpPortA_.store(0xFF);
+    mcpPortB_.store(0xFF);
+  }

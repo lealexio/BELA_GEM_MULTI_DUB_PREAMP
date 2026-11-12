@@ -200,6 +200,11 @@ IN → × inputGain_ → NoiseGate → 3-Band EQ (low shelf / mid peak / high sh
 | `kSamplerGainScale` | 0.35 | WAV sampler volume scaling (mixed with siren) |
 | `kFxMidLowFreq` | 250 Hz | Lower cutoff for FX send MIDS mode |
 | `kFxMidHighFreq` | 4000 Hz | Upper cutoff for FX send MIDS / threshold for TOPS |
+| `kSignalPresentThreshold` | 0.01585 | Low threshold for channel signal presence (≈ -36 dBFS) |
+| `kSignalFlashDurationMs` | 35 ms | Duration of subtle pulse for signal presence |
+| `kSignalFlashPeriodMs` | 1000 ms | Repetition rate (1 Hz) for signal presence on continuous audio |
+| `kClipThreshold` | 0.9441 | Digital clip detection ceiling (≈ -0.5 dBFS) |
+| `kClipLedHoldMs` | 1200 ms | Solid peak hold duration for digital clip LED (1.2 s) |
 | `kDebug` | true | Controls real-time terminal debug logging |
 
 ---

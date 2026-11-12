@@ -94,16 +94,20 @@ Switches connect between the MCP23017 GPIO pin and **GND**. The firmware enables
 | `FX2_FILTER_TOPS`| Pin 2 | Port B, Pin 1 | LOW (GND) | Filters FX2 send to high-pass (> 4 kHz) |
 | `SIREN_TRIGGER` | Pin 28 | Port A, Pin 7 | LOW (GND) | Gates the Dub Siren |
 
-### 4.3 Hardware Clip LEDs
-Optional hardware saturation indicators wired to MCP23017 output pins (with series current-limiting resistor, e.g. 330 Ω):
+### 4.3 Hardware Signal & Clip LEDs
+Optional hardware indicators wired to MCP23017 output pins (with series current-limiting resistor, e.g. 330 Ω to 470 Ω):
 
-| Output Name | Port / Pin | Trigger Threshold | Reset Hold |
-|---|---|---|---|
-| `CLIP_LED_MASTER` | Configurable | Peak > -0.1 dBFS | 120 ms minimum hold |
-| `CLIP_LED_AUX1` | Configurable | Peak > -0.1 dBFS | 120 ms minimum hold |
-| `CLIP_LED_AUX2` | Configurable | Peak > -0.1 dBFS | 120 ms minimum hold |
-| `CLIP_LED_AUX3` | Configurable | Peak > -0.1 dBFS | 120 ms minimum hold |
-| `CLIP_LED_AUX4` | Configurable | Peak > -0.1 dBFS | 120 ms minimum hold |
+| Output Name | Port / Pin | Signal Present Mode | Clip Mode | Behavior & Timing |
+|---|---|---|---|---|
+| `CLIP_LED_MASTER` | Configurable | N/A (Output VU on OUT6–9) | Peak ≥ -0.5 dBFS (`kClipThreshold`) | Solid ON, 1.2 s peak hold |
+| `CLIP_LED_AUX1` | Configurable | Peak ≥ -36 dBFS (`kSignalPresentThreshold`) | Peak ≥ -0.5 dBFS (`kClipThreshold`) | Sig: 35 ms flash / 1 Hz blink; Clip: Solid ON, 1.2 s hold |
+| `CLIP_LED_AUX2` | Configurable | Peak ≥ -36 dBFS (`kSignalPresentThreshold`) | Peak ≥ -0.5 dBFS (`kClipThreshold`) | Sig: 35 ms flash / 1 Hz blink; Clip: Solid ON, 1.2 s hold |
+| `CLIP_LED_AUX3` | Configurable | Peak ≥ -36 dBFS (`kSignalPresentThreshold`) | Peak ≥ -0.5 dBFS (`kClipThreshold`) | Sig: 35 ms flash / 1 Hz blink; Clip: Solid ON, 1.2 s hold |
+| `CLIP_LED_AUX4` | Configurable | Peak ≥ -36 dBFS (`kSignalPresentThreshold`) | Peak ≥ -0.5 dBFS (`kClipThreshold`) | Sig: 35 ms flash / 1 Hz blink; Clip: Solid ON, 1.2 s hold |
+
+> **Low-Frequency I2C Rhythm:** To avoid bus saturation and digital audio pollution, LED state changes run strictly at low frequency:
+> - **Signal Present:** Instant 35 ms pulse on rising edge; slow 1 Hz repetition under continuous sound (2 I2C writes/s per port, < 0.01% bus load).
+> - **Digital Clip:** Solid continuous ON for 1.2 s (0 extra I2C writes while held ON). Clip overrides Signal Present unconditionally.
 
 ---
 

@@ -293,7 +293,7 @@ var __belaPreampSketch = (() => {
   var METER_RELEASE = 0.12;
   var PEAK_HOLD_MS = 750;
   var PEAK_DECAY = 0.94;
-  var CLIP_THRESHOLD = 0.99;
+  var CLIP_THRESHOLD = 0.9441;
   var CLIP_HOLD_MS = 1500;
   var VU_BOX_COUNT = 30;
   var VU_BOX_COUNT_RED = 4;

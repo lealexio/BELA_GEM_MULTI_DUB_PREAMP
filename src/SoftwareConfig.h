@@ -19,7 +19,8 @@
 /// Default audio sample rate of the Bela platform (Hz).
 constexpr float kDefaultSampleRate = 44100.f;
 
-/// Standard Butterworth filter Q (1 / sqrt(2) ≈ 0.70710678) — maximally flat passband.
+/// Standard Butterworth filter Q (1 / sqrt(2) ≈ 0.70710678) — maximally flat
+/// passband.
 constexpr float kButterworthQ = 0.70710678f;
 
 // ---------------------------------------------------------------------------
@@ -34,21 +35,39 @@ constexpr bool kDebug = false;
 constexpr float kDebugPotMinMove = 0.01f;
 
 // ---------------------------------------------------------------------------
-// Input clip detection
+// Input clip & signal detection (Hardware LEDs via MCP23017)
 // ---------------------------------------------------------------------------
 
-/// Amplitude at or above which an input frame is considered clipped.
-/// ADC hard-clips at 1.0; 0.99 gives an early-warning margin.
-constexpr float kClipThreshold = 0.99f;
+/// Amplitude at or above which an audio frame is considered clipped.
+/// 0.9441f ≈ -0.5 dBFS (10^(-0.5/20)) — pro-audio headroom indicator.
+constexpr float kClipThreshold = 0.9441f;
+
+/// Minimum duration to keep a clip LED lit continuously after a clip event
+/// (ms). Solid, steady red illumination with a peak hold of 1.2 s
+/// (range: 1.0–1.5 s).
+constexpr float kClipLedHoldMs = 1200.f;
+
+/// Low threshold to detect presence of signal entering the preamp.
+/// 0.01585f ≈ -36 dBFS (10^(-36/20)) — confirms channel is live.
+constexpr float kSignalPresentThreshold = 0.01585f;
+
+/// Duration of the brief light impulse for signal presence (ms).
+/// 35 ms gives a subtle, visible heartbeat flash without blinding the user.
+constexpr float kSignalFlashDurationMs = 35.f;
+
+/// Repetition period of the signal presence flash under continuous audio (ms).
+/// 1000 ms = 1 Hz slow blink rhythm, keeping I2C bus traffic near zero.
+constexpr float kSignalFlashPeriodMs = 1000.f;
+
+/// Maximum silence window at the end of a 1 Hz cycle before returning to idle
+/// (ms). If no signal was detected in the last 150 ms, prevents ghost flashes
+/// when audio stops.
+constexpr float kSignalSilenceWindowMs = 150.f;
 
 /// Minimum render-block gap between two clip warning prints per channel.
 /// Prevents log spam when a signal is continuously clipping.
 /// Default: ~0.5 s at 44.1 kHz / 16 frames per block.
 constexpr unsigned int kClipWarnIntervalBlocks = 4410;
-
-/// Minimum duration to keep a clip LED lit after a transient clip event (ms).
-/// Ensures that brief single-sample peaks produce an easily visible flash.
-constexpr float kClipLedHoldMs = 80.f;
 
 /// Duration of each step of the startup LED animation (ms).
 /// Fast ping-pong scan: MASTER -> AUX1..4 -> AUX3..1 -> MASTER (2 round-trips =
@@ -81,11 +100,12 @@ constexpr float kShutdownRampMs = 30.f;
 // Potentiometer processing
 // ---------------------------------------------------------------------------
 
-/// One-pole low-pass (EMA) smoothing coefficient applied to raw pot ADC readings in scanStep().
-/// Formule: potValues_[idx] += kPotSmoothingCoeff * (raw - potValues_[idx])
-/// Higher = faster response; lower = stronger noise/jitter suppression.
-/// At ~275 Hz pot sampling rate (16 audio frames * 10 channels), 0.15 provides ~24 ms
-/// time constant, eliminating ADC jitter (~22 dB noise rejection) with zero perceptible lag.
+/// One-pole low-pass (EMA) smoothing coefficient applied to raw pot ADC
+/// readings in scanStep(). Formule: potValues_[idx] += kPotSmoothingCoeff *
+/// (raw - potValues_[idx]) Higher = faster response; lower = stronger
+/// noise/jitter suppression. At ~275 Hz pot sampling rate (16 audio frames * 10
+/// channels), 0.15 provides ~24 ms time constant, eliminating ADC jitter (~22
+/// dB noise rejection) with zero perceptible lag.
 constexpr float kPotSmoothingCoeff = 0.15f;
 
 /// Minimum change on an ADC reading to update the stored pot value.
@@ -101,9 +121,9 @@ constexpr float kSnapRadiusEdge = 0.04f;
 constexpr float kPotCenter = 0.5f;
 
 /// Dead-zone half-width around 0.5 for getCenteredPotValue().
-/// Any raw value within [kPotCenter - kSnapRadiusCenter, kPotCenter + kSnapRadiusCenter]
-/// returns exactly kPotCenter (neutral / 0 dB). Outside this dead-zone, the response
-/// scales continuously and linearly to 0.0 and 1.0.
+/// Any raw value within [kPotCenter - kSnapRadiusCenter, kPotCenter +
+/// kSnapRadiusCenter] returns exactly kPotCenter (neutral / 0 dB). Outside this
+/// dead-zone, the response scales continuously and linearly to 0.0 and 1.0.
 constexpr float kSnapRadiusCenter = 0.03f;
 
 // ---------------------------------------------------------------------------
@@ -231,7 +251,8 @@ constexpr float kFilterBypassRampMs = 5.f;
 
 /// Cascaded 2nd-order stages → 24 dB/oct Butterworth slope.
 constexpr int kMicHpfStages = 2;
-constexpr float kMicHpfQ = kButterworthQ;   ///< Butterworth pole Q (maximally flat)
+constexpr float kMicHpfQ =
+    kButterworthQ;                   ///< Butterworth pole Q (maximally flat)
 constexpr float kMicHpfFMin = 20.f;  ///< Minimum cutoff when hpf > 0 (Hz)
 constexpr float kMicHpfFMax = 300.f; ///< Maximum cutoff (Hz); 0 in config = off
 
@@ -239,9 +260,9 @@ constexpr float kMicHpfFMax = 300.f; ///< Maximum cutoff (Hz); 0 in config = off
 // Kill switches — crossover frequencies (KillSwitch)
 // ---------------------------------------------------------------------------
 
-constexpr float kKillFc0 = 80.f;          // SUB  / KICK band boundary (Hz)
-constexpr float kKillFc1 = 200.f;         // KICK / MID  band boundary (Hz)
-constexpr float kKillFc2 = 1200.f;        // MID  / TOP  band boundary (Hz)
+constexpr float kKillFc0 = 80.f;   // SUB  / KICK band boundary (Hz)
+constexpr float kKillFc1 = 200.f;  // KICK / MID  band boundary (Hz)
+constexpr float kKillFc2 = 1200.f; // MID  / TOP  band boundary (Hz)
 constexpr float kKillCrossoverQ = kButterworthQ; // Butterworth 2nd-order pole Q
 
 /// Fade time when toggling a kill band (ms).
@@ -401,7 +422,8 @@ constexpr bool kLimiterEnabled = true;
 
 /// Fold-down gain coefficient when summing L + R into mono.
 /// - 0.7071f (~ -3 dB) : Constant power law (AES/EBU pro standard). Preserves
-///   perceived acoustic loudness of stereo/side elements (reverbs, delays, panned hats).
+///   perceived acoustic loudness of stereo/side elements (reverbs, delays,
+///   panned hats).
 /// - 0.5000f (-6 dB)   : Linear voltage average.
 constexpr float kMonoFoldDownGain = 0.7071f;
 

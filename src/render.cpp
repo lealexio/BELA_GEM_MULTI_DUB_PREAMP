@@ -1074,6 +1074,7 @@ void render(BelaContext *context, void *userData) {
 
   // --- Sample loop ---
   bool clipAux[kNumAuxChannels] = {};
+  bool sigAux[kNumAuxChannels] = {};
   bool clipMaster = false;
 
   for (unsigned int n = 0; n < context->audioFrames; n++) {
@@ -1092,11 +1093,23 @@ void render(BelaContext *context, void *userData) {
       dryL[ch] = applyMicHpf(ch, gChannelStrips[ch][0].process(inL[ch]));
       dryR[ch] = applyMicHpfR(ch, gChannelStrips[ch][1].process(inR[ch]));
 
-      if (fabsf(inL[ch]) >= kClipThreshold || fabsf(dryL[ch]) >= kClipThreshold)
+        float inLMag = fabsf(inL[ch]);
+      float dryLMag = fabsf(dryL[ch]);
+      if (inLMag >= kClipThreshold || dryLMag >= kClipThreshold)
         clipAux[ch] = true;
-      if (cfg.isStereo() &&
-          (fabsf(inR[ch]) >= kClipThreshold || fabsf(dryR[ch]) >= kClipThreshold))
-        clipAux[ch] = true;
+      else if (inLMag >= kSignalPresentThreshold ||
+               dryLMag >= kSignalPresentThreshold)
+        sigAux[ch] = true;
+
+      if (cfg.isStereo()) {
+        float inRMag = fabsf(inR[ch]);
+        float dryRMag = fabsf(dryR[ch]);
+        if (inRMag >= kClipThreshold || dryRMag >= kClipThreshold)
+          clipAux[ch] = true;
+        else if (inRMag >= kSignalPresentThreshold ||
+                 dryRMag >= kSignalPresentThreshold)
+          sigAux[ch] = true;
+      }
 
       if (cfg.isStereo()) {
         fx1AuxSum += 0.5f * (gChannelStrips[ch][0].fxOut() +
@@ -1200,22 +1213,25 @@ void render(BelaContext *context, void *userData) {
       // Pure Stereo mode: independent L & R limiters
       finalL = gMasterFx.limitOutput(rawOutL);
       finalR = gMasterFxR.limitOutput(rawOutR);
-      if (fabsf(rawOutL) >= kClipThreshold || fabsf(rawOutR) >= kClipThreshold ||
-          fabsf(finalL) >= kClipThreshold || fabsf(finalR) >= kClipThreshold)
+      if (fabsf(rawOutL) >= kClipThreshold ||
+          fabsf(rawOutR) >= kClipThreshold || fabsf(finalL) >= kClipThreshold ||
+          fabsf(finalR) >= kClipThreshold)
         clipMaster = true;
     } else if (gStereoMonoMix <= kCrossfadeEpsilon) {
-      // Pure Mono mode: sum raw outputs with constant power law, apply Air compensation, limit once
+      // Pure Mono mode: sum raw outputs with constant power law, apply Air
+      // compensation, limit once
       float monoSum = kMonoFoldDownGain * (rawOutL + rawOutR);
       if (kMonoAirCompEnabled)
         monoSum = gMonoAirFilter.process(monoSum);
       float outMono = gMonoLimiter.process(monoSum);
       finalL = outMono;
       finalR = outMono;
-      if (fabsf(rawOutL) >= kClipThreshold || fabsf(rawOutR) >= kClipThreshold ||
-          fabsf(outMono) >= kClipThreshold)
+      if (fabsf(rawOutL) >= kClipThreshold ||
+          fabsf(rawOutR) >= kClipThreshold || fabsf(outMono) >= kClipThreshold)
         clipMaster = true;
     } else {
-      // Crossfade transition: smooth anti-click interpolation between stereo and mono
+      // Crossfade transition: smooth anti-click interpolation between stereo
+      // and mono
       float stereoL = gMasterFx.limitOutput(rawOutL);
       float stereoR = gMasterFxR.limitOutput(rawOutR);
 
@@ -1226,8 +1242,9 @@ void render(BelaContext *context, void *userData) {
 
       finalL = gStereoMonoMix * stereoL + (1.f - gStereoMonoMix) * outMono;
       finalR = gStereoMonoMix * stereoR + (1.f - gStereoMonoMix) * outMono;
-      if (fabsf(rawOutL) >= kClipThreshold || fabsf(rawOutR) >= kClipThreshold ||
-          fabsf(finalL) >= kClipThreshold || fabsf(finalR) >= kClipThreshold)
+      if (fabsf(rawOutL) >= kClipThreshold ||
+          fabsf(rawOutR) >= kClipThreshold || fabsf(finalL) >= kClipThreshold ||
+          fabsf(finalR) >= kClipThreshold)
         clipMaster = true;
     }
 
@@ -1314,15 +1331,18 @@ void render(BelaContext *context, void *userData) {
 #undef GUI_PEAK
   }
 
-  // --- Trigger hardware clip LEDs on MCP23017 (RT-safe atomic signals) ---
+  // --- Trigger hardware clip & signal LEDs on MCP23017 (RT-safe atomic
+  // signals) ---
   if (gHardwareManager.isStartupAnimationDone() && !gShutdownInProgress) {
     if (clipMaster)
       gHardwareManager.triggerClip(HardwareManager::CLIP_MASTER);
     for (int ch = 0; ch < kNumAuxChannels; ++ch) {
+      HardwareManager::ClipChannel clipCh =
+          static_cast<HardwareManager::ClipChannel>(HardwareManager::CLIP_AUX1 +
+                                                    ch);
       if (clipAux[ch])
-        gHardwareManager.triggerClip(
-            static_cast<HardwareManager::ClipChannel>(
-                HardwareManager::CLIP_AUX1 + ch));
+      gHardwareManager.triggerClip(clipCh);
+      else if (sigAux[ch]) gHardwareManager.triggerSignal(clipCh);
     }
   }
 
