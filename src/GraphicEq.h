@@ -1,6 +1,7 @@
 #pragma once
 #include "Biquad.h"
 #include "DspUtils.h"
+#include "SoftwareConfig.h"
 
 /**
  * 12-band fixed-frequency graphic EQ (peaking biquads).
@@ -44,7 +45,7 @@ public:
     float process(float input);
 
 private:
-    float sampleRate_      = 44100.f;
+    float sampleRate_      = kDefaultSampleRate;
     float gainSmoothCoeff_ = 0.f;
 
     BiquadFilter filters_[kNumBands];

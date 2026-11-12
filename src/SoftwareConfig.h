@@ -13,6 +13,16 @@
  */
 
 // ---------------------------------------------------------------------------
+// Audio Engine & Platform Defaults
+// ---------------------------------------------------------------------------
+
+/// Default audio sample rate of the Bela platform (Hz).
+constexpr float kDefaultSampleRate = 44100.f;
+
+/// Standard Butterworth filter Q (1 / sqrt(2) ≈ 0.70710678) — maximally flat passband.
+constexpr float kButterworthQ = 0.70710678f;
+
+// ---------------------------------------------------------------------------
 // Debug
 // ---------------------------------------------------------------------------
 
@@ -87,9 +97,12 @@ constexpr float kJitterThreshold = 0.002f;
 /// all accessors benefit automatically.
 constexpr float kSnapRadiusEdge = 0.04f;
 
+/// Center position of normalised pot travel [0.0–1.0].
+constexpr float kPotCenter = 0.5f;
+
 /// Dead-zone half-width around 0.5 for getCenteredPotValue().
-/// Any raw value within [0.5 - kSnapRadiusCenter, 0.5 + kSnapRadiusCenter]
-/// returns exactly 0.5 (neutral / 0 dB). Outside this dead-zone, the response
+/// Any raw value within [kPotCenter - kSnapRadiusCenter, kPotCenter + kSnapRadiusCenter]
+/// returns exactly kPotCenter (neutral / 0 dB). Outside this dead-zone, the response
 /// scales continuously and linearly to 0.0 and 1.0.
 constexpr float kSnapRadiusCenter = 0.03f;
 
@@ -218,7 +231,7 @@ constexpr float kFilterBypassRampMs = 5.f;
 
 /// Cascaded 2nd-order stages → 24 dB/oct Butterworth slope.
 constexpr int kMicHpfStages = 2;
-constexpr float kMicHpfQ = 0.707f;   ///< Butterworth pole Q (maximally flat)
+constexpr float kMicHpfQ = kButterworthQ;   ///< Butterworth pole Q (maximally flat)
 constexpr float kMicHpfFMin = 20.f;  ///< Minimum cutoff when hpf > 0 (Hz)
 constexpr float kMicHpfFMax = 300.f; ///< Maximum cutoff (Hz); 0 in config = off
 
@@ -229,7 +242,7 @@ constexpr float kMicHpfFMax = 300.f; ///< Maximum cutoff (Hz); 0 in config = off
 constexpr float kKillFc0 = 80.f;          // SUB  / KICK band boundary (Hz)
 constexpr float kKillFc1 = 200.f;         // KICK / MID  band boundary (Hz)
 constexpr float kKillFc2 = 1200.f;        // MID  / TOP  band boundary (Hz)
-constexpr float kKillCrossoverQ = 0.707f; // Butterworth 2nd-order pole Q
+constexpr float kKillCrossoverQ = kButterworthQ; // Butterworth 2nd-order pole Q
 
 /// Fade time when toggling a kill band (ms).
 /// Higher = softer transition; lower = snappier but may pop at short values.
@@ -337,9 +350,8 @@ constexpr float kFxMidLowFreq = 250.f; // Hz
 /// High boundary of the mid band / tops crossover.
 constexpr float kFxMidHighFreq = 4000.f; // Hz
 
-/// Butterworth Q for FX send filter transitions (0.707 = maximally flat, no
-/// resonance).
-constexpr float kFxFilterQ = 0.707f;
+/// Butterworth Q for FX send filter transitions (maximally flat, no resonance).
+constexpr float kFxFilterQ = kButterworthQ;
 
 /// Master gain scale applied to both the dry output and FX send of the siren.
 /// Reduce if the siren is too loud relative to the channel strips.
@@ -407,6 +419,9 @@ constexpr float kMonoAirCompGainDb = 1.5f;
 /// Crossfade duration (ms) when switching live between Stereo and Mono.
 constexpr float kMonoCrossfadeMs = 20.f;
 
+/// Threshold epsilon for mono/stereo crossfade completion.
+constexpr float kCrossfadeEpsilon = 0.001f;
+
 // ---------------------------------------------------------------------------
 // FX return routing
 // ---------------------------------------------------------------------------
@@ -473,6 +488,12 @@ constexpr const char *kCpuTempSysfsPath =
 // ---------------------------------------------------------------------------
 // MCP23017 / I2C fault tolerance
 // ---------------------------------------------------------------------------
+
+/// Normal polling interval for the I2C auxiliary task (us).
+constexpr unsigned int kMcpPollIntervalUs = 5000;
+
+/// Normal polling interval for the I2C auxiliary task (ms).
+constexpr float kMcpPollIntervalMs = 5.0f;
 
 /// Reconnection retry interval in milliseconds when MCP23017 is disconnected.
 constexpr unsigned int kMcpReconnectIntervalMs = 1000;

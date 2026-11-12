@@ -1,4 +1,5 @@
 #include "SamplePlayer.h"
+#include "DspUtils.h"
 
 #include <Bela.h>
 #include <libraries/AudioFile/AudioFile.h>
@@ -154,8 +155,8 @@ bool resolveSamplesDir(const char* projectName, char* out, size_t outSize) {
 } // namespace
 
 void SamplePlayer::setup(float sampleRate, const char* projectName) {
-    sampleRate_  = sampleRate > 0.f ? sampleRate : 44100.f;
-    fadeSamples_ = (int)std::max(1.f, sampleRate_ * kSamplerFadeMs / 1000.f);
+    sampleRate_  = sampleRate > 0.f ? sampleRate : kDefaultSampleRate;
+    fadeSamples_ = (int)std::max(1.f, msToSamples(kSamplerFadeMs, sampleRate_));
     fadeStep_    = 1.f / (float)fadeSamples_;
     folderOk_    = false;
     sampleCount_ = 0;

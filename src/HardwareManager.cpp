@@ -85,8 +85,8 @@ void HardwareManager::scanStep(BelaContext *context) {
 
     sampleCount_++;
 
-    // Leave 16 audio frames (~0.36 ms) for the multiplexers to settle voltage
-    if (sampleCount_ >= 16 && (n % analogFrameRatio == 0)) {
+    // Leave kMuxSettleFrames audio frames (~0.36 ms) for the multiplexers to settle voltage
+    if (sampleCount_ >= kMuxSettleFrames && (n % analogFrameRatio == 0)) {
       unsigned int analogFrame = n / analogFrameRatio;
       if (analogFrame >= context->analogFrames)
         analogFrame = context->analogFrames - 1;
@@ -116,9 +116,9 @@ void HardwareManager::scanStep(BelaContext *context) {
           potValues_[idx] += kPotSmoothingCoeff * (raw - potValues_[idx]);
 
           // Snap to clean boundaries when reaching extremities
-          if (raw == 0.f && potValues_[idx] < 0.002f)
+          if (raw == 0.f && potValues_[idx] < kJitterThreshold)
             potValues_[idx] = 0.f;
-          else if (raw == 1.f && potValues_[idx] > 0.998f)
+          else if (raw == 1.f && potValues_[idx] > (1.f - kJitterThreshold))
             potValues_[idx] = 1.f;
         }
       }
@@ -138,13 +138,13 @@ float HardwareManager::getPotValue(int muxId, int potId) const {
 
 float HardwareManager::getCenteredPotValue(int muxId, int potId) const {
   float v = getPotValue(muxId, potId);
-  float delta = v - 0.5f;
+  float delta = v - kPotCenter;
   if (fabsf(delta) <= kSnapRadiusCenter) {
-    return 0.5f;
+    return kPotCenter;
   }
   float sign = (delta > 0.f) ? 1.f : -1.f;
-  float scale = 0.5f / (0.5f - kSnapRadiusCenter);
-  return 0.5f + sign * (fabsf(delta) - kSnapRadiusCenter) * scale;
+  float scale = kPotCenter / (kPotCenter - kSnapRadiusCenter);
+  return kPotCenter + sign * (fabsf(delta) - kSnapRadiusCenter) * scale;
 }
 
 // ---------------------------------------------------------------------------
@@ -332,19 +332,19 @@ void HardwareManager::readMcp23017() {
         // --- Startup LED animation: ping-pong scan sequence (2 round-trips)
         // --- Sequence: MASTER -> AUX1 -> AUX2 -> AUX3 -> AUX4 -> AUX3 -> AUX2
         // -> AUX1 (x2) -> MASTER
-        static const ClipChannel kAnimationSeq[17] = {
-            // 1er aller-retour
+        static const ClipChannel kAnimationSeq[kStartupLedAnimSteps] = {
+            // 1st round trip
             CLIP_MASTER, CLIP_AUX1, CLIP_AUX2, CLIP_AUX3, CLIP_AUX4, CLIP_AUX3,
             CLIP_AUX2, CLIP_AUX1,
-            // 2eme aller-retour
+            // 2nd round trip
             CLIP_MASTER, CLIP_AUX1, CLIP_AUX2, CLIP_AUX3, CLIP_AUX4, CLIP_AUX3,
             CLIP_AUX2, CLIP_AUX1,
-            // Verrouillage final sur Master
+            // Final hold on Master
             CLIP_MASTER};
-        constexpr int kTotalAnimSteps = 17;
         const int ticksPerStep =
-            (int)(kStartupLedStepMs / 5.0f > 1.0f ? kStartupLedStepMs / 5.0f
-                                                  : 1.0f);
+            (int)(kStartupLedStepMs / kMcpPollIntervalMs > 1.0f
+                      ? kStartupLedStepMs / kMcpPollIntervalMs
+                      : 1.0f);
 
         ClipChannel activeCh = kAnimationSeq[startupAnimationStep_];
 
@@ -372,7 +372,7 @@ void HardwareManager::readMcp23017() {
 
         if (++startupAnimationTick_ >= ticksPerStep) {
           startupAnimationTick_ = 0;
-          if (++startupAnimationStep_ >= kTotalAnimSteps) {
+          if (++startupAnimationStep_ >= kStartupLedAnimSteps) {
             // Animation complete: turn off all LEDs and mark done
             for (int i = 0; i < kNumClipChannels; ++i) {
               const ClipLedRef *r = refs[i];

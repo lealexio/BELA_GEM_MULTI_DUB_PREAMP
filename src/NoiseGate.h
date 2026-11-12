@@ -1,5 +1,6 @@
 #pragma once
 #include <cmath>
+#include "DspUtils.h"
 #include "SoftwareConfig.h"
 
 /**
@@ -49,7 +50,7 @@ private:
     State state_ = State::CLOSED;
 
     /** Converts a time constant (ms) to a one-pole EMA coefficient. */
-    static float msToCoeff(float ms, float sampleRate) {
-        return expf(-1.f / (ms * 0.001f * sampleRate));
+    static inline float msToCoeff(float ms, float sampleRate) {
+        return onePoleDecayCoeff(ms, sampleRate);
     }
 };

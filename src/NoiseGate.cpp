@@ -1,4 +1,5 @@
 #include "NoiseGate.h"
+#include "DspUtils.h"
 #include <cmath>
 
 void NoiseGate::setup(float sampleRate) {
@@ -6,7 +7,7 @@ void NoiseGate::setup(float sampleRate) {
     releaseCoeff_ = msToCoeff(kGateReleaseMs,     sampleRate);
     gainAttCoeff_ = msToCoeff(kGateAttackMs,      sampleRate);
     gainRelCoeff_ = msToCoeff(kGateReleaseMs,     sampleRate);
-    holdSamples_  = kGateHoldMs * 0.001f * sampleRate;
+    holdSamples_  = msToSamples(kGateHoldMs,      sampleRate);
 }
 
 float NoiseGate::process(float input) {

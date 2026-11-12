@@ -1,5 +1,6 @@
 #pragma once
 #include <cmath>
+#include "DspUtils.h"
 
 /**
  * Second-order IIR biquad filter (Direct Form I).
@@ -31,9 +32,9 @@ struct BiquadFilter {
     // Named constant for the Cookbook shelf slope S=1 (sqrt(2)).
     static constexpr float kShelfAlphaFactor = 1.41421356f;
 
-    // Portable Pi constant (M_PI is POSIX-only, not in the C++ standard).
-    static constexpr float kPi    = 3.14159265358979323846f;
-    static constexpr float kTwoPi = 2.f * kPi;
+    // Portable Pi constant (from DspUtils.h).
+    static constexpr float kPi    = ::kPi;
+    static constexpr float kTwoPi = ::kTwoPi;
 
     /**
      * Process one sample and return the filtered output.

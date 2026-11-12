@@ -1,6 +1,23 @@
 #include "Biquad.h"
+#include <algorithm>
+
+namespace {
+
+inline float clampFreq(float freq, float sampleRate) {
+    if (sampleRate <= 0.f) return 1000.f;
+    const float minF = 1.0f;
+    const float maxF = sampleRate * 0.495f;
+    return (freq < minF) ? minF : ((freq > maxF) ? maxF : freq);
+}
+
+inline float clampQ(float q) {
+    return (q < 0.01f) ? 0.01f : q;
+}
+
+} // namespace
 
 void BiquadFilter::setLowShelf(float freq, float gainDb, float sampleRate) {
+    freq = clampFreq(freq, sampleRate);
     float A  = powf(10.f, gainDb / 40.f);
     float w0 = kTwoPi * freq / sampleRate;
     float cw = cosf(w0);
@@ -17,6 +34,7 @@ void BiquadFilter::setLowShelf(float freq, float gainDb, float sampleRate) {
 }
 
 void BiquadFilter::setHighShelf(float freq, float gainDb, float sampleRate) {
+    freq = clampFreq(freq, sampleRate);
     float A  = powf(10.f, gainDb / 40.f);
     float w0 = kTwoPi * freq / sampleRate;
     float cw = cosf(w0);
@@ -33,6 +51,8 @@ void BiquadFilter::setHighShelf(float freq, float gainDb, float sampleRate) {
 }
 
 void BiquadFilter::setLowPass(float freq, float q, float sampleRate) {
+    freq = clampFreq(freq, sampleRate);
+    q = clampQ(q);
     float w0 = kTwoPi * freq / sampleRate;
     float cw = cosf(w0);
     float alpha = sinf(w0) / (2.f * q);
@@ -46,6 +66,8 @@ void BiquadFilter::setLowPass(float freq, float q, float sampleRate) {
 }
 
 void BiquadFilter::setHighPass(float freq, float q, float sampleRate) {
+    freq = clampFreq(freq, sampleRate);
+    q = clampQ(q);
     float w0 = kTwoPi * freq / sampleRate;
     float cw = cosf(w0);
     float alpha = sinf(w0) / (2.f * q);
@@ -59,6 +81,8 @@ void BiquadFilter::setHighPass(float freq, float q, float sampleRate) {
 }
 
 void BiquadFilter::setPeaking(float freq, float gainDb, float q, float sampleRate) {
+    freq = clampFreq(freq, sampleRate);
+    q = clampQ(q);
     float A  = powf(10.f, gainDb / 40.f);
     float w0 = kTwoPi * freq / sampleRate;
     float alpha = sinf(w0) / (2.f * q);

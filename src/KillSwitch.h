@@ -58,7 +58,7 @@ private:
     enum { SUB = 0, KICK = 1, MID = 2, TOP = 3 };
     enum { FC0 = 0, FC1 = 1, FC2 = 2 };
 
-    float sampleRate_ = 44100.f;
+    float sampleRate_ = kDefaultSampleRate;
     float rampStep_   = 0.f; // per-sample increment, computed from kKillRampMs
 
     BiquadFilter lp_[3][kKillFilterStages]; // [crossover index][stage]

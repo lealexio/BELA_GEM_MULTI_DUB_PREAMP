@@ -1,4 +1,5 @@
 #pragma once
+#include "SoftwareConfig.h"
 
 /**
  * Monophonic dub siren: phase-accumulator oscillator modulated by an LFO.
@@ -62,7 +63,7 @@ public:
   const char *getPresetName() const;
 
 private:
-  float sampleRate_ = 44100.f;
+  float sampleRate_ = kDefaultSampleRate;
 
   // --- Active oscillator state ---
   float oscPhase_ = 0.f;       // oscillator phase [0, 1)

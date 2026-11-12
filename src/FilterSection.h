@@ -52,7 +52,7 @@ public:
     float process(float input);
 
 private:
-    float sampleRate_ = 44100.f;
+    float sampleRate_ = kDefaultSampleRate;
 
     BiquadFilter hpf_;
     BiquadFilter lpf_;

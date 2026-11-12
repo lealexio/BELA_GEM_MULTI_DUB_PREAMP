@@ -1,7 +1,6 @@
 #include "ChannelStrip.h"
+#include "DspUtils.h"
 #include <cmath>
-
-static constexpr float kGainEpsilonDb = 0.05f; // min change to recompute biquad or enable bypass
 
 // ---------------------------------------------------------------------------
 // ChannelStrip
@@ -9,7 +8,7 @@ static constexpr float kGainEpsilonDb = 0.05f; // min change to recompute biquad
 
 void ChannelStrip::setup(float sampleRate) {
     sampleRate_      = sampleRate;
-    gainSmoothCoeff_ = 1.f - expf(-1.f / (kEqGainSmoothMs * 0.001f * sampleRate_));
+    gainSmoothCoeff_ = onePoleLpCoeff(kEqGainSmoothMs, sampleRate_);
     gate_.setup(sampleRate_);
     // Initialise filters at 0 dB so the strip is transparent on startup
     low_.setLowShelf  (kEqLowFreq,  0.f,         sampleRate_);
@@ -43,20 +42,20 @@ float ChannelStrip::process(float input) {
     smoothHigh_ += gainSmoothCoeff_ * (targetHigh_ - smoothHigh_);
 
     // Recompute biquad coefficients only when the smoothed gain has moved enough
-    if(fabsf(smoothLow_  - lastLow_)  > kGainEpsilonDb)
+    if(fabsf(smoothLow_  - lastLow_)  > kEqGainEpsilonDb)
         { low_.setLowShelf  (kEqLowFreq,  smoothLow_,  sampleRate_);         lastLow_  = smoothLow_;  }
-    if(fabsf(smoothMid_  - lastMid_)  > kGainEpsilonDb)
+    if(fabsf(smoothMid_  - lastMid_)  > kEqGainEpsilonDb)
         { mid_.setPeaking   (kEqMidFreq,  smoothMid_,  kEqMidQ, sampleRate_); lastMid_  = smoothMid_;  }
-    if(fabsf(smoothHigh_ - lastHigh_) > kGainEpsilonDb)
+    if(fabsf(smoothHigh_ - lastHigh_) > kEqGainEpsilonDb)
         { high_.setHighShelf(kEqHighFreq, smoothHigh_, sampleRate_);           lastHigh_ = smoothHigh_; }
 
     float gained = input * inputGain_;
     float gated  = gate_.process(gained);
 
     // EQ — bypassed when all smoothed gains are below the audible threshold
-    bool allFlat = fabsf(smoothLow_)  < kGainEpsilonDb
-                && fabsf(smoothMid_)  < kGainEpsilonDb
-                && fabsf(smoothHigh_) < kGainEpsilonDb;
+    bool allFlat = fabsf(smoothLow_)  < kEqGainEpsilonDb
+                && fabsf(smoothMid_)  < kEqGainEpsilonDb
+                && fabsf(smoothHigh_) < kEqGainEpsilonDb;
     float out = allFlat ? gated : high_.process(mid_.process(low_.process(gated)));
 
     lastOut_ = out;

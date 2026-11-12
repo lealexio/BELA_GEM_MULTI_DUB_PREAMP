@@ -73,7 +73,7 @@ public:
     float playhead() const;
 
 private:
-    float sampleRate_   = 44100.f;
+    float sampleRate_   = kDefaultSampleRate;
     float gain_         = 0.f;
     float fxSend_       = 0.f;
     float fxSend2_      = 0.f;

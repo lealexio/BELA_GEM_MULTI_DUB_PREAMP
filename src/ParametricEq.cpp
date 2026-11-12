@@ -15,10 +15,10 @@ void ParametricEq::setup(float sampleRate) {
     sampleRate_      = sampleRate;
     gainSmoothCoeff_ = onePoleLpCoeff(kEqGainSmoothMs, sampleRate_);
     for(int i = 0; i < kNumBands; ++i) {
-        float fc = logInterp(kFMin[i], kFMax[i], 0.5f);
+        float fc = logInterp(kFMin[i], kFMax[i], kPotCenter);
         filters_[i].setPeaking(fc, 0.f, kMasterEqQ, sampleRate_);
         filters_[i].reset();
-        lastFreqPot_[i]  = 0.5f;
+        lastFreqPot_[i]  = kPotCenter;
         targetGainDb_[i] = smoothGainDb_[i] = lastGainDb_[i] = 0.f;
     }
 }

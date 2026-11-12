@@ -32,6 +32,10 @@ constexpr int kNumMux = 8;
 /// Number of channels per MUX chip (10 channels: 0..9).
 constexpr int kPotsPerMux = 10;
 
+/// Number of audio frames to wait after switching MUX channel address lines
+/// before reading analog voltages (~0.36 ms at 44.1 kHz).
+constexpr int kMuxSettleFrames = 16;
+
 // ---------------------------------------------------------------------------
 // MUX topology — runtime (loaded from JSON "mux" object)
 // ---------------------------------------------------------------------------
@@ -96,12 +100,14 @@ extern float CODEC_OUTPUT_GAIN_DB[kCodecChannels];
 // Audio routing — one entry per ChannelStrip instance
 // ---------------------------------------------------------------------------
 
+/// Number of auxiliary input channels (AUX1..AUX4).
+constexpr int kNumAuxChannels = 4;
+
 struct ChannelConfig {
-  int audioIns[2]; ///< Bela audio input indices. [0] = left/mono, [1] = right
-                   ///< (-1 = mono: right mirrors left).
-  bool micMode;    ///< true = bypass master ParamEq / HPF-LPF / kills.
-  float
-      hpfHz; ///< Mic-path HPF cutoff (Hz); 0 = off. Applied only when micMode.
+  int audioIns[2] = {-1, -1}; ///< Bela audio input indices. [0] = left/mono, [1] = right
+                              ///< (-1 = mono: right mirrors left).
+  bool micMode = false;       ///< true = bypass master ParamEq / HPF-LPF / kills.
+  float hpfHz = 0.f;          ///< Mic-path HPF cutoff (Hz); 0 = off. Applied only when micMode.
 
   /// Returns true when this channel is configured as stereo (audioIns[1] !=
   /// -1).
@@ -124,7 +130,7 @@ extern ChannelConfig AUX4_CONFIG;
  *   portB    : false = port A (default), true = port B
  */
 struct SwitchRef {
-  int pin;
+  int pin = -1;
   bool reversed = false;
   bool portB = false;
 };
@@ -183,8 +189,8 @@ extern ClipLedRef CLIP_LED_AUX4;
  *              when this flag is set.
  */
 struct PotRef {
-  int mux;
-  int pot;
+  int mux = -1;
+  int pot = -1;
   bool reversed = false;
   const char *name = nullptr;
   bool centered = false;

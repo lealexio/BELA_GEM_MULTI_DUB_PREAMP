@@ -1,6 +1,7 @@
 #pragma once
 #include "Biquad.h"
 #include "NoiseGate.h"
+#include "SoftwareConfig.h"
 
 /**
  * Single input channel strip: gain → noise gate → 3-band parametric EQ → FX send.
@@ -73,7 +74,7 @@ public:
     bool gateIsOpen() const { return gate_.isOpen(); }
 
 private:
-    float sampleRate_      = 44100.f;
+    float sampleRate_      = kDefaultSampleRate;
     float inputGain_       = 1.f;
     float fxSendLevel_     = 0.f;
     float fxSendLevel2_    = 0.f;

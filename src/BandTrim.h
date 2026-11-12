@@ -1,5 +1,6 @@
 #pragma once
 #include "Biquad.h"
+#include "SoftwareConfig.h"
 
 /**
  * 4-band gain trim matching the speaker crossover topology (SUB/KICK/MID/TOP).
@@ -44,7 +45,7 @@ public:
     float process(float input);
 
 private:
-    float sampleRate_      = 44100.f;
+    float sampleRate_      = kDefaultSampleRate;
     float gainSmoothCoeff_ = 0.f;
 
     BiquadFilter filters_[kNumBands];

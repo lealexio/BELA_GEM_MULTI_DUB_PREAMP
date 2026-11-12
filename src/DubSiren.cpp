@@ -1,4 +1,5 @@
 #include "DubSiren.h"
+#include "DspUtils.h"
 #include "SoftwareConfig.h"
 #include <cmath>
 
@@ -105,24 +106,24 @@ float DubSiren::oscSample(int wave, float phase) {
   case 1:
     return 2.f * phase - 1.f; // saw
   case 2:
-    return phase < 0.5f ? 1.f : -1.f; // square
+    return phase < kPotCenter ? 1.f : -1.f; // square
   default:
-    return sinf(2.f * static_cast<float>(M_PI) * phase); // sine
+    return sinf(kTwoPi * phase); // sine
   }
 }
 
 float DubSiren::lfoSample(int shape, float phase) {
   switch (shape) {
   case 1: // triangle
-    return phase < 0.5f ? (4.f * phase - 1.f) : (3.f - 4.f * phase);
+    return phase < kPotCenter ? (4.f * phase - 1.f) : (3.f - 4.f * phase);
   case 2: // square
-    return phase < 0.5f ? 1.f : -1.f;
+    return phase < kPotCenter ? 1.f : -1.f;
   case 3: // ramp up (NJD rising sweep: -1 to +1)
     return 2.f * phase - 1.f;
   case 4: // ramp down (NJD falling laser: +1 to -1)
     return 1.f - 2.f * phase;
   default: // sine
-    return sinf(2.f * static_cast<float>(M_PI) * phase);
+    return sinf(kTwoPi * phase);
   }
 }
 
@@ -137,11 +138,10 @@ const char *DubSiren::getPresetName() const {
 
 void DubSiren::setup(float sampleRate) {
   sampleRate_ = sampleRate;
-  attackCoeff_ = 1.f - expf(-1.f / (kSirenGateAttackMs * 0.001f * sampleRate));
-  releaseCoeff_ =
-      1.f - expf(-1.f / (kSirenGateReleaseMs * 0.001f * sampleRate));
-  crossfadeStep_ = 1.f / (kSirenPresetCrossfadeMs * 0.001f * sampleRate);
-  lpfCoeff_ = 1.f - expf(-2.f * static_cast<float>(M_PI) * 2800.f / sampleRate);
+  attackCoeff_ = onePoleLpCoeff(kSirenGateAttackMs, sampleRate);
+  releaseCoeff_ = onePoleLpCoeff(kSirenGateReleaseMs, sampleRate);
+  crossfadeStep_ = 1.f / msToSamples(kSirenPresetCrossfadeMs, sampleRate);
+  lpfCoeff_ = 1.f - expf(-kTwoPi * 2800.f / sampleRate);
   lpfState_ = 0.f;
   presetIdx_ = -1; // force first-run load
 }

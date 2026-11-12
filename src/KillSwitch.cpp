@@ -1,9 +1,10 @@
 #include "KillSwitch.h"
+#include "DspUtils.h"
 #include <algorithm>
 
 void KillSwitch::setup(float sampleRate) {
     sampleRate_ = sampleRate;
-    rampStep_   = 1.f / (kKillRampMs * 0.001f * sampleRate_);
+    rampStep_   = 1.f / msToSamples(kKillRampMs, sampleRate_);
 
     for(int s = 0; s < kKillFilterStages; ++s) {
         lp_[FC0][s].setLowPass (kKillFc0, kKillCrossoverQ, sampleRate_);
