@@ -55,11 +55,13 @@ Credentials are automatically saved in `/var/lib/iwd/` and will reconnect automa
 
 ## 4. Automatic Hotspot Fallback Setup
 
-When taking the preamp to a live sound system or venue with no Wi-Fi router, this setup attempts to connect to known networks for 20 seconds. If no connection is established, Bela automatically spawns its own Wi-Fi Hotspot (`bela-hotspot`).
+When taking the preamp to a live sound system, festival, or venue with no local Wi-Fi router (or if the home Wi-Fi is lost during operation), Bela runs a lightweight background watcher daemon.
+- **At boot:** Attempts to connect to known Wi-Fi networks for ~25 seconds. If no IP is assigned, it smoothly transitions the interface to AP mode and broadcasts `bela-hotspot`.
+- **In operation (Dynamic Watcher):** If the Wi-Fi signal drops or the router is turned off for more than 15 seconds, the daemon automatically switches `wlan0` to AP mode and starts `bela-hotspot`.
 
 ### Step 4.1: Enable Network Configuration in `iwd`
 
-Edit `/etc/iwd/main.conf` and ensure network configuration is enabled:
+Edit `/etc/iwd/main.conf` and ensure network configuration is enabled so that `iwd` provides built-in DHCP server capabilities for the AP:
 
 ```ini
 [General]
@@ -84,7 +86,7 @@ Add the following configuration:
 
 ```ini
 [Security]
-Passphrase=BelaGemPreamp
+Passphrase=fullavibes
 
 [IPv4]
 Address=192.168.101.1
@@ -92,7 +94,12 @@ Gateway=192.168.101.1
 Netmask=255.255.255.0
 ```
 
-### Step 4.3: Create the Fallback Script
+*Set permissions to 600:*
+```bash
+chmod 600 /var/lib/iwd/ap/bela-hotspot.ap
+```
+
+### Step 4.3: Create the Dynamic Watcher Script
 
 Create `/usr/local/bin/wifi-fallback.sh`:
 
@@ -105,27 +112,125 @@ Paste the following script:
 
 ```bash
 #!/bin/bash
-# Wait for iwd to initialize and attempt auto-connection
-sleep 8
+# ==============================================================================
+# wifi-fallback.sh — Dynamic Wi-Fi station watcher and fallback hotspot daemon
+# ==============================================================================
 
-MAX_WAIT=20
-ELAPSED=0
+HOTSPOT_PROFILE="bela-hotspot"
+INTERFACE="wlan0"
+BOOT_GRACE_TIME=25       # Seconds to wait at startup for Wi-Fi station connect
+DISCONNECT_GRACE_TIME=15 # Seconds of lost connection before starting hotspot
+CHECK_INTERVAL=5         # Polling loop interval in seconds
 
-while [ $ELAPSED -lt $MAX_WAIT ]; do
-    IP=$(ip -4 addr show wlan0 2>/dev/null | grep 'inet ' | awk '{print $2}')
-    if [ -n "$IP" ]; then
-        echo "wifi-fallback: connected with IP $IP"
-        exit 0
-    fi
+# Helper: check if wlan0 has a valid station IPv4 address (not the hotspot IP)
+has_station_ip() {
+    ip -4 addr show "$INTERFACE" 2>/dev/null | grep 'inet ' | grep -v '192.168.101.' >/dev/null 2>&1
+}
+
+# Helper: check current mode in iwd (station or ap)
+get_mode() {
+    /usr/bin/iwctl device "$INTERFACE" show 2>/dev/null | grep -i 'Mode' | grep -oE 'ap|station'
+}
+
+# Helper: check if AP is currently started
+is_ap_started() {
+    /usr/bin/iwctl ap "$INTERFACE" show 2>/dev/null | grep -E "Started\s+yes" >/dev/null 2>&1
+}
+
+# Helper: safely start hotspot
+start_hotspot() {
+    echo "wifi-fallback: starting hotspot profile '$HOTSPOT_PROFILE'..."
+
+    # Ensure any active station activity is stopped
+    /usr/bin/iwctl station "$INTERFACE" disconnect 2>/dev/null
     sleep 1
-    ELAPSED=$((ELAPSED + 1))
-done
 
-# If no connection after timeout, switch to AP mode
-echo "wifi-fallback: no connection after ${MAX_WAIT}s, starting fallback hotspot"
-/usr/bin/iwctl device wlan0 set-property Mode ap
-sleep 1
-/usr/bin/iwctl ap wlan0 start-profile bela-hotspot
+    # Switch device to AP mode if not already in AP mode
+    CURRENT_MODE=$(get_mode)
+    if [ "$CURRENT_MODE" != "ap" ]; then
+        echo "wifi-fallback: setting $INTERFACE mode to ap..."
+        /usr/bin/iwctl device "$INTERFACE" set-property Mode ap 2>/dev/null
+        sleep 2
+    fi
+
+    # Try starting the AP profile with retries
+    for attempt in 1 2 3 4 5; do
+        if is_ap_started; then
+            echo "wifi-fallback: hotspot is already running."
+            return 0
+        fi
+        echo "wifi-fallback: attempting to start AP profile (attempt $attempt/5)..."
+        if /usr/bin/iwctl ap "$INTERFACE" start-profile "$HOTSPOT_PROFILE" 2>/dev/null; then
+            echo "wifi-fallback: hotspot started successfully!"
+            return 0
+        fi
+        sleep 2
+    done
+
+    echo "wifi-fallback: failed to start hotspot after 5 attempts."
+    return 1
+}
+
+# --- INITIAL BOOT / STARTUP SEQUENCE ---
+echo "wifi-fallback: daemon started."
+INIT_MODE=$(get_mode)
+
+if [ "$INIT_MODE" = "station" ]; then
+    echo "wifi-fallback: waiting up to ${BOOT_GRACE_TIME}s for Wi-Fi station connection..."
+    ELAPSED=0
+    while [ $ELAPSED -lt $BOOT_GRACE_TIME ]; do
+        if has_station_ip; then
+            IP=$(ip -4 addr show "$INTERFACE" | grep 'inet ' | awk '{print $2}')
+            echo "wifi-fallback: connected at boot with IP $IP"
+            break
+        fi
+        sleep 1
+        ELAPSED=$((ELAPSED + 1))
+    done
+
+    if ! has_station_ip; then
+        echo "wifi-fallback: no connection after ${BOOT_GRACE_TIME}s. Launching fallback hotspot."
+        start_hotspot
+    fi
+else
+    # Started while in AP mode
+    if ! is_ap_started; then
+        start_hotspot
+    else
+        echo "wifi-fallback: AP mode already active."
+    fi
+fi
+
+# --- CONTINUOUS WATCHER LOOP ---
+LOST_COUNT=0
+LOST_THRESHOLD=$((DISCONNECT_GRACE_TIME / CHECK_INTERVAL))
+
+while true; do
+    sleep "$CHECK_INTERVAL"
+
+    CURRENT_MODE=$(get_mode)
+
+    if [ "$CURRENT_MODE" = "ap" ]; then
+        # In AP mode: ensure AP remains active
+        if ! is_ap_started; then
+            echo "wifi-fallback: AP stopped unexpectedly, restarting..."
+            start_hotspot
+        fi
+        continue
+    fi
+
+    # In station mode: monitor IP connectivity
+    if has_station_ip; then
+        LOST_COUNT=0
+    else
+        LOST_COUNT=$((LOST_COUNT + 1))
+        if [ "$LOST_COUNT" -ge "$LOST_THRESHOLD" ]; then
+            echo "wifi-fallback: Wi-Fi lost for >${DISCONNECT_GRACE_TIME}s. Switching to hotspot."
+            start_hotspot
+            LOST_COUNT=0
+        fi
+    fi
+done
 ```
 
 ### Step 4.4: Create the Systemd Service
@@ -140,14 +245,15 @@ Add:
 
 ```ini
 [Unit]
-Description=Wi-Fi fallback to hotspot if no network available
+Description=WiFi fallback to hotspot if no network available
 After=iwd.service
 Requires=iwd.service
 
 [Service]
-Type=oneshot
+Type=simple
 ExecStart=/usr/local/bin/wifi-fallback.sh
-RemainAfterExit=yes
+Restart=always
+RestartSec=5
 
 [Install]
 WantedBy=multi-user.target
@@ -158,14 +264,15 @@ WantedBy=multi-user.target
 ```bash
 systemctl daemon-reload
 systemctl enable wifi-fallback.service
-systemctl start wifi-fallback.service
+systemctl restart wifi-fallback.service
+journalctl -u wifi-fallback.service -f
 ```
 
 ### Hotspot Connection Summary
 - **SSID:** `bela-hotspot`
-- **Passphrase:** `BelaGemPreamp`
+- **Passphrase:** `fullavibes`
 - **Preamp IP:** `192.168.101.1`
-- **Web GUI / IDE URL:** `http://192.168.101.1/gui/`
+- **Web GUI / IDE URL:** `http://192.168.101.1/gui/` (or `http://192.168.101.1` for Bela IDE)
 
 ---
 
