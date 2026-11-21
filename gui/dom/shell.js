@@ -1,6 +1,6 @@
 /** Top-level UI shell: header, tabs, tab switching, theme toggle. */
 import { getContext } from '../context.js';
-import { TAB_LIVE, TAB_MAPPING, THEME_STORAGE_KEY } from '../config.js';
+import { TAB_LIVE, TAB_FX, TAB_DEV, TAB_MAPPING, THEME_STORAGE_KEY } from '../config.js';
 import { el, projectFileUrl } from './utils.js';
 import {
     buildLivePane,
@@ -12,6 +12,8 @@ import { isLiveTileOn } from '../live-layout.js';
 import { startMeterAnim, stopMeterAnim } from './meters.js';
 import { drawMasterEqCurve } from './masterEq.js';
 import { buildMappingPane, cancelDetect } from './mapping.js';
+import { buildDevControlPane } from './devControl.js';
+import { buildFxPane } from './fx.js';
 
 let _currentTheme = 'dark';
 let _themeToggleBtn = null;
@@ -38,8 +40,8 @@ export function updateThemeButton() {
     if (!_themeToggleBtn) return;
     const isDark = _currentTheme === 'dark';
     _themeToggleBtn.innerHTML = (isDark ? '🌙' : '☀️') + '<span class="theme-btn-lbl"> ' + (isDark ? 'Dark' : 'Light') + '</span>';
-    _themeToggleBtn.title = isDark ? 'Mode sombre actif (cliquer pour mode clair)' : 'Mode clair actif (cliquer pour mode sombre)';
-    _themeToggleBtn.setAttribute('aria-label', isDark ? 'Passer en mode clair' : 'Passer en mode sombre');
+    _themeToggleBtn.title = isDark ? 'Dark mode active (click for light mode)' : 'Light mode active (click for dark mode)';
+    _themeToggleBtn.setAttribute('aria-label', isDark ? 'Switch to light mode' : 'Switch to dark mode');
 }
 
 /** Applies a theme ('dark' | 'light'), persists to localStorage and redraws canvas if needed. */
@@ -83,6 +85,13 @@ export function buildUI() {
     });
     tempBadge.textContent = '--°C';
     hdr.appendChild(tempBadge);
+    const devBadge = el('span', {
+        className: 'badge dev-badge',
+        id: 'dev-badge',
+        title: 'UI Control Mode active'
+    });
+    devBadge.textContent = 'DEV MODE';
+    hdr.appendChild(devBadge);
     const clipBadges = el('div', {
         id: 'clip-badges',
         className: 'clip-badges',
@@ -96,7 +105,7 @@ export function buildUI() {
     topChrome.appendChild(hdr);
 
     const tabBar = el('div', {id: 'tab-bar'});
-    ['Live', 'Mapping'].forEach((lbl, i) => {
+    ['Live', 'FX', 'Controls', 'Mapping'].forEach((lbl, i) => {
         const btn = el('button', {className: 'tab-btn' + (i === TAB_LIVE ? ' active' : '')});
         btn.textContent = lbl;
         btn.dataset.tab = i;
@@ -141,6 +150,8 @@ export function buildUI() {
 
     const content = el('div', {id: 'tab-content'});
     content.appendChild(buildLivePane());
+    content.appendChild(buildFxPane());
+    content.appendChild(buildDevControlPane());
     content.appendChild(buildMappingPane());
     root.appendChild(content);
 

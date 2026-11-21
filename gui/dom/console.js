@@ -53,7 +53,7 @@ export function buildConsoleCard(listId) {
     const filterBar = el('div', { className: 'console-filter' });
     [
         { mode: 'normal', label: 'Normal' },
-        { mode: 'detailed', label: 'Détaillé' }
+        { mode: 'detailed', label: 'Detailed' }
     ].forEach(({ mode, label }) => {
         const btn = el('button', {
             type: 'button',

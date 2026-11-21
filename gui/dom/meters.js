@@ -84,13 +84,13 @@ function _setMasterStereoBtnState(btn, isStereo) {
     if (isStereo) {
         btn.classList.remove('mono');
         btn.classList.add('stereo');
-        btn.textContent = 'STÉRÉO';
-        btn.title = 'Master mode: Stéréo (cliquer pour Mono L+R)';
+        btn.textContent = 'STEREO';
+        btn.title = 'Master mode: Stereo (click for Mono L+R)';
     } else {
         btn.classList.remove('stereo');
         btn.classList.add('mono');
         btn.textContent = 'MONO';
-        btn.title = 'Master mode: Mono Canal L + R (cliquer pour Stéréo)';
+        btn.title = 'Master mode: Mono L+R (click for Stereo)';
     }
 }
 

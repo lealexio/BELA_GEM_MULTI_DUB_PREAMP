@@ -14,6 +14,8 @@ import { TAB_LIVE } from './config.js';
 import { isLiveTileOn } from './live-layout.js';
 import { updateMasterEq, resizeMasterEqCanvas } from './dom/masterEq.js';
 import { tryBuildMappingTable, updateDetectMode, fillRoutingFromConfigMeta, fillIgnoredPotsFromConfigMeta } from './dom/mapping.js';
+import { syncUiDevMode, updateDevControlsLive } from './dom/devControl.js';
+import { updateFxLive } from './dom/fx.js';
 import {
     updateBelaRxWatchdog, isBelaConnected, updateBadge, updateTempBadge
 } from './bela/connection.js';
@@ -126,6 +128,7 @@ export default function sketch(p) {
             ctx.configMeta = b[6];
             syncMicInputs(b[6]);
             syncMasterStereo(b[6]);
+            syncUiDevMode(b[6]);
         }
 
         // Buffer 8: codec gain state — sync all connected clients (no send back to Bela).
@@ -135,11 +138,18 @@ export default function sketch(p) {
         if (b[9] && b[9].length) updateTempBadge(b[9][0]);
         else updateTempBadge(undefined);
 
+        // Buffer 12: Digital FX state [peaks, routing]
+        if (b[12]) {
+            ctx.fxState = b[12];
+            updateFxLive();
+        }
+
         if (ctx.consoleReady) updateConsole();
         updateSiren();
         updateSampler();
         updateSwitches();
         updateMasterEq();
+        updateDevControlsLive();
         // updateClipIndicators() is already called inside updateMetersFrame() (rAF loop).
         // Call it here only when the meter rAF is NOT running (meters tile hidden / tab inactive).
         if (ctx.meterAnimId == null) updateClipIndicators();

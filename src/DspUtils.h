@@ -13,6 +13,16 @@ static constexpr float kPi    = 3.14159265358979323846f;
 static constexpr float kTwoPi = 2.f * kPi;
 
 /**
+ * Clamps a value v between minVal and maxVal (C++11 compatible).
+ */
+template <typename T>
+static inline T clamp(T v, T minVal, T maxVal) {
+    if (v < minVal) return minVal;
+    if (v > maxVal) return maxVal;
+    return v;
+}
+
+/**
  * Converts a duration in milliseconds to number of samples at sampleRate.
  *
  * @param ms          Duration in milliseconds

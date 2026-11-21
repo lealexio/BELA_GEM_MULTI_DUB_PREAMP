@@ -88,6 +88,32 @@ public:
   }
 
   // -----------------------------------------------------------------------
+  // UI Control (Dev) Mode — Virtual pots & switches
+  // -----------------------------------------------------------------------
+
+  /** Enables or disables virtual control mode (Dev Mode). */
+  void setUiControlMode(bool enabled) {
+    uiControlMode_.store(enabled, std::memory_order_relaxed);
+  }
+
+  /** Returns true if UI virtual control mode is active. RT-safe (atomic load). */
+  bool isUiControlMode() const {
+    return uiControlMode_.load(std::memory_order_relaxed);
+  }
+
+  /** Sets a virtual pot value [0.0, 1.0] by mux and pot channel. */
+  void setVirtualPotValue(int muxId, int potId, float val);
+
+  /** Sets a virtual pot value [0.0, 1.0] by index in kAllNamedPots (0..kAllNamedPotsCount-1). */
+  void setVirtualNamedPot(int potIdx, float val);
+
+  /** Sets a virtual switch active state by SwitchRef. */
+  void setVirtualSwitchByRef(const SwitchRef &sw, bool active);
+
+  /** Resets all virtual pots and switches to clean, musical defaults. */
+  void resetVirtualControlsToDefaults();
+
+  // -----------------------------------------------------------------------
   // Switch accessors (MCP23017 — RT-safe, reads from atomic registers)
   // -----------------------------------------------------------------------
 
@@ -129,6 +155,10 @@ public:
    * Returns false if MCP23017 is disconnected (all switches inactive).
    */
   bool getSwitchState(const SwitchRef &sw) const {
+    if (uiControlMode_.load(std::memory_order_relaxed)) {
+      int key = (sw.portB ? 8 : 0) + sw.pin;
+      return (key >= 0 && key < 16) ? virtualSwitchActive_[key].load(std::memory_order_relaxed) : false;
+    }
     if (!mcpConnected_.load())
       return false;
     bool raw = sw.portB ? getSwitchStateB(sw.pin) : getSwitchState(sw.pin);
@@ -212,4 +242,9 @@ private:
   std::atomic<bool> startupAnimationDone_{false};
   int startupAnimationTick_ = 0;
   int startupAnimationStep_ = 0;
+
+  // UI Control (Dev) Mode state
+  std::atomic<bool> uiControlMode_{false};
+  float virtualPotValues_[kNumMux * kPotsPerMux] = {};
+  std::atomic<bool> virtualSwitchActive_[16];
 };

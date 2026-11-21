@@ -4,7 +4,53 @@
 
 /** Tab indices — must match shell.js tab bar order. */
 export const TAB_LIVE = 0;
-export const TAB_MAPPING = 1;
+export const TAB_FX = 1;
+export const TAB_DEV = 2;
+export const TAB_MAPPING = 3;
+
+/** Digital FX send destinations. */
+export const FX_DEST_HARDWARE = 0;
+export const FX_DEST_SUB_ROAR = 1;
+export const FX_DEST_ECHU_DUB = 2;
+export const FX_DEST_TUBBY_SPRING = 3;
+export const FX_DEST_BLACK_ARK = 4;
+export const FX_DEST_MUTE = 5;
+
+export const SUB_ROAR_DEFAULTS = {
+    tune: 45,
+    drive: 0.45,
+    decay: 850,
+    cutoff: 80,
+    level: 1.0,
+    enabled: true
+};
+
+export const ECHU_DUB_DEFAULTS = {
+    time: 375,
+    feedback: 0.65,
+    tone: 2800,
+    flutter: 0.20,
+    level: 0.75,
+    kill: false,
+    enabled: true
+};
+
+export const TUBBY_SPRING_DEFAULTS = {
+    dwell: 0.65,
+    decay: 0.70,
+    tone: 3200,
+    level: 0.85,
+    enabled: true
+};
+
+export const BLACK_ARK_DEFAULTS = {
+    rate: 0.25,
+    depth: 0.75,
+    feedback: 0.60,
+    stages: 6,
+    level: 0.80,
+    enabled: true
+};
 
 /**
  * Selectable Live dashboard tiles (Mapping excluded).
@@ -129,7 +175,8 @@ export const CONFIG_META = {
     HPF_AUX1: 24, HPF_AUX2: 25, HPF_AUX3: 26, HPF_AUX4: 27,
     AUX1_R: 28, AUX2_R: 29, AUX3_R: 30, AUX4_R: 31,
     MASTER_STEREO: 32,
-    IGNORED_COUNT: 33, IGNORED_BASE: 34
+    UI_DEV_MODE: 33,
+    IGNORED_COUNT: 34, IGNORED_BASE: 35
 };
 
 /** Mic-mode HPF Hz range — must match kMicHpfFMin/FMax in SoftwareConfig.h. */

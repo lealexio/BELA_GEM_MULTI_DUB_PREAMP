@@ -15,9 +15,9 @@ The interface is implemented using **p5.js** and communicates with the real-time
 ```
 ┌──────────────────────────────────────────────────────────────────┐
 │                          Bela Web GUI                            │
-│  ┌───────────┐  ┌───────────┐  ┌─────────────┐  ┌─────────────┐  │
-│  │   Live    │  │  Meters   │  │  Master EQ  │  │   Mapping   │  │
-│  └───────────┘  └───────────┘  └─────────────┘  └─────────────┘  │
+│  ┌───────────┐  ┌─────────────┐  ┌───────────────────────┐  ┌─────────────┐       │
+│  │   Live    │  │     FX      │  │  Contrôles UI (Dev)   │  │   Mapping   │       │
+│  └───────────┘  └─────────────┘  └───────────────────────┘  └─────────────┘       │
 └────────────────────────────────┬─────────────────────────────────┘
                                  │ WebSockets (Bela.control)
                                  ▼
@@ -37,22 +37,24 @@ The operational performance dashboard:
 - **Sample Player:** Visual list of one-shot audio samples detected in `src/samples/*.{wav,mp3}`. Clicking any sample card triggers immediate playback synchronized through the audio engine.
 - **Master Status:** Instant Stereo / Mono toggle button (updates `MASTER_STEREO` without rebooting).
 - **Channel Strips:** Real-time level indicators and microphone bypass status badges.
+- **VU Meters & Master EQ Curve:** Configurable tiles displaying real-time audio ballistics and filter responses.
 
-### 2.2 Meters Tab
-Precision audio monitoring:
-- High-resolution canvas VU meters for all 10 audio input and output channels.
-- Four-band frequency-split output levels (SUB, KICK, MID, TOP).
-- Direct ADC / DAC PGA gain calibration sliders (adjusting codec gain stages).
+### 2.2 FX Tab (Digital Multi-FX Engine)
+Real-time digital effects and channel send routing:
+- **Channel Sends Routing Matrix:** Dynamic assignment of AUX 1–4 Send 1 and Send 2 to `[Hardware Out]`, `[SUB ROAR]`, `[ECHU DUB]`, or `[Off]`. Diverts sends away from physical jacks directly into internal digital processors while keeping hardware knob control.
+- **SUB ROAR Module:** Sub-harmonic bass synthesizer and asymmetric saturation (< 80 Hz) driven by a continuous broadband musical envelope follower. Parameters: Tune (30–90 Hz), Roar Drive (0–100%), Decay (100–3000 ms), 24 dB/oct Sub Cutoff (40–120 Hz), Return Level (0–150%). Continuously scales with the channel send pot from 0% to 100%.
+- **ECHU DUB Module:** Authentic space tape echo and saturating dub delay. Parameters: Delay Time (40–1500 ms) with rhythm sync buttons (1/16, 1/8, 1/8d, 1/4, Dub Long), Feedback (0–115%, with self-oscillation above 85%), Tape Tone High-Cut (1000–5000 Hz), Wow/Flutter (0–100%), Return Level (0–100%). Includes a **"KILL SEND"** latching button and a **"CLEAR ECHO"** flush button.
 
-### 2.3 Master EQ Tab
-Visual acoustic feedback:
-- Plots the combined theoretical magnitude transfer function (in dB vs. frequency from 20 Hz to 20 kHz).
-- Dynamically superimposes:
-  - 4-Band Parametric EQ curves
-  - 12-Band Graphic EQ responses
-  - High-Pass Filter (HPF) and Low-Pass Filter (LPF) resonance slopes
-  - Band Trim offsets
-- Updates in real time as physical potentiometers are turned.
+### 2.3 Contrôles UI Tab (Dev Mode / Virtual Controls)
+Full virtual console for developing, debugging, and testing without physical potentiometers or switches:
+- **Mode Toggle:** Instant toggle between Hardware Control Mode and UI Control (Dev) Mode.
+  - *When Inactive:* **0% CPU overhead**, standard physical MUX & MCP23017 scanning.
+  - *When Active:* MUX ADC scanning is bypassed to prevent floating pin noise from forcing unnecessary biquad recalculations, saving CPU on Bela.
+- **Master & Kills:** 4-band parallel crossover kills (SUB, KICK, MID, TOP), Master Volume fader, Band Trim (±6 dB), resonant HPF and LPF controls.
+- **Channel Strips (AUX 1–4):** Input Gain, 3-band EQ (Low, Mid, High with center-snap at 0 dB), FX1 & FX2 Send levels.
+- **Master EQ Section:** 4-band parametric EQ (sweepable frequency and gain) and 12-band Graphic EQ with "Flat" reset.
+- **Effects & Dub Siren:** FX send mode selectors (MIDS, TOPS), FX return gains, siren parameters, and momentary / latching siren trigger buttons.
+- **Quick Actions:** "Réinitialiser aux valeurs neutres" (resets all virtual controls to musical nominals) and "Mute Master".
 
 ### 2.4 Mapping Tab
 Hardware diagnostic and configuration utility:
@@ -121,14 +123,33 @@ The GUI communicates with the C++ backend using Bela's bi-directional WebSocket 
   ```javascript
   Bela.control.send({ event: 'custom', masterStereo: isStereo });
   ```
-- **Trigger Dub Siren:**
+- **Toggle UI Control (Dev) Mode:**
   ```javascript
-  Bela.control.send({ event: 'custom', sirenTrigger: true });
+  Bela.control.send({ event: 'custom', uiDevMode: true });
+  ```
+- **Set Virtual Potentiometer Value (0.0 to 1.0):**
+  ```javascript
+  Bela.control.send({ event: 'custom', uiPot: potIndex, val: 0.75 });
+  ```
+- **Set Virtual Switch State:**
+  ```javascript
+  Bela.control.send({ event: 'custom', uiSwitch: switchIndex, val: true });
+  ```
+- **Reset Virtual Controls to Defaults:**
+  ```javascript
+  Bela.control.send({ event: 'custom', uiReset: true });
   ```
 
 ### 4.2 C++ to UI (Data Buffers)
-- **Buffer 0–7:** Multiplexer potentiometer raw smoothed values.
-- **Buffer 8:** MCP23017 switch states.
-- **Buffer 9:** Output VU meter peak and RMS levels.
-- **Buffer 10–11:** Sample list metadata (names and durations).
+- **Buffer 0:** 60 named potentiometer positions (`kAllNamedPots`).
+- **Buffer 1:** 9 switch states (`kGuiSwitchRefs`).
+- **Buffer 2:** Siren state [presetIdx, gate, mod].
+- **Buffer 3:** Audio peak levels across all 13 monitored points.
+- **Buffer 4–5:** Pot and switch hardware mapping.
+- **Buffer 6:** Configuration metadata (routing, master stereo, `UI_DEV_MODE` at index 33, ignored pots).
+- **Buffer 7:** Raw 80-channel MUX grid for mapping discovery.
+- **Buffer 8:** Codec PGA ADC input / DAC output gains.
+- **Buffer 9:** CPU core temperature (°C).
+- **Buffer 10–11:** Sample list metadata (playback state and packed ASCII filenames).
+- **Buffer 12:** Digital FX telemetry [0]=SubRoar peak, [1]=EchuDub peak, [2..9]=AUX 1–4 Send 1 & Send 2 routing destinations.
 

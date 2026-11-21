@@ -1,4 +1,5 @@
 #pragma once
+#include <cstdint>
 
 /**
  * DSP and software behaviour constants.
@@ -488,9 +489,9 @@ constexpr int kGuiStaticBufSendDivisor = 40;
 /// sketch.js. Layout: [0-4] mux/cal/i2c | [5-7] master outs | [8-9] fx sends |
 /// [10-13] vu outs
 ///         [14-15] fx returns | [16-19] AUX channelL | [20-23] AUX micMode
-///         [24-27] AUX hpfHz | [28-31] AUX channelR | [32] masterStereo | [33]
-///         ignoredPotsCount | [34+] ignored pairs
-constexpr int kGuiConfigMetaHeaderFloats = 34;
+///         [24-27] AUX hpfHz | [28-31] AUX channelR | [32] masterStereo | [33] uiDevMode | [34]
+///         ignoredPotsCount | [35+] ignored pairs
+constexpr int kGuiConfigMetaHeaderFloats = 35;
 constexpr int kGuiConfigMetaSize =
     kGuiConfigMetaHeaderFloats + 64; // 32 ignored pairs max
 
@@ -523,3 +524,66 @@ constexpr unsigned int kMcpReconnectIntervalMs = 1000;
 /// Number of consecutive I2C read errors before declaring MCP23017
 /// disconnected.
 constexpr int kMcpMaxConsecutiveErrors = 5;
+
+// ---------------------------------------------------------------------------
+// Digital Multi-FX Engine (SUB ROAR, ECHU DUB, TUBBY SPRING, BLACK ARK)
+// ---------------------------------------------------------------------------
+
+/// Destination routing enum for channel FX sends.
+enum class FxSendDest : uint8_t {
+    Hardware    = 0,   ///< Physical output jack (OUT0 for FX1, OUT1 for FX2)
+    SubRoar     = 1,   ///< Internal digital FX 1 (SUB ROAR)
+    EchuDub     = 2,   ///< Internal digital FX 2 (ECHU DUB)
+    TubbySpring = 3,   ///< Internal digital FX 3 (TUBBY SPRING)
+    BlackArk    = 4,   ///< Internal digital FX 4 (BLACK ARK PHASER)
+    Mute        = 5    ///< Send disabled / muted
+};
+
+/// Size of GUI buffer 12 (4 effect peak meters + 8 AUX routing values)
+constexpr int kGuiFxStateBufSize = 12;
+
+// --- SUB ROAR Defaults & Ranges ---
+constexpr float kSubRoarTuneMinHz       = 30.f;
+constexpr float kSubRoarTuneMaxHz       = 90.f;
+constexpr float kSubRoarTuneDefaultHz   = 45.f;
+constexpr float kSubRoarDecayMinMs      = 100.f;
+constexpr float kSubRoarDecayMaxMs      = 3000.f;
+constexpr float kSubRoarDecayDefaultMs  = 850.f;
+constexpr float kSubRoarCutoffMinHz     = 40.f;
+constexpr float kSubRoarCutoffMaxHz     = 120.f;
+constexpr float kSubRoarCutoffDefaultHz = 80.f;
+constexpr float kSubRoarDriveDefault    = 0.45f;
+constexpr float kSubRoarReturnDefault   = 1.0f;
+/// Master headroom scaling for SUB ROAR: calibrated to deliver heavy, powerful
+/// sub presence while maintaining clean headroom on the master bus.
+constexpr float kSubRoarGainScale       = 0.55f;
+
+// --- ECHU DUB Defaults & Ranges ---
+constexpr float kEchuDubMaxDelayMs      = 2000.f;
+constexpr float kEchuDubMinDelayMs      = 40.f;
+constexpr float kEchuDubDefaultDelayMs  = 375.f;
+constexpr float kEchuDubDefaultFeedback = 0.65f;
+constexpr float kEchuDubMaxFeedback     = 1.15f;
+constexpr float kEchuDubDefaultToneHz   = 2800.f;
+constexpr float kEchuDubMinToneHz       = 1000.f;
+constexpr float kEchuDubMaxToneHz       = 5000.f;
+constexpr float kEchuDubDefaultFlutter  = 0.20f;
+constexpr float kEchuDubReturnDefault   = 0.75f;
+
+// --- TUBBY SPRING Defaults & Ranges ---
+constexpr float kTubbySpringDwellDefault   = 0.65f;
+constexpr float kTubbySpringDecayDefault   = 0.70f;
+constexpr float kTubbySpringToneDefaultHz  = 3200.f;
+constexpr float kTubbySpringReturnDefault  = 0.85f;
+constexpr float kTubbySpringGainScale      = 0.70f;
+
+// --- BLACK ARK PHASER Defaults & Ranges ---
+constexpr float kBlackArkRateMinHz         = 0.02f;
+constexpr float kBlackArkRateMaxHz         = 6.0f;
+constexpr float kBlackArkRateDefaultHz     = 0.25f;
+constexpr float kBlackArkDepthDefault      = 0.75f;
+constexpr float kBlackArkFeedbackDefault   = 0.60f;
+constexpr int   kBlackArkStagesDefault     = 6;
+constexpr float kBlackArkReturnDefault     = 0.80f;
+constexpr float kBlackArkGainScale         = 0.75f;
+

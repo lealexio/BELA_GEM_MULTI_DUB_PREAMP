@@ -541,7 +541,7 @@ export function tryBuildMappingTable() {
                 `<td class="col-check"><input type="checkbox" ${rev ? 'checked' : ''} ` +
                 `data-i="${i}" data-f="rev" class="pi"></td>` +
                 `<td class="col-check"><input type="checkbox" ${cen ? 'checked' : ''} ` +
-                `data-i="${i}" data-f="cen" class="pi" disabled title="Fixé par le DSP : ${cen ? 'Centré (bipolaire 0 dB à 12h)' : 'Linéaire / Unipolaire'}"></td>` +
+                `data-i="${i}" data-f="cen" class="pi" disabled title="Fixed by DSP: ${cen ? 'Centered (bipolar 0 dB at 12 o\'clock)' : 'Linear / Unipolar'}"></td>` +
                 `<td class="detect-cell"></td>`;
             tr.querySelector('.detect-cell').appendChild(createDetectButton('pot', i));
             ptbody.appendChild(tr);

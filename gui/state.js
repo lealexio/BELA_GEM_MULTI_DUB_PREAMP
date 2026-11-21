@@ -1,5 +1,11 @@
 /** Runtime GUI state (mutable, shared across modules via context). */
-import { MASTER_EQ_CONFIG } from './config.js';
+import {
+    MASTER_EQ_CONFIG,
+    SUB_ROAR_DEFAULTS,
+    ECHU_DUB_DEFAULTS,
+    TUBBY_SPRING_DEFAULTS,
+    BLACK_ARK_DEFAULTS
+} from './config.js';
 
 /** Creates the initial mutable GUI state object. */
 export function createState() {
@@ -17,6 +23,22 @@ export function createState() {
         samplerListEl: null,
         samplerEmptyEl: null,
         audioLevels: new Float32Array(13),
+        fxState: new Float32Array(12),
+        fxRouting: [
+            [0, 0], // AUX 1 [Send 1, Send 2]
+            [0, 0], // AUX 2 [Send 1, Send 2]
+            [0, 0], // AUX 3 [Send 1, Send 2]
+            [0, 0]  // AUX 4 [Send 1, Send 2]
+        ],
+        subRoar: { ...SUB_ROAR_DEFAULTS },
+        echuDub: { ...ECHU_DUB_DEFAULTS },
+        tubbySpring: { ...TUBBY_SPRING_DEFAULTS },
+        blackArk: { ...BLACK_ARK_DEFAULTS },
+        fxSubMeterEl: null,
+        fxDubMeterEl: null,
+        fxSpringMeterEl: null,
+        fxPhaserMeterEl: null,
+        fxRouteButtons: [],
         potMapping: null,
         switchMapping: null,
         configMeta: null,
@@ -56,6 +78,9 @@ export function createState() {
         belaRxFingerprint: '',
         belaConnState: 'offline',
         belaLastLagMs: 0,
-        belaRxPackets: 0
+        belaRxPackets: 0,
+        uiDevMode: false,
+        devInteractingPot: -1,
+        devControlInitialized: false
     };
 }

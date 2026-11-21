@@ -17,6 +17,7 @@
  *   [9] Float32[1]       — CPU temperature °C (sysfs thermal_zone0, ~2 s poll)
  *   [10] Float32[5]      — sampler: [folderOk, count, playingSlot, isPlaying, playhead]
  *   [11] Float32[32×64]  — sampler filenames packed as ASCII floats (fixed width)
+ *   [12] Float32[10]     — digital FX state: [subPeak, echuPeak, aux1-4 sends 1-2 routing]
  */
 
 var __belaPreampSketch = (() => {
@@ -60,7 +61,45 @@ var __belaPreampSketch = (() => {
 
   // gui/config.js
   var TAB_LIVE = 0;
-  var TAB_MAPPING = 1;
+  var TAB_MAPPING = 3;
+  var FX_DEST_HARDWARE = 0;
+  var FX_DEST_SUB_ROAR = 1;
+  var FX_DEST_ECHU_DUB = 2;
+  var FX_DEST_TUBBY_SPRING = 3;
+  var FX_DEST_BLACK_ARK = 4;
+  var FX_DEST_MUTE = 5;
+  var SUB_ROAR_DEFAULTS = {
+    tune: 45,
+    drive: 0.45,
+    decay: 850,
+    cutoff: 80,
+    level: 1,
+    enabled: true
+  };
+  var ECHU_DUB_DEFAULTS = {
+    time: 375,
+    feedback: 0.65,
+    tone: 2800,
+    flutter: 0.2,
+    level: 0.75,
+    kill: false,
+    enabled: true
+  };
+  var TUBBY_SPRING_DEFAULTS = {
+    dwell: 0.65,
+    decay: 0.7,
+    tone: 3200,
+    level: 0.85,
+    enabled: true
+  };
+  var BLACK_ARK_DEFAULTS = {
+    rate: 0.25,
+    depth: 0.75,
+    feedback: 0.6,
+    stages: 6,
+    level: 0.8,
+    enabled: true
+  };
   var LIVE_TILES = [
     { id: "siren", label: "Siren", pair: true, defaultOn: true },
     { id: "mic", label: "Mic inputs", pair: true, defaultOn: true },
@@ -219,8 +258,9 @@ var __belaPreampSketch = (() => {
     AUX3_R: 30,
     AUX4_R: 31,
     MASTER_STEREO: 32,
-    IGNORED_COUNT: 33,
-    IGNORED_BASE: 34
+    UI_DEV_MODE: 33,
+    IGNORED_COUNT: 34,
+    IGNORED_BASE: 35
   };
   var MIC_HPF_HZ_MIN = 0;
   var MIC_HPF_HZ_MAX = 300;
@@ -386,6 +426,26 @@ var __belaPreampSketch = (() => {
       samplerListEl: null,
       samplerEmptyEl: null,
       audioLevels: new Float32Array(13),
+      fxState: new Float32Array(12),
+      fxRouting: [
+        [0, 0],
+        // AUX 1 [Send 1, Send 2]
+        [0, 0],
+        // AUX 2 [Send 1, Send 2]
+        [0, 0],
+        // AUX 3 [Send 1, Send 2]
+        [0, 0]
+        // AUX 4 [Send 1, Send 2]
+      ],
+      subRoar: __spreadValues({}, SUB_ROAR_DEFAULTS),
+      echuDub: __spreadValues({}, ECHU_DUB_DEFAULTS),
+      tubbySpring: __spreadValues({}, TUBBY_SPRING_DEFAULTS),
+      blackArk: __spreadValues({}, BLACK_ARK_DEFAULTS),
+      fxSubMeterEl: null,
+      fxDubMeterEl: null,
+      fxSpringMeterEl: null,
+      fxPhaserMeterEl: null,
+      fxRouteButtons: [],
       potMapping: null,
       switchMapping: null,
       configMeta: null,
@@ -425,7 +485,10 @@ var __belaPreampSketch = (() => {
       belaRxFingerprint: "",
       belaConnState: "offline",
       belaLastLagMs: 0,
-      belaRxPackets: 0
+      belaRxPackets: 0,
+      uiDevMode: false,
+      devInteractingPot: -1,
+      devControlInitialized: false
     };
   }
 
@@ -1342,6 +1405,743 @@ border-radius:6px;background:transparent;
 @media(min-width:720px){
 .master-eq-canvas{height:320px;min-height:320px}
 }
+
+/* --- UI Dev Controls Tab & Badge --- */
+.badge.dev-badge {
+  display: none;
+  background: #0284c7;
+  color: #ffffff;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  animation: devPulse 2s infinite ease-in-out;
+}
+.badge.dev-badge.visible {
+  display: inline-block;
+}
+@keyframes devPulse {
+  0%, 100% { opacity: 0.9; }
+  50% { opacity: 0.65; }
+}
+
+.dev-banner {
+  margin-bottom: 16px;
+  padding: 16px 20px;
+  border-left: 5px solid var(--muted);
+  transition: border-color 0.2s ease, background-color 0.2s ease;
+}
+.dev-banner.dev-active {
+  border-left-color: #10b981;
+  background: rgba(16, 185, 129, 0.05);
+}
+.dev-banner-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+.dev-banner-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--ink);
+  margin-bottom: 4px;
+}
+.dev-mode-desc {
+  font-size: 13px;
+  color: var(--ink-soft);
+  line-height: 1.4;
+}
+.dev-toggle-btn {
+  padding: 10px 20px;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  border-radius: var(--radius);
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--muted);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+.dev-toggle-btn:hover {
+  border-color: var(--ink-soft);
+  color: var(--ink);
+}
+.dev-toggle-btn.active {
+  background: #10b981;
+  color: #ffffff;
+  border-color: #059669;
+  box-shadow: 0 0 12px rgba(16, 185, 129, 0.4);
+}
+.dev-actions-row {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding-top: 10px;
+  border-top: 1px solid var(--line-soft);
+}
+.dev-action-btn, .dev-small-btn {
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  background: var(--bg-elev);
+  color: var(--ink-soft);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.dev-action-btn:hover, .dev-small-btn:hover {
+  background: var(--surface);
+  color: var(--ink);
+  border-color: var(--muted);
+}
+
+.dev-controls-container {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  transition: opacity 0.2s ease, filter 0.2s ease;
+}
+.dev-controls-container.disabled-controls {
+  opacity: 0.55;
+  pointer-events: none;
+  user-select: none;
+  filter: grayscale(40%);
+}
+
+.dev-section {
+  padding: 16px 20px;
+}
+.dev-sub-panel {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.dev-sub-heading {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--ink);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.dev-row-between {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+.dev-grid-2col {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 14px;
+  margin-top: 12px;
+}
+.dev-channels-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 14px;
+  margin-top: 10px;
+}
+.dev-channel-col {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.dev-channel-hdr {
+  font-size: 14px;
+  font-weight: 800;
+  color: var(--accent);
+  text-align: center;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--line);
+  letter-spacing: 0.5px;
+}
+.dev-eq-box {
+  background: var(--bg-elev);
+  border: 1px solid var(--line-soft);
+  border-radius: 6px;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.dev-pot-grid-2 {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+}
+.dev-geq-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.dev-pot-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.dev-pot-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-size: 12px;
+}
+.dev-pot-label {
+  font-weight: 600;
+  color: var(--ink-soft);
+}
+.dev-pot-val {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--accent);
+  font-weight: 600;
+}
+.dev-pot-slider {
+  width: 100%;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--line);
+  outline: none;
+  -webkit-appearance: none;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+.dev-pot-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--ink);
+  border: 2px solid #ffffff;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+  cursor: pointer;
+  transition: transform 0.1s ease, background 0.15s ease;
+}
+.dev-pot-slider:hover::-webkit-slider-thumb {
+  transform: scale(1.15);
+}
+.dev-pot-slider.centered::-webkit-slider-thumb {
+  background: #3b82f6;
+}
+
+.dev-kill-section {
+  margin-bottom: 14px;
+}
+.dev-kill-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+  margin-top: 8px;
+}
+@media (max-width: 600px) {
+  .dev-kill-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+.dev-kill-btn {
+  padding: 12px 8px;
+  font-size: 13px;
+  font-weight: 800;
+  border-radius: var(--radius);
+  border: 2px solid var(--line);
+  background: var(--surface);
+  color: var(--muted);
+  cursor: pointer;
+  text-align: center;
+  letter-spacing: 0.5px;
+  transition: all 0.15s ease;
+}
+.dev-kill-btn:hover {
+  border-color: var(--ink-soft);
+  color: var(--ink);
+}
+.dev-kill-btn.active {
+  background: #dc2626;
+  color: #ffffff;
+  border-color: #ef4444;
+  box-shadow: 0 0 14px rgba(220, 38, 38, 0.6);
+  animation: killGlow 1.5s infinite alternate;
+}
+@keyframes killGlow {
+  from { box-shadow: 0 0 8px rgba(220, 38, 38, 0.4); }
+  to { box-shadow: 0 0 16px rgba(220, 38, 38, 0.8); }
+}
+.dev-fx-mode-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+.dev-mode-btn {
+  flex: 1;
+  padding: 6px 10px;
+  font-size: 11px;
+  font-weight: 700;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  background: var(--bg-elev);
+  color: var(--ink-soft);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.dev-mode-btn:hover {
+  border-color: var(--muted);
+}
+.dev-mode-btn.active {
+  background: #8b5cf6;
+  color: #ffffff;
+  border-color: #7c3aed;
+  box-shadow: 0 0 8px rgba(139, 92, 246, 0.4);
+}
+.dev-siren-trigger-box {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 10px;
+}
+.dev-siren-trig-btn {
+  padding: 14px;
+  font-size: 14px;
+  font-weight: 800;
+  letter-spacing: 0.5px;
+  border-radius: var(--radius);
+  border: 2px solid #f59e0b;
+  background: rgba(245, 158, 11, 0.1);
+  color: #d97706;
+  cursor: pointer;
+  user-select: none;
+  touch-action: none;
+  transition: all 0.1s ease;
+  text-align: center;
+}
+.dev-siren-trig-btn:hover {
+  background: rgba(245, 158, 11, 0.2);
+}
+.dev-siren-trig-btn.firing {
+  background: #f59e0b;
+  color: #000000;
+  box-shadow: 0 0 18px rgba(245, 158, 11, 0.7);
+  transform: scale(0.98);
+}
+.dev-siren-latch-btn {
+  padding: 8px;
+  font-size: 12px;
+  font-weight: 700;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  background: var(--bg-elev);
+  color: var(--ink-soft);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.dev-siren-latch-btn.active {
+  background: #f59e0b;
+  color: #000000;
+  border-color: #d97706;
+  box-shadow: 0 0 10px rgba(245, 158, 11, 0.5);
+}
+
+/* ===========================================================================
+   Digital Multi-FX Engine (SUB ROAR, ECHU DUB & Routing Matrix)
+   =========================================================================== */
+.fx-pane-container {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.fx-header-banner {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-left: 4px solid #f59e0b;
+  border-radius: var(--radius);
+  padding: 12px 16px;
+}
+.fx-main-title {
+  font-size: 16px;
+  font-weight: 800;
+  letter-spacing: 0.8px;
+  color: var(--ink);
+  margin: 0 0 4px 0;
+}
+.fx-subtitle {
+  font-size: 12px;
+  color: var(--ink-soft);
+  margin: 0;
+}
+.fx-card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 16px;
+  box-shadow: var(--shadow-sm);
+}
+.fx-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+  gap: 12px;
+}
+.fx-card-title {
+  font-size: 14px;
+  font-weight: 800;
+  letter-spacing: 0.5px;
+}
+.fx-card-title.sub-title { color: #f59e0b; }
+.fx-card-title.dub-title { color: #06b6d4; }
+.fx-card-title.spring-title { color: #f59e0b; }
+.fx-card-title.phase-title { color: #a855f7; }
+.fx-card-title.chop-title { color: #ef4444; }
+.fx-card-desc {
+  font-size: 11px;
+  color: var(--ink-soft);
+  margin-top: 2px;
+}
+.fx-card-badge {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 3px 8px;
+  border-radius: 4px;
+  background: var(--bg-elev);
+  border: 1px solid var(--line);
+  color: var(--ink-soft);
+}
+.fx-routing-desc {
+  font-size: 12px;
+  color: var(--ink-soft);
+  margin-bottom: 14px;
+  line-height: 1.4;
+}
+.fx-matrix-table {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.fx-matrix-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 10px 14px;
+  background: var(--bg-elev);
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  flex-wrap: wrap;
+}
+.fx-matrix-ch-label {
+  min-width: 65px;
+}
+.fx-ch-badge {
+  font-size: 12px;
+  font-weight: 800;
+  padding: 4px 8px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  color: var(--ink);
+}
+.fx-matrix-send-col {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1;
+  min-width: 260px;
+}
+.fx-send-title {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--muted);
+  letter-spacing: 0.5px;
+}
+.fx-pill-group {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+.fx-pill-btn {
+  padding: 5px 9px;
+  font-size: 11px;
+  font-weight: 700;
+  border-radius: 5px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--muted);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.fx-pill-btn:hover {
+  border-color: var(--ink-soft);
+  color: var(--ink);
+}
+.fx-pill-btn.dest-hw.active {
+  background: #2563eb;
+  color: #ffffff;
+  border-color: #1d4ed8;
+  box-shadow: 0 0 8px rgba(37, 99, 235, 0.4);
+}
+.fx-pill-btn.dest-sub.active {
+  background: #f59e0b;
+  color: #000000;
+  border-color: #d97706;
+  box-shadow: 0 0 10px rgba(245, 158, 11, 0.5);
+}
+.fx-pill-btn.dest-dub.active {
+  background: #06b6d4;
+  color: #000000;
+  border-color: #0891b2;
+  box-shadow: 0 0 10px rgba(6, 182, 212, 0.5);
+}
+.fx-pill-btn.dest-spring.active {
+  background: #d97706;
+  color: #ffffff;
+  border-color: #b45309;
+  box-shadow: 0 0 10px rgba(217, 119, 6, 0.5);
+}
+.fx-pill-btn.dest-phase.active {
+  background: #8b5cf6;
+  color: #ffffff;
+  border-color: #7c3aed;
+  box-shadow: 0 0 10px rgba(139, 92, 246, 0.5);
+}
+.fx-pill-btn.dest-chop.active {
+  background: #ef4444;
+  color: #ffffff;
+  border-color: #dc2626;
+  box-shadow: 0 0 10px rgba(239, 68, 68, 0.5);
+}
+.fx-pill-btn.dest-mute.active {
+  background: #64748b;
+  color: #ffffff;
+  border-color: #475569;
+}
+.fx-modules-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+  gap: 16px;
+}
+.fx-toggle-wrap {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  color: var(--ink-soft);
+}
+.fx-meter-box {
+  margin-bottom: 14px;
+}
+.fx-meter-lbl {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--muted);
+  letter-spacing: 0.5px;
+}
+.fx-meter-track {
+  height: 6px;
+  background: rgba(0, 0, 0, 0.35);
+  border-radius: 3px;
+  overflow: hidden;
+  margin-top: 4px;
+}
+.fx-meter-fill {
+  height: 100%;
+  width: 0%;
+  transition: width 0.05s ease;
+}
+.fx-meter-fill.sub-fill {
+  background: linear-gradient(90deg, #d97706, #f59e0b, #ef4444);
+}
+.fx-meter-fill.dub-fill {
+  background: linear-gradient(90deg, #0891b2, #06b6d4, #38bdf8);
+}
+.fx-meter-fill.spring-fill {
+  background: linear-gradient(90deg, #b45309, #d97706, #fbbf24);
+}
+.fx-meter-fill.phase-fill {
+  background: linear-gradient(90deg, #6d28d9, #8b5cf6, #c084fc);
+}
+.fx-meter-fill.chop-fill {
+  background: linear-gradient(90deg, #b91c1c, #ef4444, #f87171);
+}
+.fx-controls-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.fx-slider-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.fx-slider-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.fx-slider-lbl {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--ink-soft);
+}
+.fx-slider-val {
+  font-size: 11px;
+  font-weight: 800;
+  color: var(--ink);
+  background: var(--bg-elev);
+  padding: 2px 6px;
+  border-radius: 4px;
+  border: 1px solid var(--line-soft);
+}
+.fx-slider-val.warn {
+  color: #ef4444;
+  background: rgba(239, 68, 68, 0.15);
+  border-color: #ef4444;
+}
+.fx-range-slider {
+  -webkit-appearance: none;
+  width: 100%;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--line);
+  outline: none;
+  cursor: pointer;
+}
+.fx-preset-row {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin: -4px 0 6px 0;
+}
+.fx-mini-btn {
+  padding: 3px 8px;
+  font-size: 10px;
+  font-weight: 700;
+  border-radius: 4px;
+  border: 1px solid var(--line);
+  background: var(--bg-elev);
+  color: var(--ink-soft);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.fx-mini-btn:hover {
+  background: var(--surface);
+  color: var(--ink);
+  border-color: var(--muted);
+}
+.fx-action-box {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.fx-action-box.dual-action {
+  flex-direction: row;
+  gap: 10px;
+}
+.fx-big-btn {
+  flex: 1;
+  padding: 12px;
+  font-size: 13px;
+  font-weight: 800;
+  border-radius: var(--radius);
+  cursor: pointer;
+  text-align: center;
+  border: 1px solid transparent;
+  transition: all 0.15s ease;
+}
+.btn-kill-send {
+  background: var(--bg-elev);
+  color: var(--ink-soft);
+  border: 1px solid var(--line);
+}
+.btn-kill-send:hover {
+  border-color: var(--ink-soft);
+  color: var(--ink);
+}
+.btn-kill-send.active {
+  background: #ef4444;
+  color: #ffffff;
+  border-color: #dc2626;
+  box-shadow: 0 0 14px rgba(239, 68, 68, 0.6);
+}
+.btn-clear-delay {
+  background: var(--bg-elev);
+  color: var(--ink-soft);
+  border: 1px solid var(--line);
+}
+.btn-clear-delay:hover {
+  border-color: var(--ink-soft);
+  color: var(--ink);
+}
+.btn-clear-delay.flash {
+  background: #06b6d4;
+  color: #000000;
+  border-color: #0891b2;
+}
+.btn-spring-splash {
+  background: linear-gradient(135deg, #d97706, #b45309);
+  color: #ffffff;
+  border: 1px solid #f59e0b;
+}
+.btn-spring-splash:hover {
+  filter: brightness(1.15);
+  box-shadow: 0 0 14px rgba(245, 158, 11, 0.6);
+}
+.btn-spring-splash.splash-active {
+  transform: scale(0.97);
+  background: #fbbf24;
+  color: #000000;
+  box-shadow: 0 0 24px #fbbf24;
+}
+.btn-stages {
+  background: var(--bg-elev);
+  color: var(--ink-soft);
+  border: 1px solid var(--line);
+}
+.btn-stages:hover {
+  border-color: var(--ink-soft);
+  color: var(--ink);
+}
+.btn-stages.active {
+  background: #8b5cf6;
+  color: #ffffff;
+  border-color: #7c3aed;
+  box-shadow: 0 0 12px rgba(139, 92, 246, 0.5);
+}
+.btn-chop-momentary {
+  background: #dc2626;
+  color: #ffffff;
+  border: 1px solid #b91c1c;
+}
+.btn-chop-momentary:hover {
+  background: #b91c1c;
+}
+.btn-chop-momentary.active {
+  background: #7f1d1d;
+  color: #fca5a5;
+  transform: scale(0.97);
+  box-shadow: 0 0 20px #ef4444;
+}
+.fx-mini-btn.active {
+  background: #2563eb;
+  color: #ffffff;
+  border-color: #1d4ed8;
+}
     `;
     document.head.appendChild(s);
   }
@@ -1839,13 +2639,13 @@ border-radius:6px;background:transparent;
     if (isStereo) {
       btn.classList.remove("mono");
       btn.classList.add("stereo");
-      btn.textContent = "ST\xC9R\xC9O";
-      btn.title = "Master mode: St\xE9r\xE9o (cliquer pour Mono L+R)";
+      btn.textContent = "STEREO";
+      btn.title = "Master mode: Stereo (click for Mono L+R)";
     } else {
       btn.classList.remove("stereo");
       btn.classList.add("mono");
       btn.textContent = "MONO";
-      btn.title = "Master mode: Mono Canal L + R (cliquer pour St\xE9r\xE9o)";
+      btn.title = "Master mode: Mono L+R (click for Stereo)";
     }
   }
   function _buildMeterGainControls(initVal, min, max, step, onSend) {
@@ -2730,7 +3530,7 @@ border-radius:6px;background:transparent;
         const tr = document.createElement("tr");
         tr.dataset.mapTable = "pot";
         tr.dataset.mapIndex = String(i);
-        tr.innerHTML = `<td class="pname" title="${name}">${name}</td><td><input type="number" min="0" max="7"  value="${mux}" data-i="${i}" data-f="mux" class="pi"></td><td><input type="number" min="0" max="9"  value="${pot}" data-i="${i}" data-f="pot" class="pi"></td><td class="col-check"><input type="checkbox" ${rev ? "checked" : ""} data-i="${i}" data-f="rev" class="pi"></td><td class="col-check"><input type="checkbox" ${cen ? "checked" : ""} data-i="${i}" data-f="cen" class="pi" disabled title="Fix\xE9 par le DSP : ${cen ? "Centr\xE9 (bipolaire 0 dB \xE0 12h)" : "Lin\xE9aire / Unipolaire"}"></td><td class="detect-cell"></td>`;
+        tr.innerHTML = `<td class="pname" title="${name}">${name}</td><td><input type="number" min="0" max="7"  value="${mux}" data-i="${i}" data-f="mux" class="pi"></td><td><input type="number" min="0" max="9"  value="${pot}" data-i="${i}" data-f="pot" class="pi"></td><td class="col-check"><input type="checkbox" ${rev ? "checked" : ""} data-i="${i}" data-f="rev" class="pi"></td><td class="col-check"><input type="checkbox" ${cen ? "checked" : ""} data-i="${i}" data-f="cen" class="pi" disabled title="Fixed by DSP: ${cen ? "Centered (bipolar 0 dB at 12 o'clock)" : "Linear / Unipolar"}"></td><td class="detect-cell"></td>`;
         tr.querySelector(".detect-cell").appendChild(createDetectButton("pot", i));
         ptbody.appendChild(tr);
       });
@@ -3481,7 +4281,7 @@ border-radius:6px;background:transparent;
     const filterBar = el("div", { className: "console-filter" });
     [
       { mode: "normal", label: "Normal" },
-      { mode: "detailed", label: "D\xE9taill\xE9" }
+      { mode: "detailed", label: "Detailed" }
     ].forEach(({ mode, label }) => {
       const btn = el("button", {
         type: "button",
@@ -5001,6 +5801,1185 @@ border-radius:6px;background:transparent;
     }
   }
 
+  // gui/dom/devControl.js
+  var _lastSendTs = new Float64Array(POT_NAMES.length);
+  var _pendingRaf = new Int32Array(POT_NAMES.length).fill(-1);
+  var _pendingVals = new Float32Array(POT_NAMES.length).fill(-1);
+  var MIN_SEND_INTERVAL_MS = 30;
+  var _devModeHoldUntil = 0;
+  var DEV_MODE_HOLD_MS = 2500;
+  var _activeInteractingPot = -1;
+  var _potSliders = new Array(POT_NAMES.length);
+  var _potValueLabels = new Array(POT_NAMES.length);
+  var _switchButtons = new Array(SWITCH_NAMES.length);
+  var _devModeToggleBtn = null;
+  var _devModeBannerEl = null;
+  var _devControlsContainerEl = null;
+  function sendCustomControl(payload) {
+    if (!belaControlReady()) return;
+    Bela.control.send(payload);
+  }
+  function sendVirtualPot(potIdx, val, forceImmediate = false) {
+    if (potIdx < 0 || potIdx >= POT_NAMES.length) return;
+    const now = performance.now();
+    _pendingVals[potIdx] = val;
+    if (forceImmediate || now - _lastSendTs[potIdx] >= MIN_SEND_INTERVAL_MS) {
+      _lastSendTs[potIdx] = now;
+      if (_pendingRaf[potIdx] !== -1) {
+        cancelAnimationFrame(_pendingRaf[potIdx]);
+        _pendingRaf[potIdx] = -1;
+      }
+      sendCustomControl({
+        event: "custom",
+        uiPot: potIdx,
+        val: Number(val.toFixed(4))
+      });
+      return;
+    }
+    if (_pendingRaf[potIdx] === -1) {
+      _pendingRaf[potIdx] = requestAnimationFrame(() => {
+        _pendingRaf[potIdx] = -1;
+        _lastSendTs[potIdx] = performance.now();
+        sendCustomControl({
+          event: "custom",
+          uiPot: potIdx,
+          val: Number(_pendingVals[potIdx].toFixed(4))
+        });
+      });
+    }
+  }
+  function sendVirtualSwitch(swIdx, active) {
+    if (swIdx < 0 || swIdx >= SWITCH_NAMES.length) return;
+    sendCustomControl({
+      event: "custom",
+      uiSwitch: swIdx,
+      val: Boolean(active)
+    });
+  }
+  function sendUiDevMode(enabled) {
+    const ctx = getContext();
+    ctx.uiDevMode = Boolean(enabled);
+    _devModeHoldUntil = Date.now() + DEV_MODE_HOLD_MS;
+    updateDevModeVisuals(ctx.uiDevMode);
+    if (ctx.uiDevMode) {
+      for (let i = 0; i < POT_NAMES.length; i++) {
+        const defVal = isPotCentered(POT_NAMES[i]) ? 0.5 : 0;
+        if (_potSliders[i]) _potSliders[i].value = defVal.toString();
+        if (_potValueLabels[i]) _potValueLabels[i].textContent = formatPotValue(POT_NAMES[i], defVal);
+      }
+      for (let i = 0; i < SWITCH_NAMES.length; i++) {
+        if (_switchButtons[i]) _switchButtons[i].classList.remove("active", "firing");
+      }
+    }
+    sendCustomControl({
+      event: "custom",
+      uiDevMode: ctx.uiDevMode
+    });
+  }
+  function sendVirtualReset() {
+    sendCustomControl({
+      event: "custom",
+      uiReset: true
+    });
+  }
+  function updateDevModeVisuals(active) {
+    const ctx = getContext();
+    ctx.uiDevMode = active;
+    if (_devModeToggleBtn) {
+      _devModeToggleBtn.classList.toggle("active", active);
+      _devModeToggleBtn.textContent = active ? "VIRTUAL MODE ACTIVE" : "PHYSICAL MODE ACTIVE";
+    }
+    if (_devModeBannerEl) {
+      _devModeBannerEl.classList.toggle("dev-active", active);
+      const descEl = _devModeBannerEl.querySelector(".dev-mode-desc");
+      if (descEl) {
+        descEl.innerHTML = active ? "<strong>UI Control Mode Active:</strong> Sliders and switches below directly control Bela. Hardware ADC scanning is suspended (zero floating noise, CPU saved)." : "<strong>Physical Mode Active:</strong> Bela is controlled by its physical potentiometers and switches. Click above to enable virtual UI control.";
+      }
+    }
+    if (_devControlsContainerEl) {
+      _devControlsContainerEl.classList.toggle("disabled-controls", !active);
+    }
+    const headerDevBadge = document.getElementById("dev-badge");
+    if (headerDevBadge) {
+      headerDevBadge.classList.toggle("visible", active);
+    }
+  }
+  function syncUiDevMode(metaBuf) {
+    if (!metaBuf || metaBuf.length <= CONFIG_META.UI_DEV_MODE) return;
+    const isDev = metaBuf[CONFIG_META.UI_DEV_MODE] > 0.5;
+    const ctx = getContext();
+    if (Date.now() < _devModeHoldUntil) {
+      if (ctx.uiDevMode === isDev) {
+        _devModeHoldUntil = 0;
+      }
+      return;
+    }
+    if (ctx.uiDevMode !== isDev) {
+      ctx.uiDevMode = isDev;
+      updateDevModeVisuals(isDev);
+    }
+  }
+  function formatPotValue(name, val) {
+    if (/^AUX\d_EQ_(LOW|MID|HIGH)$/.test(name) || /^MASTER_EQ_.*_GAIN$/.test(name) || /^BTRIM_/.test(name)) {
+      const db = (val - 0.5) * 12;
+      return (db >= 0 ? "+" : "") + db.toFixed(1) + " dB";
+    }
+    if (name.startsWith("GEQ_")) {
+      const db = (val - 0.5) * 24;
+      return (db >= 0 ? "+" : "") + db.toFixed(1) + " dB";
+    }
+    if (name === "MASTER_HPF_FREQ") {
+      const hz = 20 + val * 1980;
+      return val < 0.015 ? "Bypass" : Math.round(hz) + " Hz";
+    }
+    if (name === "MASTER_LPF_FREQ") {
+      const hz = 200 + val * 19800;
+      return val > 0.985 ? "Bypass" : hz >= 1e3 ? (hz / 1e3).toFixed(1) + " kHz" : Math.round(hz) + " Hz";
+    }
+    if (name === "MASTER_HPF_RES" || name === "MASTER_LPF_RES") {
+      const q = 0.7 + val * (4.5 - 0.7);
+      return "Q " + q.toFixed(2);
+    }
+    if (name === "MASTER_EQ_SUB_FREQ") {
+      return Math.round(20 + val * 60) + " Hz";
+    }
+    if (name === "MASTER_EQ_KICK_FREQ") {
+      return Math.round(80 + val * 120) + " Hz";
+    }
+    if (name === "MASTER_EQ_MID_FREQ") {
+      return Math.round(200 + val * 1e3) + " Hz";
+    }
+    if (name === "MASTER_EQ_TOP_FREQ") {
+      const hz = 1200 + val * 14800;
+      return hz >= 1e3 ? (hz / 1e3).toFixed(1) + " kHz" : Math.round(hz) + " Hz";
+    }
+    if (name === "SIREN_TYPE") {
+      const idx = Math.min(5, Math.floor(val * 6));
+      return SIREN_PRESETS[idx] || "Preset " + idx;
+    }
+    return Math.round(val * 100) + "%";
+  }
+  function createPotControl(potIdx, label) {
+    const name = POT_NAMES[potIdx];
+    const isCentered = isPotCentered(name);
+    const defVal = isCentered ? 0.5 : 0;
+    const item = el("div", { className: "dev-pot-item" });
+    const topRow = el("div", { className: "dev-pot-top" });
+    const lbl = el("span", { className: "dev-pot-label" });
+    lbl.textContent = label || name;
+    const valLbl = el("span", { className: "dev-pot-val" });
+    valLbl.textContent = formatPotValue(name, defVal);
+    topRow.appendChild(lbl);
+    topRow.appendChild(valLbl);
+    item.appendChild(topRow);
+    const slider = el("input", {
+      type: "range",
+      min: "0",
+      max: "1",
+      step: "0.005",
+      value: defVal.toString(),
+      className: "dev-pot-slider" + (isCentered ? " centered" : "")
+    });
+    slider.addEventListener("pointerdown", () => {
+      _activeInteractingPot = potIdx;
+    });
+    slider.addEventListener("pointerup", () => {
+      _activeInteractingPot = -1;
+      sendVirtualPot(potIdx, parseFloat(slider.value), true);
+    });
+    slider.addEventListener("input", () => {
+      const v = parseFloat(slider.value);
+      valLbl.textContent = formatPotValue(name, v);
+      sendVirtualPot(potIdx, v, false);
+    });
+    slider.addEventListener("dblclick", () => {
+      slider.value = defVal.toString();
+      valLbl.textContent = formatPotValue(name, defVal);
+      sendVirtualPot(potIdx, defVal, true);
+    });
+    item.appendChild(slider);
+    _potSliders[potIdx] = slider;
+    _potValueLabels[potIdx] = valLbl;
+    return item;
+  }
+  function buildMasterSection() {
+    const card = el("div", { className: "card dev-section" });
+    card.appendChild(cardTitle("Master & Band Kills"));
+    const killSection = el("div", { className: "dev-kill-section" });
+    const killTitle = el("div", { className: "dev-sub-heading" });
+    killTitle.textContent = "4-Band Crossover Kills (24 dB/oct)";
+    killSection.appendChild(killTitle);
+    const killGrid = el("div", { className: "dev-kill-grid" });
+    const killDef = [
+      { idx: 0, label: "SUB (<80Hz)", color: "sub" },
+      { idx: 1, label: "KICK (80-200Hz)", color: "kick" },
+      { idx: 2, label: "MID (200-1.2k)", color: "mid" },
+      { idx: 3, label: "TOP (>1.2kHz)", color: "top" }
+    ];
+    killDef.forEach(({ idx, label, color }) => {
+      const btn = el("button", {
+        type: "button",
+        className: "dev-kill-btn " + color
+      });
+      btn.textContent = label;
+      btn.addEventListener("click", () => {
+        const ctx = getContext();
+        const curState = ctx.switchStates && ctx.switchStates[idx] > 0.5;
+        const newState = !curState;
+        btn.classList.toggle("active", newState);
+        sendVirtualSwitch(idx, newState);
+      });
+      _switchButtons[idx] = btn;
+      killGrid.appendChild(btn);
+    });
+    killSection.appendChild(killGrid);
+    card.appendChild(killSection);
+    const masterGrid = el("div", { className: "dev-grid-2col" });
+    const masterCol = el("div", { className: "dev-sub-panel" });
+    masterCol.appendChild(el("div", { className: "dev-sub-heading", textContent: "Master Volume" }));
+    masterCol.appendChild(createPotControl(24, "Master Gain (OUT 2/3)"));
+    masterGrid.appendChild(masterCol);
+    const trimCol = el("div", { className: "dev-sub-panel" });
+    trimCol.appendChild(el("div", { className: "dev-sub-heading", textContent: "Band Trim (\xB16 dB)" }));
+    const trimPots = el("div", { className: "dev-pot-grid-2" });
+    trimPots.appendChild(createPotControl(37, "Trim Sub", true));
+    trimPots.appendChild(createPotControl(38, "Trim Kick", true));
+    trimPots.appendChild(createPotControl(39, "Trim Mid", true));
+    trimPots.appendChild(createPotControl(40, "Trim Top", true));
+    trimCol.appendChild(trimPots);
+    masterGrid.appendChild(trimCol);
+    card.appendChild(masterGrid);
+    const filterSection = el("div", { className: "dev-sub-panel" });
+    filterSection.appendChild(el("div", { className: "dev-sub-heading", textContent: "Master Resonant Filters (Soft-Bypass)" }));
+    const filterGrid = el("div", { className: "dev-pot-grid-2" });
+    filterGrid.appendChild(createPotControl(33, "HPF Cutoff (20Hz - 2kHz)"));
+    filterGrid.appendChild(createPotControl(34, "HPF Resonance (Q 0.7 - 4.5)"));
+    filterGrid.appendChild(createPotControl(35, "LPF Cutoff (200Hz - 20kHz)"));
+    filterGrid.appendChild(createPotControl(36, "LPF Resonance (Q 0.7 - 4.5)"));
+    filterSection.appendChild(filterGrid);
+    card.appendChild(filterSection);
+    return card;
+  }
+  function buildChannelStripsSection() {
+    const card = el("div", { className: "card dev-section" });
+    card.appendChild(cardTitle("AUX Channel Strips (1 to 4)"));
+    const grid = el("div", { className: "dev-channels-grid" });
+    const auxConfigs = [
+      { ch: 1, base: 0 },
+      { ch: 2, base: 6 },
+      { ch: 3, base: 12 },
+      { ch: 4, base: 18 }
+    ];
+    auxConfigs.forEach(({ ch, base }) => {
+      const col = el("div", { className: "dev-channel-col" });
+      const hdr = el("div", { className: "dev-channel-hdr" });
+      hdr.textContent = "AUX " + ch;
+      col.appendChild(hdr);
+      col.appendChild(createPotControl(base + 0, "Gain In"));
+      const eqBox = el("div", { className: "dev-eq-box" });
+      if (ch === 1 || ch === 2) {
+        if (ch === 1) {
+          eqBox.appendChild(createPotControl(base + 3, "EQ High", true));
+          eqBox.appendChild(createPotControl(base + 1, "EQ Mid", true));
+          eqBox.appendChild(createPotControl(base + 2, "EQ Low", true));
+        } else {
+          eqBox.appendChild(createPotControl(base + 2, "EQ High", true));
+          eqBox.appendChild(createPotControl(base + 1, "EQ Mid", true));
+          eqBox.appendChild(createPotControl(base + 3, "EQ Low", true));
+        }
+      } else {
+        eqBox.appendChild(createPotControl(base + 3, "EQ High", true));
+        eqBox.appendChild(createPotControl(base + 2, "EQ Mid", true));
+        eqBox.appendChild(createPotControl(base + 1, "EQ Low", true));
+      }
+      col.appendChild(eqBox);
+      col.appendChild(createPotControl(base + 4, "FX 1 Send"));
+      col.appendChild(createPotControl(base + 5, "FX 2 Send"));
+      grid.appendChild(col);
+    });
+    card.appendChild(grid);
+    return card;
+  }
+  function buildMasterEqSection() {
+    const card = el("div", { className: "card dev-section" });
+    card.appendChild(cardTitle("Master Equalizers (Parametric & 12-Band Graphic)"));
+    const peqBox = el("div", { className: "dev-sub-panel" });
+    peqBox.appendChild(el("div", { className: "dev-sub-heading", textContent: "4-Band Parametric Equalizer (Sweepable Freq \xB16 dB)" }));
+    const peqGrid = el("div", { className: "dev-channels-grid" });
+    const peqBands = [
+      { label: "SUB (20-80 Hz)", fIdx: 25, gIdx: 26 },
+      { label: "KICK (80-200 Hz)", fIdx: 27, gIdx: 28 },
+      { label: "MID (200-1.2k Hz)", fIdx: 29, gIdx: 30 },
+      { label: "TOP (1.2-16k Hz)", fIdx: 31, gIdx: 32 }
+    ];
+    peqBands.forEach(({ label, fIdx, gIdx }) => {
+      const bCol = el("div", { className: "dev-channel-col" });
+      bCol.appendChild(el("div", { className: "dev-channel-hdr", textContent: label }));
+      bCol.appendChild(createPotControl(fIdx, "Frequency"));
+      bCol.appendChild(createPotControl(gIdx, "Gain (\xB16 dB)", true));
+      peqGrid.appendChild(bCol);
+    });
+    peqBox.appendChild(peqGrid);
+    card.appendChild(peqBox);
+    const geqBox = el("div", { className: "dev-sub-panel" });
+    const geqHdrRow = el("div", { className: "dev-row-between" });
+    geqHdrRow.appendChild(el("div", { className: "dev-sub-heading", textContent: "12-Band Graphic Equalizer (\xB112 dB)" }));
+    const flatBtn = el("button", {
+      type: "button",
+      className: "dev-small-btn",
+      textContent: "Reset to Flat (0 dB)"
+    });
+    flatBtn.addEventListener("click", () => {
+      for (let i = 46; i <= 57; i++) {
+        if (_potSliders[i]) _potSliders[i].value = "0.5";
+        if (_potValueLabels[i]) _potValueLabels[i].textContent = "0.0 dB";
+        sendVirtualPot(i, 0.5, true);
+      }
+    });
+    geqHdrRow.appendChild(flatBtn);
+    geqBox.appendChild(geqHdrRow);
+    const geqGrid = el("div", { className: "dev-geq-grid" });
+    const geqLabels = ["40Hz", "60Hz", "80Hz", "100Hz", "125Hz", "250Hz", "500Hz", "1kHz", "2kHz", "4kHz", "8kHz", "16kHz"];
+    for (let i = 0; i < 12; i++) {
+      const potIdx = 46 + i;
+      geqGrid.appendChild(createPotControl(potIdx, geqLabels[i], true));
+    }
+    geqBox.appendChild(geqGrid);
+    card.appendChild(geqBox);
+    return card;
+  }
+  function buildFxAndSirenSection() {
+    const card = el("div", { className: "card dev-section" });
+    card.appendChild(cardTitle("Effects & Dub Siren"));
+    const grid = el("div", { className: "dev-grid-2col" });
+    const fxCol = el("div", { className: "dev-sub-panel" });
+    fxCol.appendChild(el("div", { className: "dev-sub-heading", textContent: "FX Sends & Returns" }));
+    const fx1Row = el("div", { className: "dev-fx-mode-row" });
+    fx1Row.appendChild(el("span", { className: "dev-pot-label", textContent: "FX1 Send Filter:" }));
+    const fx1Mids = el("button", { type: "button", className: "dev-mode-btn", textContent: "MIDS (250-4k)" });
+    const fx1Tops = el("button", { type: "button", className: "dev-mode-btn", textContent: "TOPS (>4k)" });
+    fx1Mids.addEventListener("click", () => {
+      const cur = fx1Mids.classList.contains("active");
+      fx1Mids.classList.toggle("active", !cur);
+      sendVirtualSwitch(4, !cur);
+    });
+    fx1Tops.addEventListener("click", () => {
+      const cur = fx1Tops.classList.contains("active");
+      fx1Tops.classList.toggle("active", !cur);
+      sendVirtualSwitch(5, !cur);
+    });
+    _switchButtons[4] = fx1Mids;
+    _switchButtons[5] = fx1Tops;
+    fx1Row.appendChild(fx1Mids);
+    fx1Row.appendChild(fx1Tops);
+    fxCol.appendChild(fx1Row);
+    const fx2Row = el("div", { className: "dev-fx-mode-row" });
+    fx2Row.appendChild(el("span", { className: "dev-pot-label", textContent: "FX2 Send Filter:" }));
+    const fx2Mids = el("button", { type: "button", className: "dev-mode-btn", textContent: "MIDS (250-4k)" });
+    const fx2Tops = el("button", { type: "button", className: "dev-mode-btn", textContent: "TOPS (>4k)" });
+    fx2Mids.addEventListener("click", () => {
+      const cur = fx2Mids.classList.contains("active");
+      fx2Mids.classList.toggle("active", !cur);
+      sendVirtualSwitch(7, !cur);
+    });
+    fx2Tops.addEventListener("click", () => {
+      const cur = fx2Tops.classList.contains("active");
+      fx2Tops.classList.toggle("active", !cur);
+      sendVirtualSwitch(6, !cur);
+    });
+    _switchButtons[7] = fx2Mids;
+    _switchButtons[6] = fx2Tops;
+    fx2Row.appendChild(fx2Mids);
+    fx2Row.appendChild(fx2Tops);
+    fxCol.appendChild(fx2Row);
+    fxCol.appendChild(createPotControl(58, "FX 1 Return Gain (IN 0)"));
+    fxCol.appendChild(createPotControl(59, "FX 2 Return Gain (IN 1)"));
+    grid.appendChild(fxCol);
+    const sirenCol = el("div", { className: "dev-sub-panel" });
+    sirenCol.appendChild(el("div", { className: "dev-sub-heading", textContent: "Monophonic Dub Siren" }));
+    sirenCol.appendChild(createPotControl(41, "Siren Type (Preset)"));
+    sirenCol.appendChild(createPotControl(42, "Modulation LFO"));
+    sirenCol.appendChild(createPotControl(43, "Siren Gain"));
+    sirenCol.appendChild(createPotControl(44, "Siren FX 1 Send"));
+    sirenCol.appendChild(createPotControl(45, "Siren FX 2 Send"));
+    const triggerBox = el("div", { className: "dev-siren-trigger-box" });
+    const trigBtn = el("button", {
+      type: "button",
+      className: "dev-siren-trig-btn",
+      textContent: "TRIGGER SIREN (Hold)"
+    });
+    const triggerOn = (e) => {
+      e.preventDefault();
+      trigBtn.classList.add("firing");
+      sendVirtualSwitch(8, true);
+    };
+    const triggerOff = (e) => {
+      e.preventDefault();
+      trigBtn.classList.remove("firing");
+      sendVirtualSwitch(8, false);
+    };
+    trigBtn.addEventListener("mousedown", triggerOn);
+    window.addEventListener("mouseup", triggerOff);
+    trigBtn.addEventListener("touchstart", triggerOn, { passive: false });
+    window.addEventListener("touchend", triggerOff, { passive: false });
+    const latchBtn = el("button", {
+      type: "button",
+      className: "dev-siren-latch-btn",
+      textContent: "Continuous Latch"
+    });
+    latchBtn.addEventListener("click", () => {
+      const isFiring = latchBtn.classList.toggle("active");
+      trigBtn.classList.toggle("firing", isFiring);
+      sendVirtualSwitch(8, isFiring);
+    });
+    _switchButtons[8] = latchBtn;
+    triggerBox.appendChild(trigBtn);
+    triggerBox.appendChild(latchBtn);
+    sirenCol.appendChild(triggerBox);
+    grid.appendChild(sirenCol);
+    card.appendChild(grid);
+    return card;
+  }
+  function buildDevControlPane() {
+    const pane = el("div", {
+      id: "pane-dev",
+      className: "tab-pane"
+    });
+    const banner = el("div", { className: "card dev-banner", id: "dev-mode-banner" });
+    _devModeBannerEl = banner;
+    const bannerTop = el("div", { className: "dev-banner-top" });
+    const titleDiv = el("div", { className: "dev-banner-title-box" });
+    const title = el("h2", { className: "dev-banner-title", textContent: "Virtual Control Mode (Development Mode)" });
+    const desc = el("p", { className: "dev-mode-desc" });
+    titleDiv.appendChild(title);
+    titleDiv.appendChild(desc);
+    bannerTop.appendChild(titleDiv);
+    const toggleBtn = el("button", {
+      type: "button",
+      id: "dev-mode-toggle-btn",
+      className: "dev-toggle-btn"
+    });
+    toggleBtn.addEventListener("click", () => {
+      const ctx = getContext();
+      sendUiDevMode(!ctx.uiDevMode);
+    });
+    _devModeToggleBtn = toggleBtn;
+    bannerTop.appendChild(toggleBtn);
+    banner.appendChild(bannerTop);
+    const actionsRow = el("div", { className: "dev-actions-row" });
+    const resetBtn = el("button", {
+      type: "button",
+      className: "dev-action-btn",
+      textContent: "Reset to Default Values"
+    });
+    resetBtn.addEventListener("click", () => {
+      sendVirtualReset();
+      for (let i = 0; i < POT_NAMES.length; i++) {
+        const name = POT_NAMES[i];
+        const defVal = isPotCentered(name) ? 0.5 : 0;
+        if (_potSliders[i]) _potSliders[i].value = defVal.toString();
+        if (_potValueLabels[i]) _potValueLabels[i].textContent = formatPotValue(name, defVal);
+      }
+      for (let i = 0; i < SWITCH_NAMES.length; i++) {
+        if (_switchButtons[i]) _switchButtons[i].classList.remove("active", "firing");
+      }
+    });
+    actionsRow.appendChild(resetBtn);
+    const muteBtn = el("button", {
+      type: "button",
+      className: "dev-action-btn",
+      textContent: "Mute Master (0%)"
+    });
+    muteBtn.addEventListener("click", () => {
+      if (_potSliders[24]) _potSliders[24].value = "0";
+      if (_potValueLabels[24]) _potValueLabels[24].textContent = "0%";
+      sendVirtualPot(24, 0, true);
+    });
+    actionsRow.appendChild(muteBtn);
+    const unkillBtn = el("button", {
+      type: "button",
+      className: "dev-action-btn",
+      textContent: "Disable All Kills"
+    });
+    unkillBtn.addEventListener("click", () => {
+      for (let i = 0; i < 4; i++) {
+        if (_switchButtons[i]) _switchButtons[i].classList.remove("active");
+        sendVirtualSwitch(i, false);
+      }
+    });
+    actionsRow.appendChild(unkillBtn);
+    banner.appendChild(actionsRow);
+    pane.appendChild(banner);
+    const controlsContainer = el("div", { id: "dev-controls-container", className: "dev-controls-container" });
+    _devControlsContainerEl = controlsContainer;
+    controlsContainer.appendChild(buildMasterSection());
+    controlsContainer.appendChild(buildChannelStripsSection());
+    controlsContainer.appendChild(buildMasterEqSection());
+    controlsContainer.appendChild(buildFxAndSirenSection());
+    pane.appendChild(controlsContainer);
+    updateDevModeVisuals(false);
+    return pane;
+  }
+  function updateDevControlsLive() {
+    const ctx = getContext();
+    if (!ctx || !ctx.uiDevMode) return;
+    if (ctx.potValues && ctx.potValues.length >= POT_NAMES.length) {
+      for (let i = 0; i < POT_NAMES.length; i++) {
+        if (i === _activeInteractingPot) continue;
+        const val = ctx.potValues[i];
+        const slider = _potSliders[i];
+        const valLbl = _potValueLabels[i];
+        if (slider && Math.abs(parseFloat(slider.value) - val) > 5e-3) {
+          slider.value = val.toString();
+          if (valLbl) valLbl.textContent = formatPotValue(POT_NAMES[i], val);
+        }
+      }
+    }
+    if (ctx.switchStates && ctx.switchStates.length >= SWITCH_NAMES.length) {
+      for (let i = 0; i < SWITCH_NAMES.length; i++) {
+        const btn = _switchButtons[i];
+        if (!btn) continue;
+        const isOn = ctx.switchStates[i] > 0.5;
+        if (i === 8) {
+          btn.classList.toggle("active", isOn);
+        } else {
+          btn.classList.toggle("active", isOn);
+        }
+      }
+    }
+  }
+
+  // gui/dom/fx.js
+  function sendBelaControl(payload) {
+    if (typeof Bela !== "undefined" && Bela.control && typeof Bela.control.send === "function") {
+      Bela.control.send(payload);
+    }
+  }
+  function buildFxPane() {
+    const pane = el("div", { className: "tab-pane", id: "tab-fx" });
+    const container = el("div", { className: "fx-pane-container" });
+    const hdr = el("div", { className: "fx-header-banner" });
+    const titleBox = el("div", { className: "fx-title-box" });
+    titleBox.appendChild(el("h2", { textContent: "DIGITAL MULTI-FX ENGINE", className: "fx-main-title" }));
+    titleBox.appendChild(el("p", {
+      textContent: "Divert channel FX sends to internal real-time DSP effects (SUB ROAR, ECHU DUB, TUBBY SPRING, BLACK ARK)",
+      className: "fx-subtitle"
+    }));
+    hdr.appendChild(titleBox);
+    container.appendChild(hdr);
+    container.appendChild(buildRoutingMatrixCard());
+    const fxGrid = el("div", { className: "fx-modules-grid" });
+    fxGrid.appendChild(buildSubRoarCard());
+    fxGrid.appendChild(buildEchuDubCard());
+    fxGrid.appendChild(buildTubbySpringCard());
+    fxGrid.appendChild(buildBlackArkPhaserCard());
+    container.appendChild(fxGrid);
+    pane.appendChild(container);
+    return pane;
+  }
+  function buildRoutingMatrixCard() {
+    const card = el("div", { className: "fx-card fx-card-routing" });
+    const cardHdr = el("div", { className: "fx-card-header" });
+    cardHdr.appendChild(el("div", { className: "fx-card-title", textContent: "\u{1F39B}\uFE0F CHANNEL SENDS ROUTING MATRIX" }));
+    cardHdr.appendChild(el("div", {
+      className: "fx-card-badge",
+      textContent: "Hardware Knobs \u2192 Internal DSP"
+    }));
+    card.appendChild(cardHdr);
+    const desc = el("p", {
+      className: "fx-routing-desc",
+      textContent: "Choose destination for each channel's FX Send. Selecting an internal digital effect diverts the signal from physical Jack Out directly into the DSP engine."
+    });
+    card.appendChild(desc);
+    const table = el("div", { className: "fx-matrix-table" });
+    const ctx = getContext();
+    ctx.fxRouteButtons = [];
+    const auxNames = ["AUX 1", "AUX 2", "AUX 3", "AUX 4"];
+    const destinations = [
+      { id: FX_DEST_HARDWARE, label: "HW OUT", cls: "dest-hw" },
+      { id: FX_DEST_SUB_ROAR, label: "SUB", cls: "dest-sub" },
+      { id: FX_DEST_ECHU_DUB, label: "ECHO", cls: "dest-dub" },
+      { id: FX_DEST_TUBBY_SPRING, label: "SPRING", cls: "dest-spring" },
+      { id: FX_DEST_BLACK_ARK, label: "PHASER", cls: "dest-phase" },
+      { id: FX_DEST_MUTE, label: "OFF", cls: "dest-mute" }
+    ];
+    auxNames.forEach((name, auxIdx) => {
+      const row = el("div", { className: "fx-matrix-row" });
+      const chLabel = el("div", { className: "fx-matrix-ch-label" });
+      chLabel.appendChild(el("span", { className: "fx-ch-badge", textContent: name }));
+      row.appendChild(chLabel);
+      const send1Col = el("div", { className: "fx-matrix-send-col" });
+      send1Col.appendChild(el("span", { className: "fx-send-title", textContent: "FX 1 SEND (OUT0)" }));
+      const grp1 = el("div", { className: "fx-pill-group" });
+      const send2Col = el("div", { className: "fx-matrix-send-col" });
+      send2Col.appendChild(el("span", { className: "fx-send-title", textContent: "FX 2 SEND (OUT1)" }));
+      const grp2 = el("div", { className: "fx-pill-group" });
+      [0, 1].forEach((sendIdx) => {
+        const grp = sendIdx === 0 ? grp1 : grp2;
+        destinations.forEach((dest) => {
+          const btn = el("button", {
+            type: "button",
+            className: `fx-pill-btn ${dest.cls}`,
+            textContent: dest.label
+          });
+          const isCurrent = ctx.fxRouting[auxIdx][sendIdx] === dest.id;
+          if (isCurrent) btn.classList.add("active");
+          btn.dataset.aux = auxIdx;
+          btn.dataset.send = sendIdx;
+          btn.dataset.dest = dest.id;
+          btn.addEventListener("click", () => {
+            ctx.fxRouting[auxIdx][sendIdx] = dest.id;
+            grp.querySelectorAll(".fx-pill-btn").forEach((b) => b.classList.remove("active"));
+            btn.classList.add("active");
+            sendBelaControl({
+              event: "custom",
+              fxRoute: { aux: auxIdx, send: sendIdx, dest: dest.id }
+            });
+          });
+          grp.appendChild(btn);
+          ctx.fxRouteButtons.push(btn);
+        });
+      });
+      send1Col.appendChild(grp1);
+      send2Col.appendChild(grp2);
+      row.appendChild(send1Col);
+      row.appendChild(send2Col);
+      table.appendChild(row);
+    });
+    card.appendChild(table);
+    return card;
+  }
+  function buildSubRoarCard() {
+    const ctx = getContext();
+    const card = el("div", { className: "fx-card fx-card-subroar" });
+    const cardHdr = el("div", { className: "fx-card-header" });
+    const titleGroup = el("div", { className: "fx-card-title-group" });
+    titleGroup.appendChild(el("div", { className: "fx-card-title sub-title", textContent: "\u26A1 SUB ROAR" }));
+    titleGroup.appendChild(el("div", { className: "fx-card-desc", textContent: "Sub-Harmonic Synthesizer & Roar Saturator (< 80 Hz)" }));
+    cardHdr.appendChild(titleGroup);
+    const pwrWrap = el("label", { className: "fx-toggle-wrap" });
+    const pwrCheck = el("input", { type: "checkbox", checked: ctx.subRoar.enabled });
+    pwrCheck.addEventListener("change", () => {
+      ctx.subRoar.enabled = pwrCheck.checked;
+      sendBelaControl({ event: "custom", subRoar: { enabled: pwrCheck.checked } });
+    });
+    pwrWrap.appendChild(pwrCheck);
+    pwrWrap.appendChild(el("span", { className: "fx-toggle-label", textContent: "ACTIVE" }));
+    cardHdr.appendChild(pwrWrap);
+    card.appendChild(cardHdr);
+    const meterBox = el("div", { className: "fx-meter-box" });
+    meterBox.appendChild(el("span", { className: "fx-meter-lbl", textContent: "SUB ACTIVITY" }));
+    const meterTrack = el("div", { className: "fx-meter-track" });
+    const meterFill = el("div", { className: "fx-meter-fill sub-fill" });
+    meterTrack.appendChild(meterFill);
+    meterBox.appendChild(meterTrack);
+    card.appendChild(meterBox);
+    ctx.fxSubMeterEl = meterFill;
+    const controls = el("div", { className: "fx-controls-list" });
+    controls.appendChild(createFxSlider({
+      label: "TUNE FREQUENCY",
+      unit: " Hz",
+      min: 30,
+      max: 90,
+      step: 1,
+      value: ctx.subRoar.tune,
+      onChange: (val) => {
+        ctx.subRoar.tune = val;
+        sendBelaControl({ event: "custom", subRoar: { tune: val } });
+      }
+    }));
+    controls.appendChild(createFxSlider({
+      label: "ROAR DRIVE (Saturation)",
+      unit: "%",
+      min: 0,
+      max: 100,
+      step: 1,
+      value: Math.round(ctx.subRoar.drive * 100),
+      onChange: (val) => {
+        const d = val / 100;
+        ctx.subRoar.drive = d;
+        sendBelaControl({ event: "custom", subRoar: { drive: d } });
+      }
+    }));
+    controls.appendChild(createFxSlider({
+      label: "DROP DECAY TIME",
+      unit: " ms",
+      min: 100,
+      max: 3e3,
+      step: 50,
+      value: ctx.subRoar.decay,
+      onChange: (val) => {
+        ctx.subRoar.decay = val;
+        sendBelaControl({ event: "custom", subRoar: { decay: val } });
+      }
+    }));
+    controls.appendChild(createFxSlider({
+      label: "STEEP LPF CUTOFF (24 dB/oct)",
+      unit: " Hz",
+      min: 40,
+      max: 120,
+      step: 1,
+      value: ctx.subRoar.cutoff,
+      onChange: (val) => {
+        ctx.subRoar.cutoff = val;
+        sendBelaControl({ event: "custom", subRoar: { cutoff: val } });
+      }
+    }));
+    controls.appendChild(createFxSlider({
+      label: "RETURN LEVEL",
+      unit: "%",
+      min: 0,
+      max: 150,
+      step: 1,
+      value: Math.round(ctx.subRoar.level * 100),
+      onChange: (val) => {
+        const l = val / 100;
+        ctx.subRoar.level = l;
+        sendBelaControl({ event: "custom", subRoar: { level: l } });
+      }
+    }));
+    card.appendChild(controls);
+    return card;
+  }
+  function buildEchuDubCard() {
+    const ctx = getContext();
+    const card = el("div", { className: "fx-card fx-card-echudub" });
+    const cardHdr = el("div", { className: "fx-card-header" });
+    const titleGroup = el("div", { className: "fx-card-title-group" });
+    titleGroup.appendChild(el("div", { className: "fx-card-title dub-title", textContent: "\u{1F4FC} ECHU DUB" }));
+    titleGroup.appendChild(el("div", { className: "fx-card-desc", textContent: "Space Tape Echo & Saturating Dub Delay" }));
+    cardHdr.appendChild(titleGroup);
+    const pwrWrap = el("label", { className: "fx-toggle-wrap" });
+    const pwrCheck = el("input", { type: "checkbox", checked: ctx.echuDub.enabled });
+    pwrCheck.addEventListener("change", () => {
+      ctx.echuDub.enabled = pwrCheck.checked;
+      sendBelaControl({ event: "custom", echuDub: { enabled: pwrCheck.checked } });
+    });
+    pwrWrap.appendChild(pwrCheck);
+    pwrWrap.appendChild(el("span", { className: "fx-toggle-label", textContent: "ACTIVE" }));
+    cardHdr.appendChild(pwrWrap);
+    card.appendChild(cardHdr);
+    const meterBox = el("div", { className: "fx-meter-box" });
+    meterBox.appendChild(el("span", { className: "fx-meter-lbl", textContent: "ECHO ACTIVITY" }));
+    const meterTrack = el("div", { className: "fx-meter-track" });
+    const meterFill = el("div", { className: "fx-meter-fill dub-fill" });
+    meterTrack.appendChild(meterFill);
+    meterBox.appendChild(meterTrack);
+    card.appendChild(meterBox);
+    ctx.fxDubMeterEl = meterFill;
+    const controls = el("div", { className: "fx-controls-list" });
+    let timeSliderRef = null;
+    let timeBadgeRef = null;
+    const timeCtrl = createFxSlider({
+      label: "DELAY TIME",
+      unit: " ms",
+      min: 40,
+      max: 1500,
+      step: 5,
+      value: ctx.echuDub.time,
+      onChange: (val) => {
+        ctx.echuDub.time = val;
+        sendBelaControl({ event: "custom", echuDub: { time: val } });
+      }
+    });
+    timeSliderRef = timeCtrl.querySelector("input[type=range]");
+    timeBadgeRef = timeCtrl.querySelector(".fx-slider-val");
+    controls.appendChild(timeCtrl);
+    const syncRow = el("div", { className: "fx-preset-row" });
+    const syncPresets = [
+      { label: "1/16 (125ms)", ms: 125 },
+      { label: "1/8 (250ms)", ms: 250 },
+      { label: "1/8d (375ms)", ms: 375 },
+      { label: "1/4 (500ms)", ms: 500 },
+      { label: "Dub Long (750ms)", ms: 750 }
+    ];
+    syncPresets.forEach((preset) => {
+      const pBtn = el("button", {
+        type: "button",
+        className: "fx-mini-btn",
+        textContent: preset.label
+      });
+      pBtn.addEventListener("click", () => {
+        ctx.echuDub.time = preset.ms;
+        if (timeSliderRef) timeSliderRef.value = preset.ms;
+        if (timeBadgeRef) timeBadgeRef.textContent = preset.ms + " ms";
+        sendBelaControl({ event: "custom", echuDub: { time: preset.ms } });
+      });
+      syncRow.appendChild(pBtn);
+    });
+    controls.appendChild(syncRow);
+    controls.appendChild(createFxSlider({
+      label: "FEEDBACK (>85% = Oscillation)",
+      unit: "%",
+      min: 0,
+      max: 115,
+      step: 1,
+      value: Math.round(ctx.echuDub.feedback * 100),
+      warnOver: 85,
+      onChange: (val) => {
+        const fb = val / 100;
+        ctx.echuDub.feedback = fb;
+        sendBelaControl({ event: "custom", echuDub: { feedback: fb } });
+      }
+    }));
+    controls.appendChild(createFxSlider({
+      label: "TAPE TONE (High-Cut)",
+      unit: " Hz",
+      min: 1e3,
+      max: 5e3,
+      step: 50,
+      value: ctx.echuDub.tone,
+      onChange: (val) => {
+        ctx.echuDub.tone = val;
+        sendBelaControl({ event: "custom", echuDub: { tone: val } });
+      }
+    }));
+    controls.appendChild(createFxSlider({
+      label: "TAPE FLUTTER & WOW",
+      unit: "%",
+      min: 0,
+      max: 100,
+      step: 1,
+      value: Math.round(ctx.echuDub.flutter * 100),
+      onChange: (val) => {
+        const fl = val / 100;
+        ctx.echuDub.flutter = fl;
+        sendBelaControl({ event: "custom", echuDub: { flutter: fl } });
+      }
+    }));
+    controls.appendChild(createFxSlider({
+      label: "RETURN LEVEL",
+      unit: "%",
+      min: 0,
+      max: 100,
+      step: 1,
+      value: Math.round(ctx.echuDub.level * 100),
+      onChange: (val) => {
+        const l = val / 100;
+        ctx.echuDub.level = l;
+        sendBelaControl({ event: "custom", echuDub: { level: l } });
+      }
+    }));
+    card.appendChild(controls);
+    const actionBox = el("div", { className: "fx-action-box dual-action" });
+    const killBtn = el("button", {
+      type: "button",
+      className: "fx-big-btn btn-kill-send" + (ctx.echuDub.kill ? " active" : ""),
+      textContent: ctx.echuDub.kill ? "\u26A1 SEND KILLED (Echo Looping)" : "\u2702\uFE0F KILL SEND (Cut Input)"
+    });
+    killBtn.addEventListener("click", () => {
+      ctx.echuDub.kill = !ctx.echuDub.kill;
+      killBtn.classList.toggle("active", ctx.echuDub.kill);
+      killBtn.textContent = ctx.echuDub.kill ? "\u26A1 SEND KILLED (Echo Looping)" : "\u2702\uFE0F KILL SEND (Cut Input)";
+      sendBelaControl({ event: "custom", echuDub: { kill: ctx.echuDub.kill } });
+    });
+    const clearBtn = el("button", {
+      type: "button",
+      className: "fx-big-btn btn-clear-delay",
+      textContent: "\u{1F9F9} CLEAR ECHO"
+    });
+    clearBtn.addEventListener("click", () => {
+      sendBelaControl({ event: "custom", echuDubClear: true });
+      clearBtn.classList.add("flash");
+      setTimeout(() => clearBtn.classList.remove("flash"), 300);
+    });
+    actionBox.appendChild(killBtn);
+    actionBox.appendChild(clearBtn);
+    card.appendChild(actionBox);
+    return card;
+  }
+  function buildTubbySpringCard() {
+    const ctx = getContext();
+    const card = el("div", { className: "fx-card fx-card-tubbyspring" });
+    const cardHdr = el("div", { className: "fx-card-header" });
+    const titleGroup = el("div", { className: "fx-card-title-group" });
+    titleGroup.appendChild(el("div", { className: "fx-card-title spring-title", textContent: "\u{1F30A} TUBBY SPRING" }));
+    titleGroup.appendChild(el("div", { className: "fx-card-desc", textContent: "King Tubby Space Reverb & Mechanical Spring Tank" }));
+    cardHdr.appendChild(titleGroup);
+    const pwrWrap = el("label", { className: "fx-toggle-wrap" });
+    const pwrCheck = el("input", { type: "checkbox", checked: ctx.tubbySpring.enabled });
+    pwrCheck.addEventListener("change", () => {
+      ctx.tubbySpring.enabled = pwrCheck.checked;
+      sendBelaControl({ event: "custom", tubbySpring: { enabled: pwrCheck.checked } });
+    });
+    pwrWrap.appendChild(pwrCheck);
+    pwrWrap.appendChild(el("span", { className: "fx-toggle-label", textContent: "ACTIVE" }));
+    cardHdr.appendChild(pwrWrap);
+    card.appendChild(cardHdr);
+    const meterBox = el("div", { className: "fx-meter-box" });
+    meterBox.appendChild(el("span", { className: "fx-meter-lbl", textContent: "SPRING ACTIVITY" }));
+    const meterTrack = el("div", { className: "fx-meter-track" });
+    const meterFill = el("div", { className: "fx-meter-fill spring-fill" });
+    meterTrack.appendChild(meterFill);
+    meterBox.appendChild(meterTrack);
+    card.appendChild(meterBox);
+    ctx.fxSpringMeterEl = meterFill;
+    const controls = el("div", { className: "fx-controls-list" });
+    controls.appendChild(createFxSlider({
+      label: "DWELL (Input Drive & Saturation)",
+      unit: "%",
+      min: 0,
+      max: 150,
+      step: 1,
+      value: Math.round(ctx.tubbySpring.dwell * 100),
+      onChange: (val) => {
+        const d = val / 100;
+        ctx.tubbySpring.dwell = d;
+        sendBelaControl({ event: "custom", tubbySpring: { dwell: d } });
+      }
+    }));
+    controls.appendChild(createFxSlider({
+      label: "SPRING DECAY / TENSION",
+      unit: "%",
+      min: 20,
+      max: 95,
+      step: 1,
+      value: Math.round(ctx.tubbySpring.decay * 100),
+      onChange: (val) => {
+        const d = val / 100;
+        ctx.tubbySpring.decay = d;
+        sendBelaControl({ event: "custom", tubbySpring: { decay: d } });
+      }
+    }));
+    controls.appendChild(createFxSlider({
+      label: "SPRING TONE (High Damping)",
+      unit: " Hz",
+      min: 1e3,
+      max: 5e3,
+      step: 50,
+      value: ctx.tubbySpring.tone,
+      onChange: (val) => {
+        ctx.tubbySpring.tone = val;
+        sendBelaControl({ event: "custom", tubbySpring: { tone: val } });
+      }
+    }));
+    controls.appendChild(createFxSlider({
+      label: "RETURN LEVEL",
+      unit: "%",
+      min: 0,
+      max: 100,
+      step: 1,
+      value: Math.round(ctx.tubbySpring.level * 100),
+      onChange: (val) => {
+        const l = val / 100;
+        ctx.tubbySpring.level = l;
+        sendBelaControl({ event: "custom", tubbySpring: { level: l } });
+      }
+    }));
+    card.appendChild(controls);
+    const actionBox = el("div", { className: "fx-action-box" });
+    const splashBtn = el("button", {
+      type: "button",
+      className: "fx-big-btn btn-spring-splash",
+      textContent: "\u{1F4A5} SPRING SPLASH (Kick Tank)"
+    });
+    splashBtn.addEventListener("click", () => {
+      sendBelaControl({ event: "custom", tubbySpringSplash: true });
+      splashBtn.classList.add("splash-active");
+      setTimeout(() => splashBtn.classList.remove("splash-active"), 250);
+    });
+    actionBox.appendChild(splashBtn);
+    card.appendChild(actionBox);
+    return card;
+  }
+  function buildBlackArkPhaserCard() {
+    const ctx = getContext();
+    const card = el("div", { className: "fx-card fx-card-blackark" });
+    const cardHdr = el("div", { className: "fx-card-header" });
+    const titleGroup = el("div", { className: "fx-card-title-group" });
+    titleGroup.appendChild(el("div", { className: "fx-card-title phase-title", textContent: "\u{1F300} BLACK ARK PHASER" }));
+    titleGroup.appendChild(el("div", { className: "fx-card-desc", textContent: "Lee Scratch Perry Mu-Tron Style Bi-Phase & Deep Dub Swirl" }));
+    cardHdr.appendChild(titleGroup);
+    const pwrWrap = el("label", { className: "fx-toggle-wrap" });
+    const pwrCheck = el("input", { type: "checkbox", checked: ctx.blackArk.enabled });
+    pwrCheck.addEventListener("change", () => {
+      ctx.blackArk.enabled = pwrCheck.checked;
+      sendBelaControl({ event: "custom", blackArk: { enabled: pwrCheck.checked } });
+    });
+    pwrWrap.appendChild(pwrCheck);
+    pwrWrap.appendChild(el("span", { className: "fx-toggle-label", textContent: "ACTIVE" }));
+    cardHdr.appendChild(pwrWrap);
+    card.appendChild(cardHdr);
+    const meterBox = el("div", { className: "fx-meter-box" });
+    meterBox.appendChild(el("span", { className: "fx-meter-lbl", textContent: "PHASER ACTIVITY" }));
+    const meterTrack = el("div", { className: "fx-meter-track" });
+    const meterFill = el("div", { className: "fx-meter-fill phase-fill" });
+    meterTrack.appendChild(meterFill);
+    meterBox.appendChild(meterTrack);
+    card.appendChild(meterBox);
+    ctx.fxPhaserMeterEl = meterFill;
+    const controls = el("div", { className: "fx-controls-list" });
+    let rateSliderRef = null;
+    let rateBadgeRef = null;
+    const rateCtrl = createFxSlider({
+      label: "SWEEP RATE",
+      unit: " Hz",
+      min: 0.05,
+      max: 5,
+      step: 0.05,
+      value: ctx.blackArk.rate,
+      onChange: (val) => {
+        ctx.blackArk.rate = val;
+        sendBelaControl({ event: "custom", blackArk: { rate: val } });
+      }
+    });
+    rateSliderRef = rateCtrl.querySelector("input[type=range]");
+    rateBadgeRef = rateCtrl.querySelector(".fx-slider-val");
+    controls.appendChild(rateCtrl);
+    const ratePresetRow = el("div", { className: "fx-preset-row" });
+    const ratePresets = [
+      { label: "Roots (0.1Hz)", hz: 0.1 },
+      { label: "Meditative (0.25Hz)", hz: 0.25 },
+      { label: "Skank (0.8Hz)", hz: 0.8 },
+      { label: "Fast Swirl (2.5Hz)", hz: 2.5 }
+    ];
+    ratePresets.forEach((preset) => {
+      const pBtn = el("button", {
+        type: "button",
+        className: "fx-mini-btn",
+        textContent: preset.label
+      });
+      pBtn.addEventListener("click", () => {
+        ctx.blackArk.rate = preset.hz;
+        if (rateSliderRef) rateSliderRef.value = preset.hz;
+        if (rateBadgeRef) rateBadgeRef.textContent = preset.hz + " Hz";
+        sendBelaControl({ event: "custom", blackArk: { rate: preset.hz } });
+      });
+      ratePresetRow.appendChild(pBtn);
+    });
+    controls.appendChild(ratePresetRow);
+    controls.appendChild(createFxSlider({
+      label: "SWEEP DEPTH",
+      unit: "%",
+      min: 0,
+      max: 100,
+      step: 1,
+      value: Math.round(ctx.blackArk.depth * 100),
+      onChange: (val) => {
+        const d = val / 100;
+        ctx.blackArk.depth = d;
+        sendBelaControl({ event: "custom", blackArk: { depth: d } });
+      }
+    }));
+    controls.appendChild(createFxSlider({
+      label: "FEEDBACK RESONANCE (\xB190%)",
+      unit: "%",
+      min: -90,
+      max: 90,
+      step: 1,
+      value: Math.round(ctx.blackArk.feedback * 100),
+      onChange: (val) => {
+        const fb = val / 100;
+        ctx.blackArk.feedback = fb;
+        sendBelaControl({ event: "custom", blackArk: { feedback: fb } });
+      }
+    }));
+    controls.appendChild(createFxSlider({
+      label: "RETURN LEVEL",
+      unit: "%",
+      min: 0,
+      max: 100,
+      step: 1,
+      value: Math.round(ctx.blackArk.level * 100),
+      onChange: (val) => {
+        const l = val / 100;
+        ctx.blackArk.level = l;
+        sendBelaControl({ event: "custom", blackArk: { level: l } });
+      }
+    }));
+    card.appendChild(controls);
+    const actionBox = el("div", { className: "fx-action-box" });
+    const stagesBtn = el("button", {
+      type: "button",
+      className: "fx-big-btn btn-stages" + (ctx.blackArk.stages === 12 ? " active" : ""),
+      textContent: ctx.blackArk.stages === 12 ? "\u2728 12-STAGE PHASER (Deep Cosmic Sweep)" : "\u{1F4FB} 6-STAGE PHASER (Vintage Swirl)"
+    });
+    stagesBtn.addEventListener("click", () => {
+      ctx.blackArk.stages = ctx.blackArk.stages === 12 ? 6 : 12;
+      stagesBtn.classList.toggle("active", ctx.blackArk.stages === 12);
+      stagesBtn.textContent = ctx.blackArk.stages === 12 ? "\u2728 12-STAGE PHASER (Deep Cosmic Sweep)" : "\u{1F4FB} 6-STAGE PHASER (Vintage Swirl)";
+      sendBelaControl({ event: "custom", blackArk: { stages: ctx.blackArk.stages } });
+    });
+    actionBox.appendChild(stagesBtn);
+    card.appendChild(actionBox);
+    return card;
+  }
+  function createFxSlider({ label, unit, min, max, step, value, warnOver, onChange }) {
+    const wrap = el("div", { className: "fx-slider-item" });
+    const topRow = el("div", { className: "fx-slider-top" });
+    topRow.appendChild(el("span", { className: "fx-slider-lbl", textContent: label }));
+    const badge = el("span", { className: "fx-slider-val", textContent: value + unit });
+    if (warnOver != null && value >= warnOver) {
+      badge.classList.add("warn");
+    }
+    topRow.appendChild(badge);
+    wrap.appendChild(topRow);
+    const slider = el("input", {
+      type: "range",
+      className: "fx-range-slider",
+      min,
+      max,
+      step: step || 1,
+      value
+    });
+    slider.addEventListener("input", () => {
+      const v = parseFloat(slider.value);
+      badge.textContent = v + unit;
+      if (warnOver != null) {
+        badge.classList.toggle("warn", v >= warnOver);
+      }
+      onChange(v);
+    });
+    wrap.appendChild(slider);
+    return wrap;
+  }
+  function updateFxLive() {
+    const ctx = getContext();
+    if (!ctx.fxState || ctx.fxState.length < 12) return;
+    const subPeak = ctx.fxState[0];
+    const echuPeak = ctx.fxState[1];
+    const springPeak = ctx.fxState[2];
+    const phaserPeak = ctx.fxState[3];
+    if (ctx.fxSubMeterEl) {
+      const pct = Math.min(100, Math.round(subPeak * 110));
+      ctx.fxSubMeterEl.style.width = pct + "%";
+      if (pct > 80) ctx.fxSubMeterEl.style.boxShadow = "0 0 10px #ffb300";
+      else ctx.fxSubMeterEl.style.boxShadow = "none";
+    }
+    if (ctx.fxDubMeterEl) {
+      const pct = Math.min(100, Math.round(echuPeak * 110));
+      ctx.fxDubMeterEl.style.width = pct + "%";
+      if (pct > 80) ctx.fxDubMeterEl.style.boxShadow = "0 0 10px #00e5ff";
+      else ctx.fxDubMeterEl.style.boxShadow = "none";
+    }
+    if (ctx.fxSpringMeterEl) {
+      const pct = Math.min(100, Math.round(springPeak * 110));
+      ctx.fxSpringMeterEl.style.width = pct + "%";
+      if (pct > 80) ctx.fxSpringMeterEl.style.boxShadow = "0 0 10px #f59e0b";
+      else ctx.fxSpringMeterEl.style.boxShadow = "none";
+    }
+    if (ctx.fxPhaserMeterEl) {
+      const pct = Math.min(100, Math.round(phaserPeak * 110));
+      ctx.fxPhaserMeterEl.style.width = pct + "%";
+      if (pct > 80) ctx.fxPhaserMeterEl.style.boxShadow = "0 0 10px #a855f7";
+      else ctx.fxPhaserMeterEl.style.boxShadow = "none";
+    }
+    if (ctx.fxRouteButtons && ctx.fxRouteButtons.length) {
+      for (let aux = 0; aux < 4; ++aux) {
+        for (let send = 0; send < 2; ++send) {
+          const sDest = Math.round(ctx.fxState[4 + aux * 2 + send]);
+          ctx.fxRouting[aux][send] = sDest;
+        }
+      }
+      ctx.fxRouteButtons.forEach((btn) => {
+        const aux = parseInt(btn.dataset.aux, 10);
+        const send = parseInt(btn.dataset.send, 10);
+        const dest = parseInt(btn.dataset.dest, 10);
+        btn.classList.toggle("active", ctx.fxRouting[aux][send] === dest);
+      });
+    }
+  }
+
   // gui/dom/shell.js
   var _currentTheme = "dark";
   var _themeToggleBtn = null;
@@ -5019,8 +6998,8 @@ border-radius:6px;background:transparent;
     if (!_themeToggleBtn) return;
     const isDark = _currentTheme === "dark";
     _themeToggleBtn.innerHTML = (isDark ? "\u{1F319}" : "\u2600\uFE0F") + '<span class="theme-btn-lbl"> ' + (isDark ? "Dark" : "Light") + "</span>";
-    _themeToggleBtn.title = isDark ? "Mode sombre actif (cliquer pour mode clair)" : "Mode clair actif (cliquer pour mode sombre)";
-    _themeToggleBtn.setAttribute("aria-label", isDark ? "Passer en mode clair" : "Passer en mode sombre");
+    _themeToggleBtn.title = isDark ? "Dark mode active (click for light mode)" : "Light mode active (click for dark mode)";
+    _themeToggleBtn.setAttribute("aria-label", isDark ? "Switch to light mode" : "Switch to dark mode");
   }
   function setTheme(theme) {
     _currentTheme = theme === "light" ? "light" : "dark";
@@ -5057,6 +7036,13 @@ border-radius:6px;background:transparent;
     });
     tempBadge.textContent = "--\xB0C";
     hdr.appendChild(tempBadge);
+    const devBadge = el("span", {
+      className: "badge dev-badge",
+      id: "dev-badge",
+      title: "UI Control Mode active"
+    });
+    devBadge.textContent = "DEV MODE";
+    hdr.appendChild(devBadge);
     const clipBadges = el("div", {
       id: "clip-badges",
       className: "clip-badges",
@@ -5069,7 +7055,7 @@ border-radius:6px;background:transparent;
     hdr.appendChild(logo);
     topChrome.appendChild(hdr);
     const tabBar = el("div", { id: "tab-bar" });
-    ["Live", "Mapping"].forEach((lbl, i) => {
+    ["Live", "FX", "Controls", "Mapping"].forEach((lbl, i) => {
       const btn = el("button", { className: "tab-btn" + (i === TAB_LIVE ? " active" : "") });
       btn.textContent = lbl;
       btn.dataset.tab = i;
@@ -5109,6 +7095,8 @@ border-radius:6px;background:transparent;
     root.appendChild(topChrome);
     const content = el("div", { id: "tab-content" });
     content.appendChild(buildLivePane());
+    content.appendChild(buildFxPane());
+    content.appendChild(buildDevControlPane());
     content.appendChild(buildMappingPane());
     root.appendChild(content);
     document.body.appendChild(root);
@@ -5233,15 +7221,21 @@ border-radius:6px;background:transparent;
         ctx.configMeta = b[6];
         syncMicInputs(b[6]);
         syncMasterStereo(b[6]);
+        syncUiDevMode(b[6]);
       }
       if (b[8]) syncCodecGains(b[8]);
       if (b[9] && b[9].length) updateTempBadge(b[9][0]);
       else updateTempBadge(void 0);
+      if (b[12]) {
+        ctx.fxState = b[12];
+        updateFxLive();
+      }
       if (ctx.consoleReady) updateConsole();
       updateSiren();
       updateSampler();
       updateSwitches();
       updateMasterEq();
+      updateDevControlsLive();
       if (ctx.meterAnimId == null) updateClipIndicators();
       updateBadge();
       if (ctx.currentTab === TAB_LIVE && isLiveTileOn(ctx.liveLayoutPrefs, "meters") && ctx.meterAnimId == null)
