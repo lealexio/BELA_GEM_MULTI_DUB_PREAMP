@@ -201,11 +201,24 @@ void HardwareManager::resetVirtualControlsToDefaults() {
   for (int i = 0; i < 16; ++i) {
     virtualSwitchActive_[i].store(false, std::memory_order_relaxed);
   }
+  const bool isDev = uiControlMode_.load(std::memory_order_relaxed);
   for (int i = 0; i < kAllNamedPotsCount; ++i) {
     const PotRef &ref = kAllNamedPots[i];
     if (!ref.name)
       continue;
     float defVal = ref.centered ? 0.5f : 0.0f;
+    if (isDev) {
+      if (strcmp(ref.name, "AUX1_INPUT_GAIN") == 0 ||
+          strcmp(ref.name, "AUX2_INPUT_GAIN") == 0 ||
+          strcmp(ref.name, "AUX3_INPUT_GAIN") == 0 ||
+          strcmp(ref.name, "AUX4_INPUT_GAIN") == 0) {
+        defVal = kDevModeAuxGain;
+      } else if (strcmp(ref.name, "SIREN_GAIN") == 0) {
+        defVal = kDevModeSirenGain;
+      } else if (strcmp(ref.name, "MASTER_GAIN") == 0) {
+        defVal = kDevModeMasterGain;
+      }
+    }
     setVirtualNamedPot(i, defVal);
   }
 }

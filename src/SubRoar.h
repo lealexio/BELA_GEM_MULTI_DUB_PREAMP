@@ -78,6 +78,9 @@ private:
     float decayCoeff_       = 0.999f;
     float lastCutoff_       = -1.f;
     float lastDecayMs_      = -1.f;
+    float lastDrive_        = -1.f;
+    float driveMult_        = 1.0f;
+    float normFactor_       = 1.0f;
     float peakOut_          = 0.f;
 
     BiquadFilter inBp_; // Input detector filter (400 Hz low-pass)

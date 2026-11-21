@@ -36,6 +36,19 @@ constexpr bool kDebug = false;
 constexpr float kDebugPotMinMove = 0.01f;
 
 // ---------------------------------------------------------------------------
+// UI Control / Developer Mode Defaults
+// ---------------------------------------------------------------------------
+
+/// Default input gain for AUX1..4 when in developer mode (50%).
+constexpr float kDevModeAuxGain = 0.5f;
+
+/// Default siren gain when in developer mode (50%).
+constexpr float kDevModeSirenGain = 0.5f;
+
+/// Default master volume when in developer mode (5%).
+constexpr float kDevModeMasterGain = 0.05f;
+
+// ---------------------------------------------------------------------------
 // Input clip & signal detection (Hardware LEDs via MCP23017)
 // ---------------------------------------------------------------------------
 
@@ -526,21 +539,24 @@ constexpr unsigned int kMcpReconnectIntervalMs = 1000;
 constexpr int kMcpMaxConsecutiveErrors = 5;
 
 // ---------------------------------------------------------------------------
-// Digital Multi-FX Engine (SUB ROAR, ECHU DUB, TUBBY SPRING, BLACK ARK)
+// Digital Multi-FX Engine (SUB ROAR, ECHO DUB, TUBBY SPRING, BLACK ARK)
 // ---------------------------------------------------------------------------
 
 /// Destination routing enum for channel FX sends.
 enum class FxSendDest : uint8_t {
-    Hardware    = 0,   ///< Physical output jack (OUT0 for FX1, OUT1 for FX2)
-    SubRoar     = 1,   ///< Internal digital FX 1 (SUB ROAR)
-    EchuDub     = 2,   ///< Internal digital FX 2 (ECHU DUB)
-    TubbySpring = 3,   ///< Internal digital FX 3 (TUBBY SPRING)
-    BlackArk    = 4,   ///< Internal digital FX 4 (BLACK ARK PHASER)
-    Mute        = 5    ///< Send disabled / muted
+    Hardware     = 0,   ///< Physical output jack (OUT0 for FX1, OUT1 for FX2)
+    SubRoar      = 1,   ///< Internal digital FX 1 (SUB ROAR)
+    EchoDub      = 2,   ///< Internal digital FX 2 (ECHO DUB)
+    EchuDub      = 2,   ///< Backward compatibility alias
+    TubbySpring  = 3,   ///< Internal digital FX 3 (TUBBY SPRING)
+    BlackArk     = 4,   ///< Internal digital FX 4 (BLACK ARK PHASER)
+    TapeDrive    = 5,   ///< Internal digital FX 5 (TAPE SATURATION & DRIVE)
+    ShimmerDelay = 6,   ///< Internal digital FX 6 (PITCH DELAY / SHIMMER DUB)
+    Mute         = 7    ///< Send disabled / muted
 };
 
-/// Size of GUI buffer 12 (4 effect peak meters + 8 AUX routing values)
-constexpr int kGuiFxStateBufSize = 12;
+/// Size of GUI buffer 12 (6 effect peak meters + 1 ducking reduction + 10 routing values [4 AUX + 1 Siren] = 17)
+constexpr int kGuiFxStateBufSize = 17;
 
 // --- SUB ROAR Defaults & Ranges ---
 constexpr float kSubRoarTuneMinHz       = 30.f;
@@ -558,17 +574,29 @@ constexpr float kSubRoarReturnDefault   = 1.0f;
 /// sub presence while maintaining clean headroom on the master bus.
 constexpr float kSubRoarGainScale       = 0.55f;
 
-// --- ECHU DUB Defaults & Ranges ---
-constexpr float kEchuDubMaxDelayMs      = 2000.f;
-constexpr float kEchuDubMinDelayMs      = 40.f;
-constexpr float kEchuDubDefaultDelayMs  = 375.f;
-constexpr float kEchuDubDefaultFeedback = 0.65f;
-constexpr float kEchuDubMaxFeedback     = 1.15f;
-constexpr float kEchuDubDefaultToneHz   = 2800.f;
-constexpr float kEchuDubMinToneHz       = 1000.f;
-constexpr float kEchuDubMaxToneHz       = 5000.f;
-constexpr float kEchuDubDefaultFlutter  = 0.20f;
-constexpr float kEchuDubReturnDefault   = 0.75f;
+// --- ECHO DUB Defaults & Ranges ---
+constexpr float kEchoDubMaxDelayMs      = 2000.f;
+constexpr float kEchoDubMinDelayMs      = 40.f;
+constexpr float kEchoDubDefaultDelayMs  = 375.f;
+constexpr float kEchoDubDefaultFeedback = 0.65f;
+constexpr float kEchoDubMaxFeedback     = 1.15f;
+constexpr float kEchoDubDefaultToneHz   = 2800.f;
+constexpr float kEchoDubMinToneHz       = 1000.f;
+constexpr float kEchoDubMaxToneHz       = 5000.f;
+constexpr float kEchoDubDefaultFlutter  = 0.20f;
+constexpr float kEchoDubReturnDefault   = 0.75f;
+
+// Aliases for backward compatibility
+constexpr float kEchuDubMaxDelayMs      = kEchoDubMaxDelayMs;
+constexpr float kEchuDubMinDelayMs      = kEchoDubMinDelayMs;
+constexpr float kEchuDubDefaultDelayMs  = kEchoDubDefaultDelayMs;
+constexpr float kEchuDubDefaultFeedback = kEchoDubDefaultFeedback;
+constexpr float kEchuDubMaxFeedback     = kEchoDubMaxFeedback;
+constexpr float kEchuDubDefaultToneHz   = kEchoDubDefaultToneHz;
+constexpr float kEchuDubMinToneHz       = kEchoDubMinToneHz;
+constexpr float kEchuDubMaxToneHz       = kEchoDubMaxToneHz;
+constexpr float kEchuDubDefaultFlutter  = kEchoDubDefaultFlutter;
+constexpr float kEchuDubReturnDefault   = kEchoDubReturnDefault;
 
 // --- TUBBY SPRING Defaults & Ranges ---
 constexpr float kTubbySpringDwellDefault   = 0.65f;
@@ -586,4 +614,33 @@ constexpr float kBlackArkFeedbackDefault   = 0.60f;
 constexpr int   kBlackArkStagesDefault     = 6;
 constexpr float kBlackArkReturnDefault     = 0.80f;
 constexpr float kBlackArkGainScale         = 0.75f;
+
+// --- TAPE SATURATION & DRIVE Defaults & Ranges ---
+constexpr float kTapeDriveDefault          = 0.35f;
+constexpr float kTapeWarmthMinHz           = 6000.f;
+constexpr float kTapeWarmthMaxHz           = 16000.f;
+constexpr float kTapeWarmthDefaultHz       = 11000.f;
+constexpr float kTapeAsymmetryDefault      = 0.30f;
+constexpr float kTapeReturnDefault         = 1.0f;
+constexpr float kTapeGainScale             = 0.80f;
+
+// --- SHIMMER DUB / PITCH DELAY Defaults & Ranges ---
+constexpr int   kShimmerSemitonesMin       = -12;
+constexpr int   kShimmerSemitonesMax       = 12;
+constexpr int   kShimmerSemitonesDefault   = 12;
+constexpr float kShimmerDelayMinMs         = 40.f;
+constexpr float kShimmerDelayMaxMs         = 1500.f;
+constexpr float kShimmerDelayDefaultMs     = 375.f;
+constexpr float kShimmerFeedbackDefault    = 0.55f;
+constexpr float kShimmerGrainSizeDefaultMs = 50.f;
+constexpr float kShimmerReturnDefault      = 0.75f;
+constexpr float kShimmerGainScale          = 0.75f;
+
+// --- DUB DUCKER Defaults & Ranges ---
+constexpr float kDubDuckerThresholdDefault = 0.08f;
+constexpr float kDubDuckerReleaseMinMs     = 50.f;
+constexpr float kDubDuckerReleaseMaxMs     = 1500.f;
+constexpr float kDubDuckerReleaseDefaultMs = 350.f;
+constexpr float kDubDuckerAmountDefault    = 0.75f;
+constexpr int   kDubDuckerSourceDefault    = 0; // 0: Siren, 1: Mic, 2: Master, 3: All
 

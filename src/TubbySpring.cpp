@@ -15,7 +15,7 @@ void TubbySpring::setup(float sampleRate) {
     lastToneHz_ = tone;
 
     // Calculate loop damping coefficient: 1-pole lowpass
-    float w = 2.0f * (float)M_PI * tone / sampleRate;
+    float w = kTwoPi * tone / sampleRate;
     loopToneCoeff_ = clamp(w / (w + 1.0f), 0.05f, 0.95f);
 
     // Splash decay rate: ~350 ms ring
@@ -66,33 +66,34 @@ float TubbySpring::getAndResetPeak() {
 }
 
 float TubbySpring::process(float inSample) {
-    bool en = enabled_.load(std::memory_order_relaxed);
-    if (!en && splashEnv_ <= 0.0001f) {
-        return 0.f;
-    }
-
-    // 1. Check virtual spring splash impact trigger
+    // 1. Check virtual spring splash impact trigger first
     if (splashTrigger_.load(std::memory_order_relaxed)) {
         splashTrigger_.store(false, std::memory_order_relaxed);
         splashEnv_ = 1.0f;
         splashPhase_ = 0.f;
     }
 
+    bool en = enabled_.load(std::memory_order_relaxed);
+    if (!en && splashEnv_ <= 0.0001f) {
+        return 0.f;
+    }
+
     // 2. Physical spring splash calculation
     float splashSample = 0.f;
     if (splashEnv_ > 0.0001f) {
-        splashPhase_ += 2.0f * (float)M_PI * 160.0f / sampleRate_;
-        if (splashPhase_ >= 2.0f * (float)M_PI) splashPhase_ -= 2.0f * (float)M_PI;
+        splashPhase_ += kTwoPi * 160.0f / sampleRate_;
+        if (splashPhase_ >= kTwoPi) splashPhase_ -= kTwoPi;
         float noise = fastRand();
-        splashSample = (noise * 0.45f + std::sin(splashPhase_) * 0.55f) * splashEnv_ * 1.8f;
+        splashSample = (noise * 0.45f + sinf(splashPhase_) * 0.55f) * splashEnv_ * 1.8f;
         splashEnv_ *= splashDecayCoeff_;
+        if (splashEnv_ < 1e-5f) splashEnv_ = 0.f;
     }
 
-    // 3. Input conditioning & non-linear magnetic coil drive
+    // 3. Input conditioning & non-linear magnetic coil drive (fast rational tanh)
     float filtered = inHpf_.process(inSample);
     filtered = inLpf_.process(filtered);
     float dwell = dwell_.load(std::memory_order_relaxed);
-    float driven = std::tanh((filtered * dwell * 2.2f) + splashSample);
+    float driven = fastTanh((filtered * dwell * 2.2f) + splashSample);
 
     // 4. Dispersive All-Pass Ladder (creates the transient metallic "chirp/boing")
     float xAp = driven;
@@ -102,7 +103,7 @@ float TubbySpring::process(float inSample) {
         if (rIdx < 0) rIdx += kMaxApLength;
         float delayed = apBuffer_[s][rIdx];
         float y = -kApFeedback * xAp + delayed;
-        apBuffer_[s][apIndex_[s]] = xAp + kApFeedback * y;
+        apBuffer_[s][apIndex_[s]] = flushDenormal(xAp + kApFeedback * y);
         if (++apIndex_[s] >= kMaxApLength) apIndex_[s] = 0;
         xAp = y;
     }
@@ -116,7 +117,7 @@ float TubbySpring::process(float inSample) {
     if (std::abs(tone - lastToneHz_) > 10.f) {
         lastToneHz_ = tone;
         outToneLpf_.setLowPass(tone, kButterworthQ, sampleRate_);
-        float w = 2.0f * (float)M_PI * tone / sampleRate_;
+        float w = kTwoPi * tone / sampleRate_;
         loopToneCoeff_ = clamp(w / (w + 1.0f), 0.05f, 0.95f);
     }
 
@@ -125,8 +126,9 @@ float TubbySpring::process(float inSample) {
         if (rIdx < 0) rIdx += kMaxCombLength;
         float delayed = combBuffer_[c][rIdx];
 
-        // 1-pole damping in feedback loop
+        // 1-pole damping in feedback loop with denormal protection
         combLp_[c] += loopToneCoeff_ * (delayed - combLp_[c]);
+        combLp_[c] = flushDenormal(combLp_[c]);
         float fb = combLp_[c] * decay;
         combBuffer_[c][combIndex_[c]] = xAp + fb;
         if (++combIndex_[c] >= kMaxCombLength) combIndex_[c] = 0;

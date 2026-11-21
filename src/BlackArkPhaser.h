@@ -71,6 +71,9 @@ private:
     float lfoPhase_ = 0.f;
     float lastStageOut_ = 0.f;
     float peakOut_ = 0.f;
+    float currentA_ = 0.5f;
+    float targetA_ = 0.5f;
+    int   subSampleCount_ = 0;
 
     // 1st-order all-pass delay registers (x[n-1] and y[n-1] per stage)
     float x1_[kMaxStages] = {};

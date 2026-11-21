@@ -475,6 +475,19 @@ bool ConfigLoader::load(const char *path) {
     return false;
   }
 
+  // --- developerMode ---
+  if (child(root, L"developerMode")) {
+    DEV_MODE = boolOf(root, L"developerMode", DEV_MODE);
+  } else if (child(root, L"devMode")) {
+    DEV_MODE = boolOf(root, L"devMode", DEV_MODE);
+  } else if (child(root, L"uiDevMode")) {
+    DEV_MODE = boolOf(root, L"uiDevMode", DEV_MODE);
+  }
+  if (DEV_MODE) {
+    fprintf(stderr,
+            "[ConfigLoader] Developer mode enabled (booting with virtual controls)\n");
+  }
+
   // --- mux ---
   JSONValue *muxObj = child(root, L"mux");
   if (muxObj) {

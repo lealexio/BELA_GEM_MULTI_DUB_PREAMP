@@ -2,13 +2,17 @@
 import {
     MASTER_EQ_CONFIG,
     SUB_ROAR_DEFAULTS,
-    ECHU_DUB_DEFAULTS,
+    ECHO_DUB_DEFAULTS,
     TUBBY_SPRING_DEFAULTS,
-    BLACK_ARK_DEFAULTS
+    BLACK_ARK_DEFAULTS,
+    TAPE_DRIVE_DEFAULTS,
+    SHIMMER_DELAY_DEFAULTS,
+    DUB_DUCKER_DEFAULTS
 } from './config.js';
 
 /** Creates the initial mutable GUI state object. */
 export function createState() {
+    const echoDubState = { ...ECHO_DUB_DEFAULTS };
     return {
         potValues: new Float32Array(60),
         switchStates: new Float32Array(9),
@@ -23,21 +27,29 @@ export function createState() {
         samplerListEl: null,
         samplerEmptyEl: null,
         audioLevels: new Float32Array(13),
-        fxState: new Float32Array(12),
+        fxState: new Float32Array(17),
         fxRouting: [
             [0, 0], // AUX 1 [Send 1, Send 2]
             [0, 0], // AUX 2 [Send 1, Send 2]
             [0, 0], // AUX 3 [Send 1, Send 2]
-            [0, 0]  // AUX 4 [Send 1, Send 2]
+            [0, 0], // AUX 4 [Send 1, Send 2]
+            [0, 0]  // SIREN [Send 1, Send 2]
         ],
         subRoar: { ...SUB_ROAR_DEFAULTS },
-        echuDub: { ...ECHU_DUB_DEFAULTS },
+        echoDub: echoDubState,
+        echuDub: echoDubState, // backward-compat alias
         tubbySpring: { ...TUBBY_SPRING_DEFAULTS },
         blackArk: { ...BLACK_ARK_DEFAULTS },
+        tapeDrive: { ...TAPE_DRIVE_DEFAULTS },
+        shimmerDelay: { ...SHIMMER_DELAY_DEFAULTS },
+        dubDucker: { ...DUB_DUCKER_DEFAULTS },
         fxSubMeterEl: null,
         fxDubMeterEl: null,
         fxSpringMeterEl: null,
         fxPhaserMeterEl: null,
+        fxTapeMeterEl: null,
+        fxShimmerMeterEl: null,
+        fxDuckerMeterEl: null,
         fxRouteButtons: [],
         potMapping: null,
         switchMapping: null,

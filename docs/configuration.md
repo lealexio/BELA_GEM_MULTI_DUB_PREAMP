@@ -13,6 +13,7 @@ If `config.json` is missing or invalid, the system automatically falls back to d
 
 ```json
 {
+  "developerMode": true,
   "mux": {
     "activeMux": 8
   },
@@ -62,6 +63,7 @@ If `config.json` is missing or invalid, the system automatically falls back to d
 ```
 
 ### 1.2 Channel Routing Options
+- **Developer Mode:** `"developerMode": true` — Boots in UI Virtual Control mode (no physical ADC/MUX scan). AUX1..4 Gain In are initialized to 50%, Siren Gain to 50%, and Master Volume to 5%.
 - **Mono Source:** `"channels": [2, -1]` (Input on channel 2 duplicated to left and right).
 - **Stereo Source:** `"channels": [2, 3]` (Left on channel 2, Right on channel 3).
 - **Mic Mode:** `"mic": true` — Bypasses master parametric EQ, filters, and kills for this channel.

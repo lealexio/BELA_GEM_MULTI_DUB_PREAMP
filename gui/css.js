@@ -1250,7 +1250,7 @@ border-radius:6px;background:transparent;
 }
 
 /* ===========================================================================
-   Digital Multi-FX Engine (SUB ROAR, ECHU DUB & Routing Matrix)
+   Digital Multi-FX Engine (SUB ROAR, ECHO DUB & Routing Matrix)
    =========================================================================== */
 .fx-pane-container {
   max-width: 1200px;
@@ -1413,6 +1413,30 @@ border-radius:6px;background:transparent;
   border-color: #7c3aed;
   box-shadow: 0 0 10px rgba(139, 92, 246, 0.5);
 }
+.fx-pill-btn.dest-tape.active {
+  background: #f97316;
+  color: #ffffff;
+  border-color: #ea580c;
+  box-shadow: 0 0 10px rgba(249, 115, 22, 0.5);
+}
+.fx-pill-btn.dest-flanger.active {
+  background: #06b6d4;
+  color: #000000;
+  border-color: #0891b2;
+  box-shadow: 0 0 10px rgba(6, 182, 212, 0.5);
+}
+.fx-pill-btn.dest-filter.active {
+  background: #10b981;
+  color: #000000;
+  border-color: #059669;
+  box-shadow: 0 0 10px rgba(16, 185, 129, 0.5);
+}
+.fx-pill-btn.dest-shimmer.active {
+  background: #eab308;
+  color: #000000;
+  border-color: #ca8a04;
+  box-shadow: 0 0 10px rgba(234, 179, 8, 0.5);
+}
 .fx-pill-btn.dest-chop.active {
   background: #ef4444;
   color: #ffffff;
@@ -1471,6 +1495,26 @@ border-radius:6px;background:transparent;
 .fx-meter-fill.phase-fill {
   background: linear-gradient(90deg, #6d28d9, #8b5cf6, #c084fc);
 }
+.fx-meter-fill.tape-fill {
+  background: linear-gradient(90deg, #c2410c, #ea580c, #fb923c);
+}
+.fx-meter-fill.ducker-fill {
+  background: linear-gradient(90deg, #991b1b, #ef4444, #f87171);
+}
+.fx-meter-fill.flanger-fill {
+  background: linear-gradient(90deg, #0e7490, #06b6d4, #67e8f9);
+}
+.fx-meter-fill.filter-fill {
+  background: linear-gradient(90deg, #047857, #10b981, #6ee7b7);
+}
+.fx-meter-fill.shimmer-fill {
+  background: linear-gradient(90deg, #a16207, #eab308, #fde047);
+}
+.tape-title { color: #f97316; }
+.ducker-title { color: #ef4444; }
+.flanger-title { color: #06b6d4; }
+.filter-title { color: #10b981; }
+.shimmer-title { color: #eab308; }
 .fx-meter-fill.chop-fill {
   background: linear-gradient(90deg, #b91c1c, #ef4444, #f87171);
 }
@@ -1588,21 +1632,6 @@ border-radius:6px;background:transparent;
   background: #06b6d4;
   color: #000000;
   border-color: #0891b2;
-}
-.btn-spring-splash {
-  background: linear-gradient(135deg, #d97706, #b45309);
-  color: #ffffff;
-  border: 1px solid #f59e0b;
-}
-.btn-spring-splash:hover {
-  filter: brightness(1.15);
-  box-shadow: 0 0 14px rgba(245, 158, 11, 0.6);
-}
-.btn-spring-splash.splash-active {
-  transform: scale(0.97);
-  background: #fbbf24;
-  color: #000000;
-  box-shadow: 0 0 24px #fbbf24;
 }
 .btn-stages {
   background: var(--bg-elev);

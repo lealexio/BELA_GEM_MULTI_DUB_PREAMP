@@ -38,7 +38,7 @@ MasterFx gMasterFx;  // left / mono master bus
 MasterFx gMasterFxR; // right master bus (used only when MASTER_OUTS_COUNT >= 2)
 MasterFx *const gMasterBuses[2] = {&gMasterFx, &gMasterFxR};
 
-DigitalFxManager gDigitalFxManager; // multi-effects digital engine (SUB ROAR & ECHU DUB)
+DigitalFxManager gDigitalFxManager; // multi-effects digital engine (SUB ROAR & ECHO DUB)
 
 struct AuxPotBinding {
   const PotRef &gain;
@@ -619,6 +619,7 @@ bool setup(BelaContext *context, void *userData) {
 
   // Load hardware mappings from JSON before any other initialisation.
   ConfigLoader::load(kGuiConfigPath);
+  gHardwareManager.setUiControlMode(DEV_MODE);
   gHardwareManager.resetVirtualControlsToDefaults();
 
   // Apply routing.*.gain defaults to the codec (same APIs as the Meters UI).
@@ -928,7 +929,11 @@ bool setup(BelaContext *context, void *userData) {
             int send = (int)itSend->second->AsNumber();
             int dest = (int)itDest->second->AsNumber();
             gDigitalFxManager.setAuxRouting(aux, send, static_cast<FxSendDest>(dest));
-            rt_printf("[GUI] FX Routing: AUX%d Send%d -> %d\n", aux + 1, send + 1, dest);
+            if (aux == 4) {
+              rt_printf("[GUI] FX Routing: SIREN Send%d -> %d\n", send + 1, dest);
+            } else {
+              rt_printf("[GUI] FX Routing: AUX%d Send%d -> %d\n", aux + 1, send + 1, dest);
+            }
           }
         }
 
@@ -957,40 +962,42 @@ bool setup(BelaContext *context, void *userData) {
           }
         }
 
-        // ECHU DUB parameters: { echuDub: { time, feedback, tone, flutter, level, kill, enabled } }
-        if (root.find(L"echuDub") != root.end() && root[L"echuDub"]->IsObject()) {
-          const JSONObject &eo = root[L"echuDub"]->AsObject();
+        // ECHO DUB parameters: { echoDub: { time, feedback, tone, flutter, level, kill, enabled } }
+        const wchar_t* dubKey = (root.find(L"echoDub") != root.end()) ? L"echoDub"
+                              : (root.find(L"echuDub") != root.end()) ? L"echuDub" : nullptr;
+        if (dubKey && root[dubKey]->IsObject()) {
+          const JSONObject &eo = root[dubKey]->AsObject();
           auto itTime = eo.find(L"time");
           if (itTime != eo.end() && itTime->second->IsNumber())
-            gDigitalFxManager.echuDub().setTime((float)itTime->second->AsNumber());
+            gDigitalFxManager.echoDub().setTime((float)itTime->second->AsNumber());
           auto itFb = eo.find(L"feedback");
           if (itFb != eo.end() && itFb->second->IsNumber())
-            gDigitalFxManager.echuDub().setFeedback((float)itFb->second->AsNumber());
+            gDigitalFxManager.echoDub().setFeedback((float)itFb->second->AsNumber());
           auto itTone = eo.find(L"tone");
           if (itTone != eo.end() && itTone->second->IsNumber())
-            gDigitalFxManager.echuDub().setTone((float)itTone->second->AsNumber());
+            gDigitalFxManager.echoDub().setTone((float)itTone->second->AsNumber());
           auto itFl = eo.find(L"flutter");
           if (itFl != eo.end() && itFl->second->IsNumber())
-            gDigitalFxManager.echuDub().setFlutter((float)itFl->second->AsNumber());
+            gDigitalFxManager.echoDub().setFlutter((float)itFl->second->AsNumber());
           auto itLevel = eo.find(L"level");
           if (itLevel != eo.end() && itLevel->second->IsNumber())
-            gDigitalFxManager.echuDub().setReturnGain((float)itLevel->second->AsNumber());
+            gDigitalFxManager.echoDub().setReturnGain((float)itLevel->second->AsNumber());
           auto itKill = eo.find(L"kill");
           if (itKill != eo.end()) {
             bool kill = itKill->second->IsBool() ? itKill->second->AsBool() : (itKill->second->AsNumber() > 0.5);
-            gDigitalFxManager.echuDub().setKillSend(kill);
+            gDigitalFxManager.echoDub().setKillSend(kill);
           }
           auto itEn = eo.find(L"enabled");
           if (itEn != eo.end()) {
             bool en = itEn->second->IsBool() ? itEn->second->AsBool() : (itEn->second->AsNumber() > 0.5);
-            gDigitalFxManager.echuDub().setEnabled(en);
+            gDigitalFxManager.echoDub().setEnabled(en);
           }
         }
 
-        // ECHU DUB buffer clear: { echuDubClear: true }
-        if (root.find(L"echuDubClear") != root.end()) {
-          gDigitalFxManager.echuDub().clear();
-          rt_printf("[GUI] ECHU DUB delay buffer cleared\n");
+        // ECHO DUB buffer clear: { echoDubClear: true } or { echuDubClear: true }
+        if (root.find(L"echoDubClear") != root.end() || root.find(L"echuDubClear") != root.end()) {
+          gDigitalFxManager.echoDub().clear();
+          rt_printf("[GUI] ECHO DUB delay buffer cleared\n");
         }
 
         // TUBBY SPRING parameters: { tubbySpring: { dwell, decay, tone, level, enabled } }
@@ -1043,6 +1050,80 @@ bool setup(BelaContext *context, void *userData) {
           if (itEn != bao.end()) {
             bool en = itEn->second->IsBool() ? itEn->second->AsBool() : (itEn->second->AsNumber() > 0.5);
             gDigitalFxManager.blackArk().setEnabled(en);
+          }
+        }
+
+        // TAPE DRIVE parameters: { tapeDrive: { drive, warmth, asymmetry, level, sirenInsert, enabled } }
+        if (root.find(L"tapeDrive") != root.end() && root[L"tapeDrive"]->IsObject()) {
+          const JSONObject &tdo = root[L"tapeDrive"]->AsObject();
+          auto itDrv = tdo.find(L"drive");
+          if (itDrv != tdo.end() && itDrv->second->IsNumber())
+            gDigitalFxManager.tapeDrive().setDrive((float)itDrv->second->AsNumber());
+          auto itWarm = tdo.find(L"warmth");
+          if (itWarm != tdo.end() && itWarm->second->IsNumber())
+            gDigitalFxManager.tapeDrive().setWarmth((float)itWarm->second->AsNumber());
+          auto itAsym = tdo.find(L"asymmetry");
+          if (itAsym != tdo.end() && itAsym->second->IsNumber())
+            gDigitalFxManager.tapeDrive().setAsymmetry((float)itAsym->second->AsNumber());
+          auto itLevel = tdo.find(L"level");
+          if (itLevel != tdo.end() && itLevel->second->IsNumber())
+            gDigitalFxManager.tapeDrive().setReturnGain((float)itLevel->second->AsNumber());
+          auto itEn = tdo.find(L"enabled");
+          if (itEn != tdo.end()) {
+            bool en = itEn->second->IsBool() ? itEn->second->AsBool() : (itEn->second->AsNumber() > 0.5);
+            gDigitalFxManager.tapeDrive().setEnabled(en);
+          }
+        }
+
+
+        // SHIMMER DELAY parameters: { shimmerDelay: { semitones, delayTime, feedback, grainSize, level, enabled } }
+        if (root.find(L"shimmerDelay") != root.end() && root[L"shimmerDelay"]->IsObject()) {
+          const JSONObject &sdo = root[L"shimmerDelay"]->AsObject();
+          auto itSemi = sdo.find(L"semitones");
+          if (itSemi != sdo.end() && itSemi->second->IsNumber())
+            gDigitalFxManager.shimmerDelay().setSemitones((int)itSemi->second->AsNumber());
+          auto itTime = sdo.find(L"delayTime");
+          if (itTime != sdo.end() && itTime->second->IsNumber())
+            gDigitalFxManager.shimmerDelay().setDelayTime((float)itTime->second->AsNumber());
+          auto itFb = sdo.find(L"feedback");
+          if (itFb != sdo.end() && itFb->second->IsNumber())
+            gDigitalFxManager.shimmerDelay().setFeedback((float)itFb->second->AsNumber());
+          auto itGrain = sdo.find(L"grainSize");
+          if (itGrain != sdo.end() && itGrain->second->IsNumber())
+            gDigitalFxManager.shimmerDelay().setGrainSize((float)itGrain->second->AsNumber());
+          auto itLevel = sdo.find(L"level");
+          if (itLevel != sdo.end() && itLevel->second->IsNumber())
+            gDigitalFxManager.shimmerDelay().setReturnGain((float)itLevel->second->AsNumber());
+          auto itEn = sdo.find(L"enabled");
+          if (itEn != sdo.end()) {
+            bool en = itEn->second->IsBool() ? itEn->second->AsBool() : (itEn->second->AsNumber() > 0.5);
+            gDigitalFxManager.shimmerDelay().setEnabled(en);
+          }
+        }
+        if (root.find(L"shimmerClear") != root.end()) {
+          gDigitalFxManager.shimmerDelay().clear();
+          rt_printf("[GUI] SHIMMER DELAY memory cleared\n");
+        }
+
+        // DUB DUCKER parameters: { dubDucker: { threshold, releaseMs, duckAmount, source, enabled } }
+        if (root.find(L"dubDucker") != root.end() && root[L"dubDucker"]->IsObject()) {
+          const JSONObject &ddo = root[L"dubDucker"]->AsObject();
+          auto itTh = ddo.find(L"threshold");
+          if (itTh != ddo.end() && itTh->second->IsNumber())
+            gDigitalFxManager.ducker().setThreshold((float)itTh->second->AsNumber());
+          auto itRel = ddo.find(L"releaseMs");
+          if (itRel != ddo.end() && itRel->second->IsNumber())
+            gDigitalFxManager.ducker().setReleaseMs((float)itRel->second->AsNumber());
+          auto itAmt = ddo.find(L"duckAmount");
+          if (itAmt != ddo.end() && itAmt->second->IsNumber())
+            gDigitalFxManager.ducker().setDuckAmount((float)itAmt->second->AsNumber());
+          auto itSrc = ddo.find(L"source");
+          if (itSrc != ddo.end() && itSrc->second->IsNumber())
+            gDigitalFxManager.ducker().setSource((int)itSrc->second->AsNumber());
+          auto itEn = ddo.find(L"enabled");
+          if (itEn != ddo.end()) {
+            bool en = itEn->second->IsBool() ? itEn->second->AsBool() : (itEn->second->AsNumber() > 0.5);
+            gDigitalFxManager.ducker().setEnabled(en);
           }
         }
 
@@ -1321,8 +1402,12 @@ void render(BelaContext *context, void *userData) {
     float sirenOut = gDubSiren.process();
     float samplerOut = gSamplePlayer.process();
 
-    // FX send 1: sum AUX channels + Siren + Sampler
-    float fxSend = fx1AuxSum + gDubSiren.fxOut() + gSamplePlayer.fxOut();
+    // Route Dub Siren FX sends dynamically (Source 4 = SIREN)
+    gDigitalFxManager.routeAux1Send(4, gDubSiren.fxOut(), fx1AuxSum);
+    gDigitalFxManager.routeAux2Send(4, gDubSiren.fxOut2(), fx2AuxSum);
+
+    // FX send 1: sum AUX channels + Siren + Sampler (if routed to Hardware, Siren is in fx1AuxSum)
+    float fxSend = fx1AuxSum + gSamplePlayer.fxOut();
     if (fxModeTops)
       fxSend = gFxHpf4k.process(fxSend); // > 4 kHz only
     else if (fxModeMids)
@@ -1330,8 +1415,8 @@ void render(BelaContext *context, void *userData) {
     else
       fxSend = gFxMidHpf.process(fxSend); // > 250 Hz (MID+TOP)
 
-    // FX send 2: mono FX bus → OUT3
-    float fxSend2 = fx2AuxSum + gDubSiren.fxOut2() + gSamplePlayer.fxOut2();
+    // FX send 2: mono FX bus → OUT1 (if routed to Hardware, Siren is in fx2AuxSum)
+    float fxSend2 = fx2AuxSum + gSamplePlayer.fxOut2();
     if (fx2ModeTops)
       fxSend2 = gFx2Hpf4k.process(fxSend2); // > 4 kHz only
     else if (fx2ModeMids)
@@ -1339,6 +1424,18 @@ void render(BelaContext *context, void *userData) {
           gFx2MidLpf.process(gFx2MidHpf.process(fxSend2)); // 250 Hz – 4 kHz
     else
       fxSend2 = gFx2MidHpf.process(fxSend2); // > 250 Hz (MID+TOP)
+
+    // Dry sums before master bus
+    float dryNormalL = 0.f, dryMicL = 0.f;
+    for (int ch = 0; ch < kNumAuxChannels; ++ch) {
+      if (kAuxConfigs[ch]->micMode)
+        dryMicL += dryL[ch];
+      else
+        dryNormalL += dryL[ch];
+    }
+
+    // Sidechain key detection: Siren/Sampler, Mic inputs, or Master bus
+    gDigitalFxManager.ducker().updateKey(sirenOut + samplerOut, dryMicL, dryNormalL + sirenOut + samplerOut);
 
     // FX returns: mono, added equally to both buses
     float fxReturn = gMasterFx.processFxReturn(
@@ -1352,13 +1449,6 @@ void render(BelaContext *context, void *userData) {
     // Routing controlled by kFxReturnPostMaster (SoftwareConfig.h).
     // Mic-mode AUX dry: bypasses ParamEq / HPF-LPF / kills; still gets GEQ +
     // BandTrim + gain.
-    float dryNormalL = 0.f, dryMicL = 0.f;
-    for (int ch = 0; ch < kNumAuxChannels; ++ch) {
-      if (kAuxConfigs[ch]->micMode)
-        dryMicL += dryL[ch];
-      else
-        dryNormalL += dryL[ch];
-    }
     dryNormalL += monoExtras;
 
     float rawOutL;
@@ -1626,14 +1716,17 @@ void render(BelaContext *context, void *userData) {
     gCpuTempBuf[0] = gCpuTempC.load(std::memory_order_relaxed);
     gGui.sendBuffer(9, gCpuTempBuf);
 
-    // Buffer 12: Digital FX state [0..3]=peaks (sub, echu, spring, phaser), [4..11]=AUX1..4 sends 1..2 routing
+    // Buffer 12: Digital FX state [0..5]=peaks, [6]=duck reduction, [7..16]=5 sources (4 AUX + 1 Siren) sends 1..2 routing
     gFxStateBuf[0] = gDigitalFxManager.subRoar().getAndResetPeak();
-    gFxStateBuf[1] = gDigitalFxManager.echuDub().getAndResetPeak();
+    gFxStateBuf[1] = gDigitalFxManager.echoDub().getAndResetPeak();
     gFxStateBuf[2] = gDigitalFxManager.tubbySpring().getAndResetPeak();
     gFxStateBuf[3] = gDigitalFxManager.blackArk().getAndResetPeak();
-    for (int c = 0; c < kNumAuxChannels; ++c) {
-      gFxStateBuf[4 + c * 2]     = (float)static_cast<int>(gDigitalFxManager.getAuxRouting(c, 0));
-      gFxStateBuf[4 + c * 2 + 1] = (float)static_cast<int>(gDigitalFxManager.getAuxRouting(c, 1));
+    gFxStateBuf[4] = gDigitalFxManager.tapeDrive().getAndResetPeak();
+    gFxStateBuf[5] = gDigitalFxManager.shimmerDelay().getAndResetPeak();
+    gFxStateBuf[6] = gDigitalFxManager.ducker().getGainReductionForMeter();
+    for (int c = 0; c < DigitalFxManager::kNumSendSources; ++c) {
+      gFxStateBuf[7 + c * 2]     = (float)static_cast<int>(gDigitalFxManager.getAuxRouting(c, 0));
+      gFxStateBuf[7 + c * 2 + 1] = (float)static_cast<int>(gDigitalFxManager.getAuxRouting(c, 1));
     }
     gGui.sendBuffer(12, gFxStateBuf);
 

@@ -6,7 +6,7 @@
 import { getContext } from '../context.js';
 import {
     POT_NAMES, SWITCH_NAMES, SIREN_PRESETS,
-    TAB_DEV, CONFIG_META, isPotCentered
+    TAB_DEV, CONFIG_META, isPotCentered, getPotDevDefault
 } from '../config.js';
 import { belaControlReady } from '../bela/connection.js';
 import { el, cardTitle } from './utils.js';
@@ -98,9 +98,9 @@ export function sendUiDevMode(enabled) {
     _devModeHoldUntil = Date.now() + DEV_MODE_HOLD_MS;
     updateDevModeVisuals(ctx.uiDevMode);
     if (ctx.uiDevMode) {
-        // Reset sliders to default on enabling dev mode: centered -> 0.5, all others -> 0.0
+        // Reset sliders to default on enabling dev mode
         for (let i = 0; i < POT_NAMES.length; i++) {
-            const defVal = isPotCentered(POT_NAMES[i]) ? 0.5 : 0.0;
+            const defVal = getPotDevDefault(POT_NAMES[i]);
             if (_potSliders[i]) _potSliders[i].value = defVal.toString();
             if (_potValueLabels[i]) _potValueLabels[i].textContent = formatPotValue(POT_NAMES[i], defVal);
         }
@@ -233,7 +233,7 @@ function formatPotValue(name, val) {
 function createPotControl(potIdx, label) {
     const name = POT_NAMES[potIdx];
     const isCentered = isPotCentered(name);
-    const defVal = isCentered ? 0.5 : 0.0;
+    const defVal = getPotDevDefault(name);
     const item = el('div', { className: 'dev-pot-item' });
 
     const topRow = el('div', { className: 'dev-pot-top' });
@@ -267,11 +267,12 @@ function createPotControl(potIdx, label) {
         sendVirtualPot(potIdx, v, false);
     });
 
-    // Double click snaps back to default (0.5 for centered, 0.0 for others)
+    // Double click snaps back to default
     slider.addEventListener('dblclick', () => {
-        slider.value = defVal.toString();
-        valLbl.textContent = formatPotValue(name, defVal);
-        sendVirtualPot(potIdx, defVal, true);
+        const dVal = getPotDevDefault(name);
+        slider.value = dVal.toString();
+        valLbl.textContent = formatPotValue(name, dVal);
+        sendVirtualPot(potIdx, dVal, true);
     });
 
     item.appendChild(slider);
@@ -641,10 +642,10 @@ export function buildDevControlPane() {
     });
     resetBtn.addEventListener('click', () => {
         sendVirtualReset();
-        // Optimistically apply defaults to UI: centered -> 0.5, all others -> 0.0
+        // Optimistically apply defaults to UI
         for (let i = 0; i < POT_NAMES.length; i++) {
             const name = POT_NAMES[i];
-            const defVal = isPotCentered(name) ? 0.5 : 0.0;
+            const defVal = getPotDevDefault(name);
             if (_potSliders[i]) _potSliders[i].value = defVal.toString();
             if (_potValueLabels[i]) _potValueLabels[i].textContent = formatPotValue(name, defVal);
         }

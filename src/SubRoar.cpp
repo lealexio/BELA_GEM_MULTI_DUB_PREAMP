@@ -94,6 +94,13 @@ float SubRoar::process(float inSample) {
         lastCutoff_ = cutoff;
     }
 
+    // Update cached drive multipliers when drive parameter changes
+    if (fabsf(drive - lastDrive_) > 0.005f) {
+        driveMult_ = 1.0f + drive * 3.5f;
+        normFactor_ = 1.0f / sqrtf(1.0f + 0.7f * drive);
+        lastDrive_ = drive;
+    }
+
     // 1. Broadband Musical Energy Follower
     // inBp_ filters down to 450 Hz, isolating rhythm and musical body
     float filtered = inBp_.process(inSample);
@@ -108,6 +115,7 @@ float SubRoar::process(float inSample) {
     } else {
         // Smooth exponential release governed by Decay parameter
         env_ *= decayCoeff_;
+        if (env_ < 1e-6f) env_ = 0.f; // Anti-denormal flush
     }
 
     // 2. Sub Sine Oscillator (running smoothly at targetTune)
@@ -123,16 +131,14 @@ float SubRoar::process(float inSample) {
 
     // 4. Combined signal + Auto-Gain Roar Drive
     float combined = oscOut * 1.3f + direct;
-    float driveMult = 1.0f + drive * 3.5f;
-    float preDriven = combined * driveMult;
+    float preDriven = combined * driveMult_;
 
-    // Saturation with subtle asymmetric 2nd harmonic
-    float driven = tanhf(preDriven);
+    // Saturation with subtle asymmetric 2nd harmonic (fast rational tanh)
+    float driven = fastTanh(preDriven);
     driven += 0.10f * (driven * driven);
 
     // Auto-gain compensation keeps output volume consistent across drive levels
-    float normFactor = 1.0f / sqrtf(1.0f + 0.7f * drive);
-    driven *= normFactor;
+    driven *= normFactor_;
 
     // 5. Steep 24 dB/oct Low-Pass filtering (< cutoff)
     float subFiltered = lp2_.process(lp1_.process(driven));

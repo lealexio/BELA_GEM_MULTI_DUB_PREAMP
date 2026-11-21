@@ -9,12 +9,15 @@ export const TAB_DEV = 2;
 export const TAB_MAPPING = 3;
 
 /** Digital FX send destinations. */
-export const FX_DEST_HARDWARE = 0;
-export const FX_DEST_SUB_ROAR = 1;
-export const FX_DEST_ECHU_DUB = 2;
+export const FX_DEST_HARDWARE     = 0;
+export const FX_DEST_SUB_ROAR     = 1;
+export const FX_DEST_ECHO_DUB     = 2;
+export const FX_DEST_ECHU_DUB     = FX_DEST_ECHO_DUB; // alias
 export const FX_DEST_TUBBY_SPRING = 3;
-export const FX_DEST_BLACK_ARK = 4;
-export const FX_DEST_MUTE = 5;
+export const FX_DEST_BLACK_ARK    = 4;
+export const FX_DEST_TAPE_DRIVE   = 5;
+export const FX_DEST_SHIMMER_DELAY= 6;
+export const FX_DEST_MUTE         = 7;
 
 export const SUB_ROAR_DEFAULTS = {
     tune: 45,
@@ -25,7 +28,7 @@ export const SUB_ROAR_DEFAULTS = {
     enabled: true
 };
 
-export const ECHU_DUB_DEFAULTS = {
+export const ECHO_DUB_DEFAULTS = {
     time: 375,
     feedback: 0.65,
     tone: 2800,
@@ -34,6 +37,7 @@ export const ECHU_DUB_DEFAULTS = {
     kill: false,
     enabled: true
 };
+export const ECHU_DUB_DEFAULTS = ECHO_DUB_DEFAULTS;
 
 export const TUBBY_SPRING_DEFAULTS = {
     dwell: 0.65,
@@ -49,6 +53,31 @@ export const BLACK_ARK_DEFAULTS = {
     feedback: 0.60,
     stages: 6,
     level: 0.80,
+    enabled: true
+};
+
+export const TAPE_DRIVE_DEFAULTS = {
+    drive: 0.35,
+    warmth: 11000,
+    asymmetry: 0.30,
+    level: 1.0,
+    enabled: true
+};
+
+export const SHIMMER_DELAY_DEFAULTS = {
+    semitones: 12,
+    delayTime: 375,
+    feedback: 0.55,
+    grainSize: 50,
+    level: 0.75,
+    enabled: true
+};
+
+export const DUB_DUCKER_DEFAULTS = {
+    threshold: 0.08,
+    releaseMs: 350,
+    duckAmount: 0.75,
+    source: 0, // 0: Siren, 1: Mic, 2: Master, 3: All
     enabled: true
 };
 
@@ -144,6 +173,23 @@ export function isPotCentered(name) {
     if (name.startsWith('BTRIM_')) return true;
     if (/^MASTER_EQ_.*_GAIN$/.test(name)) return true;
     return false;
+}
+
+/**
+ * Returns the default value for a virtual pot when in UI Control / Developer Mode.
+ * - AUX1..4 INPUT_GAIN: 0.5 (50%)
+ * - SIREN_GAIN: 0.5 (50%)
+ * - MASTER_GAIN: 0.05 (5%)
+ * - Bipolar centered controls: 0.5 (0 dB)
+ * - All other pots: 0.0
+ */
+export function getPotDevDefault(name) {
+    if (!name) return 0.0;
+    if (/^AUX\d_INPUT_GAIN$/.test(name)) return 0.5;
+    if (name === 'SIREN_GAIN') return 0.5;
+    if (name === 'MASTER_GAIN') return 0.05;
+    if (isPotCentered(name)) return 0.5;
+    return 0.0;
 }
 
 /** Switch names matching kGuiSwitchRefs[] order in render.cpp. */

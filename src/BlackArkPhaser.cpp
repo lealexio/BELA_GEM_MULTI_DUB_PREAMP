@@ -7,6 +7,9 @@ void BlackArkPhaser::setup(float sampleRate) {
     lfoPhase_ = 0.f;
     lastStageOut_ = 0.f;
     peakOut_ = 0.f;
+    currentA_ = 0.5f;
+    targetA_ = 0.5f;
+    subSampleCount_ = 0;
 
     for (int s = 0; s < kMaxStages; ++s) {
         x1_[s] = 0.f;
@@ -51,40 +54,44 @@ float BlackArkPhaser::process(float inSample) {
 
     // 1. Advance slow quadrature LFO
     float rate = rate_.load(std::memory_order_relaxed);
-    lfoPhase_ += 2.0f * (float)M_PI * rate / sampleRate_;
-    if (lfoPhase_ >= 2.0f * (float)M_PI) lfoPhase_ -= 2.0f * (float)M_PI;
-    float lfo = std::sin(lfoPhase_);
+    lfoPhase_ += kTwoPi * rate / sampleRate_;
+    if (lfoPhase_ >= kTwoPi) lfoPhase_ -= kTwoPi;
 
-    // 2. Modulate all-pass cutoff frequency (250 Hz to 4200 Hz)
-    float depth = depth_.load(std::memory_order_relaxed);
-    float mod = 0.5f * (1.0f + lfo * depth);
-    float sweepFreq = 250.0f * std::pow(16.8f, mod);
+    // 2. Sub-sampled all-pass coefficient calculation (every 8 samples)
+    // Slices CPU load of heavy powf() and float division by ~88% without audible difference
+    if (++subSampleCount_ >= 8) {
+        subSampleCount_ = 0;
+        float lfo = sinf(lfoPhase_);
+        float depth = depth_.load(std::memory_order_relaxed);
+        float mod = 0.5f * (1.0f + lfo * depth);
+        float sweepFreq = 250.0f * powf(16.8f, mod);
+        float w0 = kPi * sweepFreq / sampleRate_;
+        targetA_ = clamp((1.0f - w0) / (1.0f + w0), 0.05f, 0.95f);
+    }
+    // Continuous one-pole smoothing of coefficient
+    currentA_ += 0.125f * (targetA_ - currentA_);
+    float a = currentA_;
 
-    // 3. Bilinear 1st-order all-pass coefficient
-    float w0 = (float)M_PI * sweepFreq / sampleRate_;
-    float a = (1.0f - w0) / (1.0f + w0);
-    a = clamp(a, 0.05f, 0.95f);
-
-    // 4. Saturating feedback path (Lee Perry tape/console warmth)
+    // 3. Saturating feedback path (Lee Perry tape/console warmth via fast rational tanh)
     float fb = feedback_.load(std::memory_order_relaxed);
-    float inWithFb = std::tanh(inSample + fb * lastStageOut_);
+    float inWithFb = fastTanh(inSample + fb * lastStageOut_);
 
-    // 5. Cascade all-pass filter stages (6 or 12 poles)
+    // 4. Cascade all-pass filter stages (6 or 12 poles)
     int numStages = (stages_.load(std::memory_order_relaxed) >= 10) ? 12 : 6;
     float stageInput = inWithFb;
     for (int s = 0; s < numStages; ++s) {
         float y = a * stageInput + x1_[s] - a * y1_[s];
-        x1_[s] = stageInput;
-        y1_[s] = y;
+        x1_[s] = flushDenormal(stageInput);
+        y1_[s] = flushDenormal(y);
         stageInput = y;
     }
     lastStageOut_ = stageInput;
 
-    // 6. Notch combination (50% dry + 50% all-passed) & scaling
+    // 5. Notch combination (50% dry + 50% all-passed) & scaling
     float phased = 0.5f * (inSample + stageInput);
     float out = phased * returnGain_.load(std::memory_order_relaxed) * kBlackArkGainScale;
 
-    float absOut = std::abs(out);
+    float absOut = std::fabs(out);
     if (absOut > peakOut_) peakOut_ = absOut;
 
     return out;

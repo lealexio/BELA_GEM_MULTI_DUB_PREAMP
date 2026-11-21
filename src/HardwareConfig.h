@@ -47,6 +47,10 @@ extern int kActiveMux;
 // Potentiometer calibration — runtime (loaded from JSON "calibration")
 // ---------------------------------------------------------------------------
 
+/// When true, the device boots in UI virtual control (developer) mode,
+/// bypassing physical ADC/MUX scans and using virtual software controls.
+extern bool DEV_MODE;
+
 /// Voltage scaling factor: Bela ADC reference (4.096 V) ÷ MUX supply (3.3 V).
 extern float kPotScaleRecovery;
 
