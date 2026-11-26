@@ -9,16 +9,34 @@ import { layoutTopChrome, hideP5Dom } from './dom/utils.js';
 import { updateSiren, syncMicInputs } from './dom/live.js';
 import { updateSampler } from './dom/sampler.js';
 import { updateConsole, updateSwitches } from './dom/console.js';
-import { startMeterAnim, syncCodecGains, updateClipIndicators, clearClipBadges, syncMasterStereo } from './dom/meters.js';
+import { startMeterAnim, syncCodecGains, updateClipIndicators, clearClipBadges, syncMasterStereo, rebuildMetersSection } from './dom/meters.js';
 import { TAB_LIVE } from './config.js';
 import { isLiveTileOn } from './live-layout.js';
 import { updateMasterEq, resizeMasterEqCanvas } from './dom/masterEq.js';
-import { tryBuildMappingTable, updateDetectMode, fillRoutingFromConfigMeta, fillIgnoredPotsFromConfigMeta } from './dom/mapping.js';
+import { tryBuildMappingTable, updateDetectMode, updateMappingLive, fillRoutingFromConfigMeta, fillIgnoredPotsFromConfigMeta, applyBoardConfigToMapping, resetMappingStateForRestart, setMappingStatus } from './dom/mapping.js';
 import { syncUiDevMode, updateDevControlsLive } from './dom/devControl.js';
 import { updateFxLive } from './dom/fx.js';
+import { ensureConfigControlListener, fetchBoardConfigJson } from './board-config.js';
 import {
     updateBelaRxWatchdog, isBelaConnected, updateBadge, updateTempBadge
 } from './bela/connection.js';
+
+/** Fetches Bela's config.json over HTTP and hydrates Mapping + Meters dynamically. */
+function syncBoardConfigFromBela(isAfterRestart = false) {
+    fetchBoardConfigJson().then(res => {
+        if (!res.ok || !res.parsed) return;
+        const ctx = getContext();
+        ctx.boardConfigJson = res.parsed;
+        ctx.boardConfigRawText = res.text;
+        if (!ctx.mappingUserEdited) {
+            applyBoardConfigToMapping(res.parsed, {
+                markDirty: false,
+                applyControls: !!isAfterRestart
+            });
+        }
+        rebuildMetersSection();
+    });
+}
 
 export default function sketch(p) {
     initContext(createState());
@@ -27,6 +45,8 @@ export default function sketch(p) {
         injectCSS();
         buildUI();
         layoutTopChrome();
+        ensureConfigControlListener();
+        syncBoardConfigFromBela(false);
 
         if (typeof p.noCanvas === 'function')
             p.noCanvas();
@@ -54,14 +74,35 @@ export default function sketch(p) {
             return;
         }
 
+        ensureConfigControlListener();
         const b = Bela.data.buffers;
         updateBelaRxWatchdog(b);
 
         if (!isBelaConnected()) {
+            if (ctx.awaitingRestartReconnect) {
+                if (!ctx.sawOfflineDuringRestart) {
+                    ctx.sawOfflineDuringRestart = true;
+                    ctx.restartOfflinePerfMs = performance.now();
+                }
+                ctx.potMapping = null;
+                ctx.switchMapping = null;
+                ctx.configMeta = null;
+            }
             updateBadge();
             updateTempBadge(undefined);
             clearClipBadges();
             return;
+        }
+
+        if (ctx.awaitingRestartReconnect && ctx.sawOfflineDuringRestart &&
+            b[4] && b[4].ts > (ctx.restartOfflinePerfMs || 0) &&
+            b[5] && b[5].ts > (ctx.restartOfflinePerfMs || 0) &&
+            b[6] && b[6].ts > (ctx.restartOfflinePerfMs || 0)) {
+            ctx.awaitingRestartReconnect = false;
+            ctx.sawOfflineDuringRestart = false;
+            resetMappingStateForRestart();
+            syncBoardConfigFromBela(true);
+            setMappingStatus('Bela restarted & config reloaded ✓', false);
         }
 
         if (b[0]) {
@@ -150,6 +191,7 @@ export default function sketch(p) {
         updateSwitches();
         updateMasterEq();
         updateDevControlsLive();
+        updateMappingLive();
         // updateClipIndicators() is already called inside updateMetersFrame() (rAF loop).
         // Call it here only when the meter rAF is NOT running (meters tile hidden / tab inactive).
         if (ctx.meterAnimId == null) updateClipIndicators();

@@ -4,9 +4,9 @@ import { MAX_SAMPLES, MAX_SAMPLE_NAME_LEN, SAMPLER_PAD_LABEL_LEN } from '../conf
 import { belaControlReady } from '../bela/connection.js';
 import { el, cardTitle } from './utils.js';
 
-const EMPTY_MSG = 'Create a samples folder in the project and add WAV or MP3 files.';
-const WAIT_MSG  = 'Waiting for sampler data from Bela…';
-const NONE_MSG  = 'No WAV/MP3 files found in samples/.';
+const EMPTY_MSG = 'No samples folder found (src/samples/).';
+const WAIT_MSG  = 'Waiting for Bela…';
+const NONE_MSG  = 'No WAV/MP3 files in src/samples/.';
 
 /**
  * Decodes fixed-width ASCII floats from GUI buffer 11 into filename strings.
@@ -91,13 +91,12 @@ function _rebuildList(names) {
 export function buildSamplerCard() {
     const card = el('div', { className: 'card live-tile' });
     card.dataset.tile = 'sampler';
-    card.appendChild(cardTitle('Sampler'));
+    const hdr = el('div', { className: 'card-header-row' });
+    hdr.appendChild(cardTitle('Sampler'));
+    hdr.appendChild(el('span', { className: 'card-meta', textContent: 'Siren bus' }));
+    card.appendChild(hdr);
 
     const body = el('div', { id: 'sampler-body' });
-
-    const hint = el('div', { className: 'sampler-hint' });
-    hint.textContent = 'Uses Siren gain & FX send';
-    body.appendChild(hint);
 
     const empty = el('div', { id: 'sampler-empty', className: 'sampler-empty' });
     empty.textContent = EMPTY_MSG;

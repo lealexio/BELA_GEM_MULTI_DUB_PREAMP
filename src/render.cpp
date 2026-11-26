@@ -20,12 +20,16 @@ https://bela.io
 #include <Bela.h>
 #include <algorithm>
 #include <atomic>
+#include <cerrno>
 #include <cmath>
 #include <csignal>
 #include <cstdio>
 #include <cstring>
 #include <libraries/Gui/Gui.h>
 #include <libraries/Scope/Scope.h>
+#include <string>
+#include <sys/types.h>
+#include <sys/wait.h>
 #include <unistd.h>
 #include <vector>
 
@@ -102,6 +106,15 @@ static BiquadFilter gMonoAirFilter;
 // Smooth crossfade state between Stereo (1.f) and Mono (0.f).
 static float gStereoMonoMix = 1.f;
 static float gStereoMonoSlewCoeff = 0.f;
+
+// Direct FX Send Trigger state (driven from GUI FX tab, works in Physical & Dev mode).
+static std::atomic<bool> gFxSendTrigger[DigitalFxManager::kNumSendSources][2];
+static std::atomic<bool> gFxTestToneEnabled{false};
+static std::atomic<bool> gSirenFxTrigger{false};
+static float gFxTestTonePhase = 0.f;
+static float gFxTestToneEnv[kNumAuxChannels][2] = {};
+static float gFxTestAttackCoeff = 0.f;
+static float gFxTestReleaseCoeff = 0.f;
 
 Scope scope;
 
@@ -191,6 +204,8 @@ static std::atomic<bool> gForceStaticMetaSend{false};
 
 // Path built in setup() from context->projectName — never hardcoded.
 static char kGuiConfigPath[256] = {};
+static char kGuiProjectName[128] = {};
+static std::atomic<bool> gRestartOrRebootPending{false};
 
 // Switch globals in the same order as the JS SWITCH_NAMES array.
 static SwitchRef *const kGuiSwitchRefs[9] = {
@@ -215,8 +230,15 @@ static void fillSamplerNamesBuf() {
   }
 }
 
-/** Fills gConfigMetaBuf with mux/calibration/routing/ignoredPots (buffer 6
- * layout). */
+/** Encodes one ClipLedRef into an exact integer float (-1 = disabled). */
+static float encodeClipLedMeta(const ClipLedRef &ref) {
+  if (!ref.enabled || ref.pin < 0 || ref.pin > 7)
+    return -1.f;
+  return (float)((ref.portB ? 8 : 0) + ref.pin + (ref.activeLow ? 16 : 0));
+}
+
+/** Fills gConfigMetaBuf with mux/calibration/routing/ignoredPots/boot/clipLeds
+ * (buffer 6 layout). */
 static void fillConfigMetaBuf() {
   gConfigMetaBuf.assign(kGuiConfigMetaSize, 0.f);
   gConfigMetaBuf[0] = (float)kActiveMux;
@@ -252,6 +274,18 @@ static void fillConfigMetaBuf() {
     gConfigMetaBuf[35 + i * 2 + 0] = (float)kIgnoredPots[i].mux;
     gConfigMetaBuf[35 + i * 2 + 1] = (float)kIgnoredPots[i].pot;
   }
+  // Boot developer mode (distinct from live UI_DEV_MODE) & Clip LEDs
+  gConfigMetaBuf[kGuiConfigMetaExtraBase] = DEV_MODE ? 1.f : 0.f;
+  gConfigMetaBuf[kGuiConfigMetaExtraBase + 1] =
+      encodeClipLedMeta(CLIP_LED_MASTER);
+  gConfigMetaBuf[kGuiConfigMetaExtraBase + 2] =
+      encodeClipLedMeta(CLIP_LED_AUX1);
+  gConfigMetaBuf[kGuiConfigMetaExtraBase + 3] =
+      encodeClipLedMeta(CLIP_LED_AUX2);
+  gConfigMetaBuf[kGuiConfigMetaExtraBase + 4] =
+      encodeClipLedMeta(CLIP_LED_AUX3);
+  gConfigMetaBuf[kGuiConfigMetaExtraBase + 5] =
+      encodeClipLedMeta(CLIP_LED_AUX4);
 }
 
 // ---------------------------------------------------------------------------
@@ -607,6 +641,86 @@ static void printChangedSwitches() {
   initialised = true;
 }
 
+/** Converts an ASCII string to wstring safely (masks bytes >= 0x80 to '?'). */
+static std::wstring asciiToWstring(const std::string &s) {
+  std::wstring out;
+  out.reserve(s.size());
+  for (unsigned char c : s)
+    out.push_back((c < 0x80) ? (wchar_t)c : L'?');
+  return out;
+}
+
+/** Sends a config-action ACK JSON back to the GUI control WebSocket.
+ *  Must be called from inside the Seasocks gui_control callback thread. */
+static void sendConfigActionAck(const char *action, bool ok,
+                                const std::string &reqId,
+                                const std::string &error = "",
+                                const std::string &content = "") {
+  JSONObject ack;
+  ack[L"event"] = new JSONValue(L"custom");
+  ack[L"configAction"] = new JSONValue(asciiToWstring(action));
+  ack[L"ok"] = new JSONValue(ok);
+  if (!reqId.empty())
+    ack[L"reqId"] = new JSONValue(asciiToWstring(reqId));
+  if (!error.empty())
+    ack[L"error"] = new JSONValue(asciiToWstring(error));
+  if (!content.empty())
+    ack[L"content"] = new JSONValue(asciiToWstring(content));
+  JSONValue *val = new JSONValue(ack);
+  gGui.sendControl(val, WSServer::kThreadCallback);
+  delete val;
+}
+
+/** Validates project name contains only safe path characters. */
+static bool isValidProjectName(const char *name) {
+  if (!name || name[0] == '\0')
+    return false;
+  if (std::strstr(name, "..") != nullptr)
+    return false;
+  for (const char *p = name; *p != '\0'; ++p) {
+    char c = *p;
+    bool ok = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+              (c >= '0' && c <= '9') || c == '_' || c == '-' || c == '.';
+    if (!ok)
+      return false;
+  }
+  return true;
+}
+
+/**
+ * Spawns a detached transient systemd unit via `systemd-run --no-block --collect`
+ * so the helper survives both `bela_startup.service` and `bela_daemon.service`
+ * cgroup tear-down. Non-RT only.
+ */
+static bool spawnTransientSystemdUnit(const char *scriptBody, const char *arg1,
+                                      const char *arg2) {
+  pid_t pid = ::fork();
+  if (pid < 0)
+    return false;
+  if (pid == 0) {
+    // Child: close inherited FDs (WebSocket, I2C, etc.) before exec.
+    for (int fd = 3; fd < 1024; ++fd)
+      ::close(fd);
+    const char *const argv[] = {"/usr/bin/systemd-run",
+                                "--no-block",
+                                "--collect",
+                                "--quiet",
+                                "/bin/sh",
+                                "-c",
+                                scriptBody,
+                                "_",
+                                arg1,
+                                arg2 ? arg2 : "",
+                                nullptr};
+    ::execv("/usr/bin/systemd-run", const_cast<char *const *>(argv));
+    _exit(127);
+  }
+  int status = 0;
+  while (::waitpid(pid, &status, 0) < 0 && errno == EINTR) {
+  }
+  return WIFEXITED(status) && WEXITSTATUS(status) == 0;
+}
+
 // ---------------------------------------------------------------------------
 // Bela callbacks
 // ---------------------------------------------------------------------------
@@ -614,6 +728,7 @@ static void printChangedSwitches() {
 bool setup(BelaContext *context, void *userData) {
   // Build project-directory paths from the runtime project name so the code
   // works regardless of what the project was named in Bela IDE.
+  snprintf(kGuiProjectName, sizeof(kGuiProjectName), "%s", context->projectName);
   snprintf(kGuiConfigPath, sizeof(kGuiConfigPath),
            "/root/Bela/projects/%s/config.json", context->projectName);
 
@@ -679,6 +794,22 @@ bool setup(BelaContext *context, void *userData) {
   gDubSiren.setup(context->audioSampleRate);
   gSamplePlayer.setup(context->audioSampleRate, context->projectName);
   gDigitalFxManager.setup(context->audioSampleRate);
+
+  for (int s = 0; s < DigitalFxManager::kNumSendSources; ++s) {
+    gFxSendTrigger[s][0].store(false, std::memory_order_relaxed);
+    gFxSendTrigger[s][1].store(false, std::memory_order_relaxed);
+  }
+  gFxTestToneEnabled.store(false, std::memory_order_relaxed);
+  gSirenFxTrigger.store(false, std::memory_order_relaxed);
+  gFxTestTonePhase = 0.f;
+  for (int ch = 0; ch < kNumAuxChannels; ++ch) {
+    gFxTestToneEnv[ch][0] = 0.f;
+    gFxTestToneEnv[ch][1] = 0.f;
+  }
+  gFxTestAttackCoeff =
+      onePoleLpCoeff(kFxTestToneAttackMs, context->audioSampleRate);
+  gFxTestReleaseCoeff =
+      onePoleLpCoeff(kFxTestToneReleaseMs, context->audioSampleRate);
 
   float sr = context->audioSampleRate;
   gFxHpf4k.setHighPass(kFxMidHighFreq, kFxFilterQ, sr); // FX1 TOPS: HPF @ 4 kHz
@@ -937,6 +1068,56 @@ bool setup(BelaContext *context, void *userData) {
           }
         }
 
+        // Direct FX Send Trigger from GUI FX tab:
+        //   { fxTrigger: { aux: 0..4, send: 0..1, active: bool, testTone?: bool } }
+        if (root.find(L"fxTrigger") != root.end() && root[L"fxTrigger"]->IsObject()) {
+          const JSONObject &ft = root[L"fxTrigger"]->AsObject();
+          auto itAux = ft.find(L"aux");
+          auto itSend = ft.find(L"send");
+          auto itAct = ft.find(L"active");
+          auto itTone = ft.find(L"testTone");
+          if (itTone != ft.end()) {
+            bool tt = itTone->second->IsBool()
+                          ? itTone->second->AsBool()
+                          : (itTone->second->AsNumber() > 0.5);
+            gFxTestToneEnabled.store(tt, std::memory_order_relaxed);
+          }
+          if (itAux != ft.end() && itAux->second->IsNumber() &&
+              itSend != ft.end() && itSend->second->IsNumber() &&
+              itAct != ft.end()) {
+            int aux = (int)itAux->second->AsNumber();
+            int send = (int)itSend->second->AsNumber();
+            bool active = itAct->second->IsBool()
+                              ? itAct->second->AsBool()
+                              : (itAct->second->AsNumber() > 0.5);
+            if (aux >= 0 && aux < DigitalFxManager::kNumSendSources &&
+                (send == 0 || send == 1)) {
+              gFxSendTrigger[aux][send].store(active, std::memory_order_relaxed);
+              if (aux == 4) {
+                bool anySiren =
+                    gFxSendTrigger[4][0].load(std::memory_order_relaxed) ||
+                    gFxSendTrigger[4][1].load(std::memory_order_relaxed);
+                gSirenFxTrigger.store(anySiren, std::memory_order_relaxed);
+              }
+            }
+          }
+        }
+
+        if (root.find(L"fxTestTone") != root.end()) {
+          bool tt = root[L"fxTestTone"]->IsBool()
+                        ? root[L"fxTestTone"]->AsBool()
+                        : (root[L"fxTestTone"]->AsNumber() > 0.5);
+          gFxTestToneEnabled.store(tt, std::memory_order_relaxed);
+        }
+
+        if (root.find(L"fxTriggerClearAll") != root.end()) {
+          for (int s = 0; s < DigitalFxManager::kNumSendSources; ++s) {
+            gFxSendTrigger[s][0].store(false, std::memory_order_relaxed);
+            gFxSendTrigger[s][1].store(false, std::memory_order_relaxed);
+          }
+          gSirenFxTrigger.store(false, std::memory_order_relaxed);
+        }
+
         // SUB ROAR parameters: { subRoar: { tune, drive, decay, cutoff, level, enabled } }
         if (root.find(L"subRoar") != root.end() && root[L"subRoar"]->IsObject()) {
           const JSONObject &so = root[L"subRoar"]->AsObject();
@@ -1129,6 +1310,115 @@ bool setup(BelaContext *context, void *userData) {
 
 
 
+        // Save config.json directly on Bela: { saveConfigText: "...", reqId?: "..." }
+        if (root.find(L"saveConfigText") != root.end() &&
+            root[L"saveConfigText"]->IsString()) {
+          std::string reqId;
+          if (root.find(L"reqId") != root.end() && root[L"reqId"]->IsString())
+            reqId = JSON::ws2s(root[L"reqId"]->AsString());
+          std::string jsonText = JSON::ws2s(root[L"saveConfigText"]->AsString());
+          std::string err;
+          bool ok = ConfigLoader::saveRawJson(kGuiConfigPath, jsonText, err);
+          if (ok)
+            rt_printf("[GUI] Saved config.json (%zu bytes)\n", jsonText.size());
+          else
+            rt_printf("[GUI] Save config.json failed: %s\n", err.c_str());
+          sendConfigActionAck("save", ok, reqId, err);
+        }
+
+        // Read raw config.json (WebSocket fallback for Export): { readConfig: true, reqId?: "..." }
+        if (root.find(L"readConfig") != root.end()) {
+          std::string reqId;
+          if (root.find(L"reqId") != root.end() && root[L"reqId"]->IsString())
+            reqId = JSON::ws2s(root[L"reqId"]->AsString());
+          std::string content;
+          std::string err;
+          bool ok = ConfigLoader::readRawJson(kGuiConfigPath, content, err);
+          sendConfigActionAck("read", ok, reqId, err, ok ? content : "");
+        }
+
+        // Restart Bela audio program only (~2-3s, keeps Wi-Fi/hotspot intact)
+        if (root.find(L"restartAudio") != root.end()) {
+          std::string reqId;
+          if (root.find(L"reqId") != root.end() && root[L"reqId"]->IsString())
+            reqId = JSON::ws2s(root[L"reqId"]->AsString());
+          if (!isValidProjectName(kGuiProjectName)) {
+            sendConfigActionAck("restartAudio", false, reqId,
+                                "Invalid project name");
+          } else if (gRestartOrRebootPending.exchange(true,
+                                                      std::memory_order_relaxed)) {
+            sendConfigActionAck("restartAudio", false, reqId,
+                                "Restart already in progress");
+          } else {
+            char pidStr[32];
+            snprintf(pidStr, sizeof(pidStr), "%ld", (long)::getpid());
+            char scriptBuf[1024];
+            int sn = snprintf(
+                scriptBuf, sizeof(scriptBuf),
+                "PID=\"$1\"; PROJ=\"$2\"; W=0; "
+                "/usr/bin/systemctl is-active --quiet bela_startup && W=1; "
+                "i=0; while kill -0 \"$PID\" 2>/dev/null && [ \"$i\" -lt %d ]; do "
+                "sleep 0.05; i=$((i+1)); done; "
+                "if [ \"$W\" -eq 1 ]; then "
+                "S=$(/usr/bin/systemctl show -p ActiveState --value bela_startup 2>/dev/null); "
+                "[ \"$S\" = active ] || [ \"$S\" = activating ] || /usr/bin/systemctl start bela_startup; "
+                "else "
+                "/usr/bin/make -C /root/Bela PROJECT=\"$PROJ\" stoprunning >/dev/null 2>&1 || true; "
+                "if /usr/bin/grep -q '^ACTIVE=1' /opt/Bela/startup_env 2>/dev/null && "
+                "/usr/bin/grep -q \"^PROJECT=$PROJ$\" /opt/Bela/startup_env 2>/dev/null; then "
+                "/usr/bin/systemctl start bela_startup; "
+                "else "
+                "/usr/bin/make -C /root/Bela PROJECT=\"$PROJ\" CL=\"-Jsettings.json\" runscreen; "
+                "fi; fi",
+                kRestartWaitPollIterations);
+            bool spawned = (sn > 0 && (size_t)sn < sizeof(scriptBuf)) &&
+                           spawnTransientSystemdUnit(scriptBuf, pidStr, kGuiProjectName);
+            if (spawned) {
+              rt_printf("[GUI] Audio restart scheduled — fading out...\n");
+              sendConfigActionAck("restartAudio", true, reqId);
+              gShutdownSignalReceived.store(true, std::memory_order_relaxed);
+            } else {
+              gRestartOrRebootPending.store(false, std::memory_order_relaxed);
+              sendConfigActionAck("restartAudio", false, reqId,
+                                  "Failed to spawn systemd restart unit");
+            }
+          }
+        }
+
+        // Full Linux OS reboot (~25-30s, triggered from Mapping -> Advanced)
+        if (root.find(L"rebootBoard") != root.end()) {
+          std::string reqId;
+          if (root.find(L"reqId") != root.end() && root[L"reqId"]->IsString())
+            reqId = JSON::ws2s(root[L"reqId"]->AsString());
+          if (gRestartOrRebootPending.exchange(true,
+                                               std::memory_order_relaxed)) {
+            sendConfigActionAck("rebootBoard", false, reqId,
+                                "Reboot already in progress");
+          } else {
+            char pidStr[32];
+            snprintf(pidStr, sizeof(pidStr), "%ld", (long)::getpid());
+            char scriptBuf[512];
+            int sn = snprintf(
+                scriptBuf, sizeof(scriptBuf),
+                "PID=\"$1\"; i=0; "
+                "while kill -0 \"$PID\" 2>/dev/null && [ \"$i\" -lt %d ]; do "
+                "sleep 0.05; i=$((i+1)); done; "
+                "/usr/bin/sync; /usr/bin/systemctl reboot",
+                kRestartWaitPollIterations);
+            bool spawned = (sn > 0 && (size_t)sn < sizeof(scriptBuf)) &&
+                           spawnTransientSystemdUnit(scriptBuf, pidStr, nullptr);
+            if (spawned) {
+              rt_printf("[GUI] Board reboot scheduled — fading out...\n");
+              sendConfigActionAck("rebootBoard", true, reqId);
+              gShutdownSignalReceived.store(true, std::memory_order_relaxed);
+            } else {
+              gRestartOrRebootPending.store(false, std::memory_order_relaxed);
+              sendConfigActionAck("rebootBoard", false, reqId,
+                                  "Failed to spawn systemd reboot unit");
+            }
+          }
+        }
+
         return true; // let the default handler process connection-reply etc.
       },
       nullptr);
@@ -1177,15 +1467,23 @@ void render(BelaContext *context, void *userData) {
   gHardwareManager.scanStep(context);
 
   // Shared controls between L and R strips (same gain/EQ/FX send on both sides)
+  bool auxTrig1[kNumAuxChannels] = {};
+  bool auxTrig2[kNumAuxChannels] = {};
   for (int ch = 0; ch < kNumAuxChannels; ++ch) {
     const auto &pots = kAuxPotBindings[ch];
+    auxTrig1[ch] = gFxSendTrigger[ch][0].load(std::memory_order_relaxed);
+    auxTrig2[ch] = gFxSendTrigger[ch][1].load(std::memory_order_relaxed);
     const float gain =
         scaleInputGainPot(gHardwareManager.getPotValue(pots.gain));
     const float eqL = potToGainDb(gHardwareManager.getPotValue(pots.eqLow));
     const float eqM = potToGainDb(gHardwareManager.getPotValue(pots.eqMid));
     const float eqH = potToGainDb(gHardwareManager.getPotValue(pots.eqHigh));
-    const float fx1 = scaleFxSendPot(gHardwareManager.getPotValue(pots.fx1));
-    const float fx2 = scaleFxSendPot(gHardwareManager.getPotValue(pots.fx2));
+    const float fx1 = auxTrig1[ch]
+                          ? 1.f
+                          : scaleFxSendPot(gHardwareManager.getPotValue(pots.fx1));
+    const float fx2 = auxTrig2[ch]
+                          ? 1.f
+                          : scaleFxSendPot(gHardwareManager.getPotValue(pots.fx2));
 
     for (int side = 0; side < 2; ++side) {
       gChannelStrips[ch][side].setInputGain(gain);
@@ -1312,18 +1610,28 @@ void render(BelaContext *context, void *userData) {
   }
 
   // --- Dub siren controls ---
-  const float sirenGain = gHardwareManager.getPotValue(SIREN_GAIN);
-  const float sirenFxSend =
+  const float rawSirenGain = gHardwareManager.getPotValue(SIREN_GAIN);
+  const float rawSirenFxSend =
       scaleFxSendPot(gHardwareManager.getPotValue(SIREN_FX_SEND));
-  const float sirenFxSend2 =
+  const float rawSirenFxSend2 =
       scaleFxSendPot(gHardwareManager.getPotValue(SIREN_FX2_SEND));
+  const bool sirenTrig1 = gFxSendTrigger[4][0].load(std::memory_order_relaxed);
+  const bool sirenTrig2 = gFxSendTrigger[4][1].load(std::memory_order_relaxed);
+  const bool sirenFxTrig =
+      gSirenFxTrigger.load(std::memory_order_relaxed) || sirenTrig1 || sirenTrig2;
+  const float sirenGain =
+      (sirenFxTrig && rawSirenGain < kDevModeSirenGain) ? kDevModeSirenGain
+                                                        : rawSirenGain;
+  const float sirenFxSend = sirenTrig1 ? 1.f : rawSirenFxSend;
+  const float sirenFxSend2 = sirenTrig2 ? 1.f : rawSirenFxSend2;
+  const bool sirenGate =
+      gHardwareManager.getSwitchState(SIREN_TRIGGER) || sirenFxTrig;
 
   gDubSiren.setControls(gHardwareManager.getPotValue(SIREN_TYPE),
                         gHardwareManager.getPotValue(SIREN_MOD), sirenGain,
-                        sirenFxSend, sirenFxSend2,
-                        gHardwareManager.getSwitchState(SIREN_TRIGGER));
+                        sirenFxSend, sirenFxSend2, sirenGate);
   // Sampler shares siren gain / FX sends; trigger comes from the GUI only.
-  gSamplePlayer.setControls(sirenGain, sirenFxSend, sirenFxSend2);
+  gSamplePlayer.setControls(rawSirenGain, rawSirenFxSend, rawSirenFxSend2);
 
   // --- FX return input gains ---
   const float fx1ReturnGain =
@@ -1353,6 +1661,17 @@ void render(BelaContext *context, void *userData) {
   bool clipAux[kNumAuxChannels] = {};
   bool sigAux[kNumAuxChannels] = {};
   bool clipMaster = false;
+  const bool testToneOn = gFxTestToneEnabled.load(std::memory_order_relaxed);
+  bool anyTestToneActive = false;
+  for (int ch = 0; ch < kNumAuxChannels; ++ch) {
+    if ((testToneOn && (auxTrig1[ch] || auxTrig2[ch])) ||
+        gFxTestToneEnv[ch][0] > 1e-6f || gFxTestToneEnv[ch][1] > 1e-6f) {
+      anyTestToneActive = true;
+      break;
+    }
+  }
+  const float testTonePhaseInc =
+      kTwoPi * kFxTestToneFreqHz / context->audioSampleRate;
 
   for (unsigned int n = 0; n < context->audioFrames; n++) {
     float inL[kNumAuxChannels];
@@ -1361,6 +1680,16 @@ void render(BelaContext *context, void *userData) {
     float dryR[kNumAuxChannels];
     float fx1AuxSum = 0.f;
     float fx2AuxSum = 0.f;
+    float testToneSample = 0.f;
+    if (anyTestToneActive) {
+      gFxTestTonePhase += testTonePhaseInc;
+      if (gFxTestTonePhase >= kTwoPi)
+        gFxTestTonePhase -= kTwoPi;
+      const float s1Osc = sinf(gFxTestTonePhase);
+      const float c1Osc = cosf(gFxTestTonePhase);
+      testToneSample =
+          (0.65f * s1Osc + 0.35f * (2.f * s1Osc * c1Osc)) * kFxTestToneGain;
+    }
 
     for (int ch = 0; ch < kNumAuxChannels; ++ch) {
       const ChannelConfig &cfg = *kAuxConfigs[ch];
@@ -1394,6 +1723,23 @@ void render(BelaContext *context, void *userData) {
       float s2 = cfg.isStereo() ? 0.5f * (gChannelStrips[ch][0].fxOut2() +
                                           gChannelStrips[ch][1].fxOut2())
                                 : gChannelStrips[ch][0].fxOut2();
+      if (anyTestToneActive) {
+        const float target1 = (testToneOn && auxTrig1[ch]) ? 1.f : 0.f;
+        const float coeff1 =
+            (target1 > gFxTestToneEnv[ch][0]) ? gFxTestAttackCoeff
+                                              : gFxTestReleaseCoeff;
+        gFxTestToneEnv[ch][0] += coeff1 * (target1 - gFxTestToneEnv[ch][0]);
+        gFxTestToneEnv[ch][0] = flushDenormal(gFxTestToneEnv[ch][0]);
+        s1 += testToneSample * gFxTestToneEnv[ch][0];
+
+        const float target2 = (testToneOn && auxTrig2[ch]) ? 1.f : 0.f;
+        const float coeff2 =
+            (target2 > gFxTestToneEnv[ch][1]) ? gFxTestAttackCoeff
+                                              : gFxTestReleaseCoeff;
+        gFxTestToneEnv[ch][1] += coeff2 * (target2 - gFxTestToneEnv[ch][1]);
+        gFxTestToneEnv[ch][1] = flushDenormal(gFxTestToneEnv[ch][1]);
+        s2 += testToneSample * gFxTestToneEnv[ch][1];
+      }
       gDigitalFxManager.routeAux1Send(ch, s1, fx1AuxSum);
       gDigitalFxManager.routeAux2Send(ch, s2, fx2AuxSum);
     }

@@ -1,12 +1,11 @@
 /**
  * Dev Control Tab (Virtual Controls Mode)
- * Provides interactive virtual sliders and switches when hardware controls
- * are not connected, with strict performance throttling for Bela.
+ * Interactive virtual sliders and switches with throttled Bela WebSocket updates.
  */
 import { getContext } from '../context.js';
 import {
     POT_NAMES, SWITCH_NAMES, SIREN_PRESETS,
-    TAB_DEV, CONFIG_META, isPotCentered, getPotDevDefault
+    CONFIG_META, isPotCentered, getPotDevDefault
 } from '../config.js';
 import { belaControlReady } from '../bela/connection.js';
 import { el, cardTitle } from './utils.js';
@@ -30,21 +29,17 @@ const _potValueLabels = new Array(POT_NAMES.length);
 const _switchButtons = new Array(SWITCH_NAMES.length);
 
 let _devModeToggleBtn = null;
+let _devModePillEl = null;
 let _devModeBannerEl = null;
 let _devControlsContainerEl = null;
 
-/**
- * Sends a custom control payload to Bela via Bela.control WebSocket.
- */
 function sendCustomControl(payload) {
     if (!belaControlReady()) return;
     /* global Bela */
     Bela.control.send(payload);
 }
 
-/**
- * Throttled sender for potentiometer values.
- */
+/** Throttled sender for potentiometer values. */
 export function sendVirtualPot(potIdx, val, forceImmediate = false) {
     if (potIdx < 0 || potIdx >= POT_NAMES.length) return;
     const now = performance.now();
@@ -77,9 +72,7 @@ export function sendVirtualPot(potIdx, val, forceImmediate = false) {
     }
 }
 
-/**
- * Immediate sender for switch toggles.
- */
+/** Immediate sender for switch toggles. */
 export function sendVirtualSwitch(swIdx, active) {
     if (swIdx < 0 || swIdx >= SWITCH_NAMES.length) return;
     sendCustomControl({
@@ -89,23 +82,23 @@ export function sendVirtualSwitch(swIdx, active) {
     });
 }
 
-/**
- * Immediate sender for UI Control (Dev) mode toggle.
- */
+/** Immediate sender for UI Control (Dev) mode toggle. */
 export function sendUiDevMode(enabled) {
     const ctx = getContext();
     ctx.uiDevMode = Boolean(enabled);
     _devModeHoldUntil = Date.now() + DEV_MODE_HOLD_MS;
     updateDevModeVisuals(ctx.uiDevMode);
     if (ctx.uiDevMode) {
-        // Reset sliders to default on enabling dev mode
         for (let i = 0; i < POT_NAMES.length; i++) {
             const defVal = getPotDevDefault(POT_NAMES[i]);
             if (_potSliders[i]) _potSliders[i].value = defVal.toString();
             if (_potValueLabels[i]) _potValueLabels[i].textContent = formatPotValue(POT_NAMES[i], defVal);
         }
         for (let i = 0; i < SWITCH_NAMES.length; i++) {
-            if (_switchButtons[i]) _switchButtons[i].classList.remove('active', 'firing');
+            if (_switchButtons[i]) {
+                _switchButtons[i].classList.remove('active', 'firing');
+                _switchButtons[i].setAttribute('aria-pressed', 'false');
+            }
         }
     }
     sendCustomControl({
@@ -114,9 +107,7 @@ export function sendUiDevMode(enabled) {
     });
 }
 
-/**
- * Immediate sender to reset virtual controls to clean musical defaults.
- */
+/** Immediate sender to reset virtual controls to musical defaults. */
 export function sendVirtualReset() {
     sendCustomControl({
         event: 'custom',
@@ -124,53 +115,43 @@ export function sendVirtualReset() {
     });
 }
 
-/**
- * Updates UI mode visual styling and header badge.
- */
+/** Updates UI mode visual styling and header badge. */
 export function updateDevModeVisuals(active) {
     const ctx = getContext();
     ctx.uiDevMode = active;
 
     if (_devModeToggleBtn) {
         _devModeToggleBtn.classList.toggle('active', active);
-        _devModeToggleBtn.textContent = active ? 'VIRTUAL MODE ACTIVE' : 'PHYSICAL MODE ACTIVE';
+        _devModeToggleBtn.textContent = active ? 'Virtual Active' : 'Enable Virtual';
+        _devModeToggleBtn.setAttribute('aria-pressed', active ? 'true' : 'false');
+    }
+
+    if (_devModePillEl) {
+        _devModePillEl.textContent = active ? 'Virtual · ADC paused' : 'Hardware';
     }
 
     if (_devModeBannerEl) {
         _devModeBannerEl.classList.toggle('dev-active', active);
-        const descEl = _devModeBannerEl.querySelector('.dev-mode-desc');
-        if (descEl) {
-            descEl.innerHTML = active
-                ? '<strong>UI Control Mode Active:</strong> Sliders and switches below directly control Bela. Hardware ADC scanning is suspended (zero floating noise, CPU saved).'
-                : '<strong>Physical Mode Active:</strong> Bela is controlled by its physical potentiometers and switches. Click above to enable virtual UI control.';
-        }
     }
 
     if (_devControlsContainerEl) {
         _devControlsContainerEl.classList.toggle('disabled-controls', !active);
     }
 
-    // Header badge
     const headerDevBadge = document.getElementById('dev-badge');
     if (headerDevBadge) {
         headerDevBadge.classList.toggle('visible', active);
     }
 }
 
-/**
- * Synchronizes UI Dev mode state from Buffer 6.
- */
+/** Synchronizes UI Dev mode state from Buffer 6. */
 export function syncUiDevMode(metaBuf) {
     if (!metaBuf || metaBuf.length <= CONFIG_META.UI_DEV_MODE) return;
     const isDev = metaBuf[CONFIG_META.UI_DEV_MODE] > 0.5;
     const ctx = getContext();
 
-    // Prevent button flickering: if user recently clicked the toggle,
-    // hold local state until Bela catches up or timeout expires.
     if (Date.now() < _devModeHoldUntil) {
-        if (ctx.uiDevMode === isDev) {
-            _devModeHoldUntil = 0; // Confirmed by Bela!
-        }
+        if (ctx.uiDevMode === isDev) _devModeHoldUntil = 0;
         return;
     }
 
@@ -180,41 +161,31 @@ export function syncUiDevMode(metaBuf) {
     }
 }
 
-/**
- * Formats a pot value for display according to its name.
- */
+/** Formats a pot value for display according to its name. */
 function formatPotValue(name, val) {
     if (/^AUX\d_EQ_(LOW|MID|HIGH)$/.test(name) || /^MASTER_EQ_.*_GAIN$/.test(name) || /^BTRIM_/.test(name)) {
-        // ±6 dB centered
         const db = (val - 0.5) * 12;
         return (db >= 0 ? '+' : '') + db.toFixed(1) + ' dB';
     }
     if (name.startsWith('GEQ_')) {
-        // ±12 dB centered
         const db = (val - 0.5) * 24;
         return (db >= 0 ? '+' : '') + db.toFixed(1) + ' dB';
     }
     if (name === 'MASTER_HPF_FREQ') {
         const hz = 20 + val * 1980;
-        return val < 0.015 ? 'Bypass' : Math.round(hz) + ' Hz';
+        return val < 0.015 ? 'Off' : Math.round(hz) + ' Hz';
     }
     if (name === 'MASTER_LPF_FREQ') {
         const hz = 200 + val * 19800;
-        return val > 0.985 ? 'Bypass' : (hz >= 1000 ? (hz / 1000).toFixed(1) + ' kHz' : Math.round(hz) + ' Hz');
+        return val > 0.985 ? 'Off' : (hz >= 1000 ? (hz / 1000).toFixed(1) + ' kHz' : Math.round(hz) + ' Hz');
     }
     if (name === 'MASTER_HPF_RES' || name === 'MASTER_LPF_RES') {
         const q = 0.7 + val * (4.5 - 0.7);
         return 'Q ' + q.toFixed(2);
     }
-    if (name === 'MASTER_EQ_SUB_FREQ') {
-        return Math.round(20 + val * 60) + ' Hz';
-    }
-    if (name === 'MASTER_EQ_KICK_FREQ') {
-        return Math.round(80 + val * 120) + ' Hz';
-    }
-    if (name === 'MASTER_EQ_MID_FREQ') {
-        return Math.round(200 + val * 1000) + ' Hz';
-    }
+    if (name === 'MASTER_EQ_SUB_FREQ') return Math.round(20 + val * 60) + ' Hz';
+    if (name === 'MASTER_EQ_KICK_FREQ') return Math.round(80 + val * 120) + ' Hz';
+    if (name === 'MASTER_EQ_MID_FREQ') return Math.round(200 + val * 1000) + ' Hz';
     if (name === 'MASTER_EQ_TOP_FREQ') {
         const hz = 1200 + val * 14800;
         return hz >= 1000 ? (hz / 1000).toFixed(1) + ' kHz' : Math.round(hz) + ' Hz';
@@ -223,14 +194,11 @@ function formatPotValue(name, val) {
         const idx = Math.min(5, Math.floor(val * 6));
         return SIREN_PRESETS[idx] || 'Preset ' + idx;
     }
-    // Default percentage
     return Math.round(val * 100) + '%';
 }
 
-/**
- * Creates a single styled slider element with label and value readout.
- */
-function createPotControl(potIdx, label) {
+/** Creates a single styled slider element with label and value readout. */
+function createPotControl(potIdx, label, ariaPrefix) {
     const name = POT_NAMES[potIdx];
     const isCentered = isPotCentered(name);
     const defVal = getPotDevDefault(name);
@@ -252,14 +220,19 @@ function createPotControl(potIdx, label) {
         max: '1',
         step: '0.005',
         value: defVal.toString(),
-        className: 'dev-pot-slider' + (isCentered ? ' centered' : '')
+        className: 'dev-pot-slider' + (isCentered ? ' centered' : ''),
+        'aria-label': ariaPrefix ? `${ariaPrefix} ${label}` : (label || name)
     });
 
     slider.addEventListener('pointerdown', () => { _activeInteractingPot = potIdx; });
-    slider.addEventListener('pointerup', () => {
-        _activeInteractingPot = -1;
-        sendVirtualPot(potIdx, parseFloat(slider.value), true);
-    });
+    const endDrag = () => {
+        if (_activeInteractingPot === potIdx) {
+            _activeInteractingPot = -1;
+            sendVirtualPot(potIdx, parseFloat(slider.value), true);
+        }
+    };
+    slider.addEventListener('pointerup', endDrag);
+    slider.addEventListener('pointercancel', endDrag);
 
     slider.addEventListener('input', () => {
         const v = parseFloat(slider.value);
@@ -267,7 +240,6 @@ function createPotControl(potIdx, label) {
         sendVirtualPot(potIdx, v, false);
     });
 
-    // Double click snaps back to default
     slider.addEventListener('dblclick', () => {
         const dVal = getPotDevDefault(name);
         slider.value = dVal.toString();
@@ -283,38 +255,36 @@ function createPotControl(potIdx, label) {
     return item;
 }
 
-/**
- * Builds the Master & Kills Card.
- */
+/** Builds the Master & Kills Card. */
 function buildMasterSection() {
     const card = el('div', { className: 'card dev-section' });
-    card.appendChild(cardTitle('Master & Band Kills'));
+    card.appendChild(cardTitle('Master'));
 
-    // Dub Kill switches row
     const killSection = el('div', { className: 'dev-kill-section' });
-    const killTitle = el('div', { className: 'dev-sub-heading' });
-    killTitle.textContent = '4-Band Crossover Kills (24 dB/oct)';
-    killSection.appendChild(killTitle);
+    killSection.appendChild(el('div', { className: 'dev-sub-heading', textContent: 'Kills' }));
 
     const killGrid = el('div', { className: 'dev-kill-grid' });
     const killDef = [
-        { idx: 0, label: 'SUB (<80Hz)', color: 'sub' },
-        { idx: 1, label: 'KICK (80-200Hz)', color: 'kick' },
-        { idx: 2, label: 'MID (200-1.2k)', color: 'mid' },
-        { idx: 3, label: 'TOP (>1.2kHz)', color: 'top' }
+        { idx: 0, label: 'SUB', sub: '<80Hz', color: 'sub' },
+        { idx: 1, label: 'KICK', sub: '80–200', color: 'kick' },
+        { idx: 2, label: 'MID', sub: '200–1.2k', color: 'mid' },
+        { idx: 3, label: 'TOP', sub: '>1.2k', color: 'top' }
     ];
 
-    killDef.forEach(({ idx, label, color }) => {
+    killDef.forEach(({ idx, label, sub, color }) => {
         const btn = el('button', {
             type: 'button',
-            className: 'dev-kill-btn ' + color
+            className: 'dev-kill-btn ' + color,
+            'aria-pressed': 'false'
         });
-        btn.textContent = label;
+        btn.appendChild(el('span', { textContent: label }));
+        btn.appendChild(el('span', { className: 'dev-kill-sub', textContent: sub }));
         btn.addEventListener('click', () => {
             const ctx = getContext();
             const curState = (ctx.switchStates && ctx.switchStates[idx] > 0.5);
             const newState = !curState;
             btn.classList.toggle('active', newState);
+            btn.setAttribute('aria-pressed', newState ? 'true' : 'false');
             sendVirtualSwitch(idx, newState);
         });
         _switchButtons[idx] = btn;
@@ -323,49 +293,45 @@ function buildMasterSection() {
     killSection.appendChild(killGrid);
     card.appendChild(killSection);
 
-    // Master Volume & Band Trim row
     const masterGrid = el('div', { className: 'dev-grid-2col' });
 
     const masterCol = el('div', { className: 'dev-sub-panel' });
-    masterCol.appendChild(el('div', { className: 'dev-sub-heading', textContent: 'Master Volume' }));
-    masterCol.appendChild(createPotControl(24, 'Master Gain (OUT 2/3)'));
+    masterCol.appendChild(el('div', { className: 'dev-sub-heading', textContent: 'Output' }));
+    masterCol.appendChild(createPotControl(24, 'Master Gain', 'Master'));
     masterGrid.appendChild(masterCol);
 
     const trimCol = el('div', { className: 'dev-sub-panel' });
-    trimCol.appendChild(el('div', { className: 'dev-sub-heading', textContent: 'Band Trim (±6 dB)' }));
+    trimCol.appendChild(el('div', { className: 'dev-sub-heading', textContent: 'Band Trim' }));
     const trimPots = el('div', { className: 'dev-pot-grid-2' });
-    trimPots.appendChild(createPotControl(37, 'Trim Sub', true));
-    trimPots.appendChild(createPotControl(38, 'Trim Kick', true));
-    trimPots.appendChild(createPotControl(39, 'Trim Mid', true));
-    trimPots.appendChild(createPotControl(40, 'Trim Top', true));
+    trimPots.appendChild(createPotControl(37, 'Sub', 'Band Trim'));
+    trimPots.appendChild(createPotControl(38, 'Kick', 'Band Trim'));
+    trimPots.appendChild(createPotControl(39, 'Mid', 'Band Trim'));
+    trimPots.appendChild(createPotControl(40, 'Top', 'Band Trim'));
     trimCol.appendChild(trimPots);
     masterGrid.appendChild(trimCol);
 
     card.appendChild(masterGrid);
 
-    // Master Resonant Filters
     const filterSection = el('div', { className: 'dev-sub-panel' });
-    filterSection.appendChild(el('div', { className: 'dev-sub-heading', textContent: 'Master Resonant Filters (Soft-Bypass)' }));
+    filterSection.style.marginTop = '12px';
+    filterSection.appendChild(el('div', { className: 'dev-sub-heading', textContent: 'Filters' }));
     const filterGrid = el('div', { className: 'dev-pot-grid-2' });
-    filterGrid.appendChild(createPotControl(33, 'HPF Cutoff (20Hz - 2kHz)'));
-    filterGrid.appendChild(createPotControl(34, 'HPF Resonance (Q 0.7 - 4.5)'));
-    filterGrid.appendChild(createPotControl(35, 'LPF Cutoff (200Hz - 20kHz)'));
-    filterGrid.appendChild(createPotControl(36, 'LPF Resonance (Q 0.7 - 4.5)'));
+    filterGrid.appendChild(createPotControl(33, 'HPF Freq', 'Master'));
+    filterGrid.appendChild(createPotControl(34, 'HPF Res', 'Master'));
+    filterGrid.appendChild(createPotControl(35, 'LPF Freq', 'Master'));
+    filterGrid.appendChild(createPotControl(36, 'LPF Res', 'Master'));
     filterSection.appendChild(filterGrid);
     card.appendChild(filterSection);
 
     return card;
 }
 
-/**
- * Builds the 4 AUX Channel Strips Card.
- */
+/** Builds the 4 AUX Channel Strips Card. */
 function buildChannelStripsSection() {
     const card = el('div', { className: 'card dev-section' });
-    card.appendChild(cardTitle('AUX Channel Strips (1 to 4)'));
+    card.appendChild(cardTitle('Channels'));
 
     const grid = el('div', { className: 'dev-channels-grid' });
-
     const auxConfigs = [
         { ch: 1, base: 0 },
         { ch: 2, base: 6 },
@@ -375,40 +341,30 @@ function buildChannelStripsSection() {
 
     auxConfigs.forEach(({ ch, base }) => {
         const col = el('div', { className: 'dev-channel-col' });
-        const hdr = el('div', { className: 'dev-channel-hdr' });
-        hdr.textContent = 'AUX ' + ch;
+        const hdr = el('div', { className: 'dev-channel-hdr', textContent: 'AUX ' + ch });
         col.appendChild(hdr);
+        const prefix = 'AUX ' + ch;
 
-        // Gain
-        col.appendChild(createPotControl(base + 0, 'Gain In'));
+        col.appendChild(createPotControl(base + 0, 'Gain', prefix));
 
-        // 3-Band EQ (in musical order: High -> Mid -> Low)
         const eqBox = el('div', { className: 'dev-eq-box' });
-        if (ch === 1 || ch === 2) {
-            // Note: in POT_NAMES:
-            // AUX1: 0=GAIN, 1=MID, 2=LOW, 3=HIGH
-            // AUX2: 6=GAIN, 7=MID, 8=HIGH, 9=LOW
-            // AUX3: 12=GAIN, 13=LOW, 14=MID, 15=HIGH
-            // AUX4: 18=GAIN, 19=LOW, 20=MID, 21=HIGH
-            if (ch === 1) {
-                eqBox.appendChild(createPotControl(base + 3, 'EQ High', true));
-                eqBox.appendChild(createPotControl(base + 1, 'EQ Mid', true));
-                eqBox.appendChild(createPotControl(base + 2, 'EQ Low', true));
-            } else {
-                eqBox.appendChild(createPotControl(base + 2, 'EQ High', true));
-                eqBox.appendChild(createPotControl(base + 1, 'EQ Mid', true));
-                eqBox.appendChild(createPotControl(base + 3, 'EQ Low', true));
-            }
+        if (ch === 1) {
+            eqBox.appendChild(createPotControl(base + 3, 'High', prefix));
+            eqBox.appendChild(createPotControl(base + 1, 'Mid', prefix));
+            eqBox.appendChild(createPotControl(base + 2, 'Low', prefix));
+        } else if (ch === 2) {
+            eqBox.appendChild(createPotControl(base + 2, 'High', prefix));
+            eqBox.appendChild(createPotControl(base + 1, 'Mid', prefix));
+            eqBox.appendChild(createPotControl(base + 3, 'Low', prefix));
         } else {
-            eqBox.appendChild(createPotControl(base + 3, 'EQ High', true));
-            eqBox.appendChild(createPotControl(base + 2, 'EQ Mid', true));
-            eqBox.appendChild(createPotControl(base + 1, 'EQ Low', true));
+            eqBox.appendChild(createPotControl(base + 3, 'High', prefix));
+            eqBox.appendChild(createPotControl(base + 2, 'Mid', prefix));
+            eqBox.appendChild(createPotControl(base + 1, 'Low', prefix));
         }
         col.appendChild(eqBox);
 
-        // FX Sends
-        col.appendChild(createPotControl(base + 4, 'FX 1 Send'));
-        col.appendChild(createPotControl(base + 5, 'FX 2 Send'));
+        col.appendChild(createPotControl(base + 4, 'FX1', prefix));
+        col.appendChild(createPotControl(base + 5, 'FX2', prefix));
 
         grid.appendChild(col);
     });
@@ -417,44 +373,41 @@ function buildChannelStripsSection() {
     return card;
 }
 
-/**
- * Builds the Master Parametric & Graphic EQ Card.
- */
+/** Builds the Master Parametric & Graphic EQ Card. */
 function buildMasterEqSection() {
     const card = el('div', { className: 'card dev-section' });
-    card.appendChild(cardTitle('Master Equalizers (Parametric & 12-Band Graphic)'));
+    card.appendChild(cardTitle('Master EQ'));
 
-    // Parametric EQ 4 sweepable bands
     const peqBox = el('div', { className: 'dev-sub-panel' });
-    peqBox.appendChild(el('div', { className: 'dev-sub-heading', textContent: '4-Band Parametric Equalizer (Sweepable Freq ±6 dB)' }));
+    peqBox.appendChild(el('div', { className: 'dev-sub-heading', textContent: 'Parametric' }));
     const peqGrid = el('div', { className: 'dev-channels-grid' });
 
     const peqBands = [
-        { label: 'SUB (20-80 Hz)', fIdx: 25, gIdx: 26 },
-        { label: 'KICK (80-200 Hz)', fIdx: 27, gIdx: 28 },
-        { label: 'MID (200-1.2k Hz)', fIdx: 29, gIdx: 30 },
-        { label: 'TOP (1.2-16k Hz)', fIdx: 31, gIdx: 32 }
+        { label: 'SUB', fIdx: 25, gIdx: 26 },
+        { label: 'KICK', fIdx: 27, gIdx: 28 },
+        { label: 'MID', fIdx: 29, gIdx: 30 },
+        { label: 'TOP', fIdx: 31, gIdx: 32 }
     ];
 
     peqBands.forEach(({ label, fIdx, gIdx }) => {
         const bCol = el('div', { className: 'dev-channel-col' });
         bCol.appendChild(el('div', { className: 'dev-channel-hdr', textContent: label }));
-        bCol.appendChild(createPotControl(fIdx, 'Frequency'));
-        bCol.appendChild(createPotControl(gIdx, 'Gain (±6 dB)', true));
+        bCol.appendChild(createPotControl(fIdx, 'Freq', label));
+        bCol.appendChild(createPotControl(gIdx, 'Gain', label));
         peqGrid.appendChild(bCol);
     });
     peqBox.appendChild(peqGrid);
     card.appendChild(peqBox);
 
-    // Graphic EQ 12 fixed bands
     const geqBox = el('div', { className: 'dev-sub-panel' });
+    geqBox.style.marginTop = '12px';
     const geqHdrRow = el('div', { className: 'dev-row-between' });
-    geqHdrRow.appendChild(el('div', { className: 'dev-sub-heading', textContent: '12-Band Graphic Equalizer (±12 dB)' }));
+    geqHdrRow.appendChild(el('div', { className: 'dev-sub-heading', textContent: 'Graphic EQ' }));
 
     const flatBtn = el('button', {
         type: 'button',
         className: 'dev-small-btn',
-        textContent: 'Reset to Flat (0 dB)'
+        textContent: 'Flat'
     });
     flatBtn.addEventListener('click', () => {
         for (let i = 46; i <= 57; i++) {
@@ -469,8 +422,7 @@ function buildMasterEqSection() {
     const geqGrid = el('div', { className: 'dev-geq-grid' });
     const geqLabels = ['40Hz', '60Hz', '80Hz', '100Hz', '125Hz', '250Hz', '500Hz', '1kHz', '2kHz', '4kHz', '8kHz', '16kHz'];
     for (let i = 0; i < 12; i++) {
-        const potIdx = 46 + i;
-        geqGrid.appendChild(createPotControl(potIdx, geqLabels[i], true));
+        geqGrid.appendChild(createPotControl(46 + i, geqLabels[i], 'GEQ'));
     }
     geqBox.appendChild(geqGrid);
     card.appendChild(geqBox);
@@ -478,34 +430,30 @@ function buildMasterEqSection() {
     return card;
 }
 
-/**
- * Builds the FX & Dub Siren Card.
- */
+/** Builds the FX & Dub Siren Card. */
 function buildFxAndSirenSection() {
     const card = el('div', { className: 'card dev-section' });
-    card.appendChild(cardTitle('Effects & Dub Siren'));
+    card.appendChild(cardTitle('FX & Siren'));
 
     const grid = el('div', { className: 'dev-grid-2col' });
 
-    // FX Configuration Col
     const fxCol = el('div', { className: 'dev-sub-panel' });
-    fxCol.appendChild(el('div', { className: 'dev-sub-heading', textContent: 'FX Sends & Returns' }));
+    fxCol.appendChild(el('div', { className: 'dev-sub-heading', textContent: 'FX Bus' }));
 
-    // FX1 Mode switches
     const fx1Row = el('div', { className: 'dev-fx-mode-row' });
-    fx1Row.appendChild(el('span', { className: 'dev-pot-label', textContent: 'FX1 Send Filter:' }));
-    const fx1Mids = el('button', { type: 'button', className: 'dev-mode-btn', textContent: 'MIDS (250-4k)' });
-    const fx1Tops = el('button', { type: 'button', className: 'dev-mode-btn', textContent: 'TOPS (>4k)' });
+    fx1Row.appendChild(el('span', { className: 'dev-pot-label', textContent: 'FX1 Filter' }));
+    const fx1Mids = el('button', { type: 'button', className: 'dev-mode-btn', textContent: 'Mids', 'aria-pressed': 'false' });
+    const fx1Tops = el('button', { type: 'button', className: 'dev-mode-btn', textContent: 'Tops', 'aria-pressed': 'false' });
 
     fx1Mids.addEventListener('click', () => {
-        const cur = fx1Mids.classList.contains('active');
-        fx1Mids.classList.toggle('active', !cur);
-        sendVirtualSwitch(4, !cur);
+        const next = fx1Mids.classList.toggle('active');
+        fx1Mids.setAttribute('aria-pressed', next ? 'true' : 'false');
+        sendVirtualSwitch(4, next);
     });
     fx1Tops.addEventListener('click', () => {
-        const cur = fx1Tops.classList.contains('active');
-        fx1Tops.classList.toggle('active', !cur);
-        sendVirtualSwitch(5, !cur);
+        const next = fx1Tops.classList.toggle('active');
+        fx1Tops.setAttribute('aria-pressed', next ? 'true' : 'false');
+        sendVirtualSwitch(5, next);
     });
     _switchButtons[4] = fx1Mids;
     _switchButtons[5] = fx1Tops;
@@ -513,21 +461,20 @@ function buildFxAndSirenSection() {
     fx1Row.appendChild(fx1Tops);
     fxCol.appendChild(fx1Row);
 
-    // FX2 Mode switches
     const fx2Row = el('div', { className: 'dev-fx-mode-row' });
-    fx2Row.appendChild(el('span', { className: 'dev-pot-label', textContent: 'FX2 Send Filter:' }));
-    const fx2Mids = el('button', { type: 'button', className: 'dev-mode-btn', textContent: 'MIDS (250-4k)' });
-    const fx2Tops = el('button', { type: 'button', className: 'dev-mode-btn', textContent: 'TOPS (>4k)' });
+    fx2Row.appendChild(el('span', { className: 'dev-pot-label', textContent: 'FX2 Filter' }));
+    const fx2Mids = el('button', { type: 'button', className: 'dev-mode-btn', textContent: 'Mids', 'aria-pressed': 'false' });
+    const fx2Tops = el('button', { type: 'button', className: 'dev-mode-btn', textContent: 'Tops', 'aria-pressed': 'false' });
 
     fx2Mids.addEventListener('click', () => {
-        const cur = fx2Mids.classList.contains('active');
-        fx2Mids.classList.toggle('active', !cur);
-        sendVirtualSwitch(7, !cur);
+        const next = fx2Mids.classList.toggle('active');
+        fx2Mids.setAttribute('aria-pressed', next ? 'true' : 'false');
+        sendVirtualSwitch(7, next);
     });
     fx2Tops.addEventListener('click', () => {
-        const cur = fx2Tops.classList.contains('active');
-        fx2Tops.classList.toggle('active', !cur);
-        sendVirtualSwitch(6, !cur);
+        const next = fx2Tops.classList.toggle('active');
+        fx2Tops.setAttribute('aria-pressed', next ? 'true' : 'false');
+        sendVirtualSwitch(6, next);
     });
     _switchButtons[7] = fx2Mids;
     _switchButtons[6] = fx2Tops;
@@ -535,52 +482,68 @@ function buildFxAndSirenSection() {
     fx2Row.appendChild(fx2Tops);
     fxCol.appendChild(fx2Row);
 
-    // FX Returns
-    fxCol.appendChild(createPotControl(58, 'FX 1 Return Gain (IN 0)'));
-    fxCol.appendChild(createPotControl(59, 'FX 2 Return Gain (IN 1)'));
+    fxCol.appendChild(createPotControl(58, 'FX1 Return', 'FX'));
+    fxCol.appendChild(createPotControl(59, 'FX2 Return', 'FX'));
     grid.appendChild(fxCol);
 
-    // Dub Siren Col
     const sirenCol = el('div', { className: 'dev-sub-panel' });
-    sirenCol.appendChild(el('div', { className: 'dev-sub-heading', textContent: 'Monophonic Dub Siren' }));
+    sirenCol.appendChild(el('div', { className: 'dev-sub-heading', textContent: 'Dub Siren' }));
 
-    sirenCol.appendChild(createPotControl(41, 'Siren Type (Preset)'));
-    sirenCol.appendChild(createPotControl(42, 'Modulation LFO'));
-    sirenCol.appendChild(createPotControl(43, 'Siren Gain'));
-    sirenCol.appendChild(createPotControl(44, 'Siren FX 1 Send'));
-    sirenCol.appendChild(createPotControl(45, 'Siren FX 2 Send'));
+    sirenCol.appendChild(createPotControl(41, 'Preset', 'Siren'));
+    sirenCol.appendChild(createPotControl(42, 'Mod', 'Siren'));
+    sirenCol.appendChild(createPotControl(43, 'Gain', 'Siren'));
+    sirenCol.appendChild(createPotControl(44, 'FX1', 'Siren'));
+    sirenCol.appendChild(createPotControl(45, 'FX2', 'Siren'));
 
-    // Siren Trigger interactive controls
     const triggerBox = el('div', { className: 'dev-siren-trigger-box' });
     const trigBtn = el('button', {
         type: 'button',
         className: 'dev-siren-trig-btn',
-        textContent: 'TRIGGER SIREN (Hold)'
+        textContent: 'Trigger'
     });
 
-    const triggerOn = (e) => {
-        e.preventDefault();
-        trigBtn.classList.add('firing');
-        sendVirtualSwitch(8, true);
-    };
-    const triggerOff = (e) => {
-        e.preventDefault();
-        trigBtn.classList.remove('firing');
-        sendVirtualSwitch(8, false);
+    let trigActive = false;
+    const setTrigger = (on) => {
+        if (trigActive === on) return;
+        trigActive = on;
+        trigBtn.classList.toggle('firing', on);
+        sendVirtualSwitch(8, on);
     };
 
-    trigBtn.addEventListener('mousedown', triggerOn);
-    window.addEventListener('mouseup', triggerOff);
-    trigBtn.addEventListener('touchstart', triggerOn, { passive: false });
-    window.addEventListener('touchend', triggerOff, { passive: false });
+    trigBtn.addEventListener('pointerdown', (e) => {
+        e.preventDefault();
+        if (typeof trigBtn.setPointerCapture === 'function') {
+            try { trigBtn.setPointerCapture(e.pointerId); } catch (_) {}
+        }
+        setTrigger(true);
+    });
+    const endTrigger = () => setTrigger(false);
+    trigBtn.addEventListener('pointerup', endTrigger);
+    trigBtn.addEventListener('pointercancel', endTrigger);
+    trigBtn.addEventListener('lostpointercapture', endTrigger);
+    trigBtn.addEventListener('keydown', (e) => {
+        if ((e.key === ' ' || e.key === 'Enter') && !e.repeat) {
+            e.preventDefault();
+            setTrigger(true);
+        }
+    });
+    trigBtn.addEventListener('keyup', (e) => {
+        if (e.key === ' ' || e.key === 'Enter') {
+            e.preventDefault();
+            setTrigger(false);
+        }
+    });
+    trigBtn.addEventListener('blur', endTrigger);
 
     const latchBtn = el('button', {
         type: 'button',
         className: 'dev-siren-latch-btn',
-        textContent: 'Continuous Latch'
+        textContent: 'Latch',
+        'aria-pressed': 'false'
     });
     latchBtn.addEventListener('click', () => {
         const isFiring = latchBtn.classList.toggle('active');
+        latchBtn.setAttribute('aria-pressed', isFiring ? 'true' : 'false');
         trigBtn.classList.toggle('firing', isFiring);
         sendVirtualSwitch(8, isFiring);
     });
@@ -591,37 +554,32 @@ function buildFxAndSirenSection() {
     sirenCol.appendChild(triggerBox);
 
     grid.appendChild(sirenCol);
-
     card.appendChild(grid);
     return card;
 }
 
-/**
- * Builds the full Dev Control tab pane.
- */
+/** Builds the full Dev Control tab pane. */
 export function buildDevControlPane() {
     const pane = el('div', {
         id: 'pane-dev',
         className: 'tab-pane'
     });
 
-    // 1. Top Control Banner
     const banner = el('div', { className: 'card dev-banner', id: 'dev-mode-banner' });
     _devModeBannerEl = banner;
 
     const bannerTop = el('div', { className: 'dev-banner-top' });
-
     const titleDiv = el('div', { className: 'dev-banner-title-box' });
-    const title = el('h2', { className: 'dev-banner-title', textContent: 'Virtual Control Mode (Development Mode)' });
-    const desc = el('p', { className: 'dev-mode-desc' });
-    titleDiv.appendChild(title);
-    titleDiv.appendChild(desc);
+    titleDiv.appendChild(el('h2', { className: 'dev-banner-title', textContent: 'Virtual Controls' }));
+    _devModePillEl = el('span', { className: 'dev-mode-pill', textContent: 'Hardware' });
+    titleDiv.appendChild(_devModePillEl);
     bannerTop.appendChild(titleDiv);
 
     const toggleBtn = el('button', {
         type: 'button',
         id: 'dev-mode-toggle-btn',
-        className: 'dev-toggle-btn'
+        className: 'dev-toggle-btn',
+        'aria-pressed': 'false'
     });
     toggleBtn.addEventListener('click', () => {
         const ctx = getContext();
@@ -629,20 +587,17 @@ export function buildDevControlPane() {
     });
     _devModeToggleBtn = toggleBtn;
     bannerTop.appendChild(toggleBtn);
-
     banner.appendChild(bannerTop);
 
-    // Action buttons row
     const actionsRow = el('div', { className: 'dev-actions-row' });
 
     const resetBtn = el('button', {
         type: 'button',
         className: 'dev-action-btn',
-        textContent: 'Reset to Default Values'
+        textContent: 'Reset'
     });
     resetBtn.addEventListener('click', () => {
         sendVirtualReset();
-        // Optimistically apply defaults to UI
         for (let i = 0; i < POT_NAMES.length; i++) {
             const name = POT_NAMES[i];
             const defVal = getPotDevDefault(name);
@@ -650,7 +605,10 @@ export function buildDevControlPane() {
             if (_potValueLabels[i]) _potValueLabels[i].textContent = formatPotValue(name, defVal);
         }
         for (let i = 0; i < SWITCH_NAMES.length; i++) {
-            if (_switchButtons[i]) _switchButtons[i].classList.remove('active', 'firing');
+            if (_switchButtons[i]) {
+                _switchButtons[i].classList.remove('active', 'firing');
+                _switchButtons[i].setAttribute('aria-pressed', 'false');
+            }
         }
     });
     actionsRow.appendChild(resetBtn);
@@ -658,7 +616,7 @@ export function buildDevControlPane() {
     const muteBtn = el('button', {
         type: 'button',
         className: 'dev-action-btn',
-        textContent: 'Mute Master (0%)'
+        textContent: 'Mute Master'
     });
     muteBtn.addEventListener('click', () => {
         if (_potSliders[24]) _potSliders[24].value = '0';
@@ -670,11 +628,14 @@ export function buildDevControlPane() {
     const unkillBtn = el('button', {
         type: 'button',
         className: 'dev-action-btn',
-        textContent: 'Disable All Kills'
+        textContent: 'Unkill All'
     });
     unkillBtn.addEventListener('click', () => {
         for (let i = 0; i < 4; i++) {
-            if (_switchButtons[i]) _switchButtons[i].classList.remove('active');
+            if (_switchButtons[i]) {
+                _switchButtons[i].classList.remove('active');
+                _switchButtons[i].setAttribute('aria-pressed', 'false');
+            }
             sendVirtualSwitch(i, false);
         }
     });
@@ -683,7 +644,6 @@ export function buildDevControlPane() {
     banner.appendChild(actionsRow);
     pane.appendChild(banner);
 
-    // 2. Interactive Sections Container
     const controlsContainer = el('div', { id: 'dev-controls-container', className: 'dev-controls-container' });
     _devControlsContainerEl = controlsContainer;
 
@@ -699,18 +659,14 @@ export function buildDevControlPane() {
     return pane;
 }
 
-/**
- * Called periodically from draw() to reflect live pot and switch values
- * into the Dev Control tab when the user is not actively dragging.
- */
+/** Reflects live pot and switch values into Dev Controls when not actively dragging. */
 export function updateDevControlsLive() {
     const ctx = getContext();
     if (!ctx || !ctx.uiDevMode) return;
 
-    // Only update UI if we have pot values
     if (ctx.potValues && ctx.potValues.length >= POT_NAMES.length) {
         for (let i = 0; i < POT_NAMES.length; i++) {
-            if (i === _activeInteractingPot) continue; // Don't fight active touch/mouse
+            if (i === _activeInteractingPot) continue;
             const val = ctx.potValues[i];
             const slider = _potSliders[i];
             const valLbl = _potValueLabels[i];
@@ -721,18 +677,13 @@ export function updateDevControlsLive() {
         }
     }
 
-    // Switches reflection
     if (ctx.switchStates && ctx.switchStates.length >= SWITCH_NAMES.length) {
         for (let i = 0; i < SWITCH_NAMES.length; i++) {
             const btn = _switchButtons[i];
             if (!btn) continue;
             const isOn = ctx.switchStates[i] > 0.5;
-            if (i === 8) {
-                // Siren trigger
-                btn.classList.toggle('active', isOn);
-            } else {
-                btn.classList.toggle('active', isOn);
-            }
+            btn.classList.toggle('active', isOn);
+            btn.setAttribute('aria-pressed', isOn ? 'true' : 'false');
         }
     }
 }

@@ -41,31 +41,34 @@ The operational performance dashboard:
 
 ### 2.2 FX Tab (Digital Multi-FX Engine)
 Real-time digital effects and dynamic channel send routing:
-- **Channel Sends Routing Matrix:** Dynamic assignment of 5 send sources (AUX 1–4 and Dub Siren) for Send 1 and Send 2 to `[HW Out]`, `[SUB]`, `[ECHO]`, `[SPRING]`, `[PHASER]`, `[TAPE]`, `[SHIM]`, or `[OFF]`. Diverts sends away from physical jacks directly into internal digital processors while keeping hardware knob control.
-- **TAPE DRIVE Module:** Analog tape desk saturation and coloration with asymmetric even harmonics (`fastTanh`), warmth high-cut filtering (6–16 kHz), and output gain scaling.
-- **DUB DUCKER Module:** Automatic sidechain ducker for time-based FX returns (Echo, Spring, Shimmer) keyed off Dub Siren / Sampler, Mic inputs, or Master bus.
-- **SUB ROAR Module:** Sub-harmonic bass synthesizer and asymmetric saturation (< 80 Hz) driven by a continuous broadband musical envelope follower. Parameters: Tune (30–90 Hz), Roar Drive (0–100%), Decay (100–3000 ms), 24 dB/oct Sub Cutoff (40–120 Hz), Return Level (0–150%).
-- **ECHO DUB Module:** Authentic space tape echo and saturating dub delay. Parameters: Delay Time (40–1500 ms) with rhythm sync buttons (1/16, 1/8, 1/8d, 1/4, Dub Long), Feedback (0–115%, with self-oscillation above 85%), Tape Tone High-Cut (1000–5000 Hz), Wow/Flutter (0–100%), Return Level (0–100%). Includes a **"KILL SEND"** latching button and a real-time safe **"CLEAR ECHO"** flush button.
-- **TUBBY SPRING Module:** King Tubby style physical spring reverb tank with 4-stage all-pass dispersion ladder, 4 prime comb filters, high-damping tone, and an interactive **"SPRING SPLASH"** button simulating a knuckle/kick on the physical reverb tank.
-- **BLACK ARK PHASER Module:** Lee "Scratch" Perry Mu-Tron style 6 or 12-pole bi-phase swirler with saturating feedback and sub-sampled coefficient glide.
-- **SHIMMER DELAY Module:** Pitch-shifted granular delay (-12 to +12 semitones, 5th, octave) with raised cosine dual-tap windowing, feedback damping, and a **"CLEAR SHIMMER"** flush button.
+- **Send Routing & Direct Trigger:** Dynamic assignment of 5 send sources (AUX 1–4 and Dub Siren) for Send 1 and Send 2 to `HW`, `SUB`, `ECHO`, `SPRING`, `PHASER`, `TAPE`, `SHIM`, or `OFF`. Each send row includes a direct **`Send`** trigger button (momentary by default, or toggled via **`Latch`**) that fires the channel's FX send directly from the FX tab in both Hardware and Virtual modes, plus an optional **`Test Tone`** (220/440 Hz) injection toggle for auditioning AUX sends with no external audio connected.
+- **Tape Drive:** Analog tape desk saturation (`fastTanh`), warmth high-cut filtering (6–16 kHz), asymmetry, and return level.
+- **Ducker:** Sidechain ducker for time-based returns (Echo, Spring, Shimmer) keyed off Siren, Mic, Master, or All.
+- **Sub Roar:** Sub-harmonic synthesizer and saturation (< 80 Hz) with Tune, Drive, Decay, 24 dB/oct Cutoff, and Return.
+- **Echo Dub:** Space tape echo and saturating dub delay (40–1500 ms, rhythm sync presets, Feedback up to 115%, Tone, Flutter, Return, `Kill Send`, and `Clear`).
+- **Tubby Spring:** Physical spring reverb tank (Dwell, Decay, Tone, Return, and mechanical `Splash` trigger).
+- **Black Ark Phaser:** 6 or 12-stage bi-phase swirler with sweep rate presets, depth, feedback, and return.
+- **Shimmer Delay:** Pitch-shifted granular delay (-12 to +12 semitones, presets, Delay Time, Feedback, Grain, Return, and `Clear`).
 
-### 2.3 Contrôles UI Tab (Dev Mode / Virtual Controls)
-Full virtual console for developing, debugging, and testing without physical potentiometers or switches:
-- **Mode Toggle:** Instant toggle between Hardware Control Mode and UI Control (Dev) Mode.
-  - *When Inactive:* **0% CPU overhead**, standard physical MUX & MCP23017 scanning.
-  - *When Active:* MUX ADC scanning is bypassed to prevent floating pin noise from forcing unnecessary biquad recalculations, saving CPU on Bela.
-- **Master & Kills:** 4-band parallel crossover kills (SUB, KICK, MID, TOP), Master Volume fader, Band Trim (±6 dB), resonant HPF and LPF controls.
-- **Channel Strips (AUX 1–4):** Input Gain, 3-band EQ (Low, Mid, High with center-snap at 0 dB), FX1 & FX2 Send levels.
-- **Master EQ Section:** 4-band parametric EQ (sweepable frequency and gain) and 12-band Graphic EQ with "Flat" reset.
-- **Effects & Dub Siren:** FX send mode selectors (MIDS, TOPS), FX return gains, siren parameters, and momentary / latching siren trigger buttons.
-- **Quick Actions:** "Réinitialiser aux valeurs neutres" (resets all virtual controls to musical nominals) and "Mute Master".
+### 2.3 Controls Tab (Virtual Controls)
+Compact virtual console for developing, debugging, and testing without physical potentiometers or switches:
+- **Mode Toggle:** Instant toggle between `Hardware` and `Virtual · ADC paused` (skips MUX ADC scanning on Bela).
+- **Master:** 4-band parallel crossover kills (`SUB`, `KICK`, `MID`, `TOP`), Master Gain, Band Trim (±6 dB), resonant HPF and LPF.
+- **Channels (AUX 1–4):** Gain, 3-band EQ (High, Mid, Low), FX1 & FX2 Send levels.
+- **Master EQ:** 4-band Parametric EQ and 12-band Graphic EQ with `Flat` reset.
+- **FX & Siren:** FX1/FX2 send filters (`Mids`, `Tops`), FX return gains, and Dub Siren controls (`Trigger` momentary & `Latch`).
+- **Quick Actions:** `Reset`, `Mute Master`, and `Unkill All`.
 
 ### 2.4 Mapping Tab
-Hardware diagnostic and configuration utility:
-- Visual display of all 8 multiplexer channels and MCP23017 GPIO pins.
-- **Live Pot Detection:** Highlights which potentiometer is currently moving to verify wiring.
-- **Configuration Exporter:** Generates a ready-to-use `config.json` file reflecting the live physical setup.
+Guided hardware configuration and direct `config.json` management on the Bela board, organized into 3 sub-views plus a top action bar:
+- **Top Action Bar:**
+  - **`Load`:** Imports a local `config.json` file from disk into all Mapping sub-views (`Controls`, `Audio I/O`, `Advanced`) for review and editing.
+  - **`Export config.json`:** Literally downloads the `config.json` file currently saved on the Bela board (`/root/Bela/projects/<project>/config.json`).
+  - **`Save`:** Validates the current Mapping form and writes `config.json` atomically directly onto the Bela board via `Bela.control` (without copying files manually or opening the Bela IDE).
+  - **`Restart`:** Cleanly fades out audio (30 ms S-curve) and restarts the Bela audio program (~2–3 s) to reload `config.json`, without dropping Wi-Fi / hotspot connectivity. Prompts for confirmation (with a **`Save & Restart`** shortcut if unsaved changes exist).
+- **Controls:** Step-by-step **`Guided Setup`** assistant + grouped collapsible sections (`Master & Filters`, `AUX 1–4`, `Parametric EQ`, `Graphic EQ`, `Siren & FX`) with search/type/conflict filters, live activity meters, polarity `Rev` toggle, and per-row `Learn` auto-detect.
+- **Audio I/O:** Physical Bela inputs/outputs assignment (`Ch`, boot `dB` gain, `Stereo` master toggle, `Mic` mode & `HPF` Hz for AUX 1–4). Kept independent from temporary live gain/stereo adjustments on the `Live` tab so `Save` persists only the Mapping form.
+- **Advanced:** Excluded MUX pins list with 1-click **`Auto-ignore unmapped`**, **`Clip LEDs (MCP23017)`** pin & polarity editor (with MCP23017 conflict detection against switches), **`Boot & System`** (`developerMode` boot toggle and secondary **`Reboot Bela`** full OS reboot button), and read-only hardware calibration/I2C summary.
 
 ---
 
@@ -78,6 +81,7 @@ The Bela IDE only loads a single script file: `src/sketch.js`. Because browsers 
 gui/
 ├── main.js             # p5.js lifecycle (setup, draw, event hooks)
 ├── config.js           # UI constants, control names, and buffer IDs
+├── board-config.js     # Live config.json HTTP fetch & Bela.control Save/Restart/Reboot RPCs
 ├── state.js            # Shared mutable application state
 ├── context.js          # Canvas rendering context helpers
 ├── css.js              # Injected CSS styles for clean dark UI
@@ -144,6 +148,22 @@ The GUI communicates with the C++ backend using Bela's bi-directional WebSocket 
   ```javascript
   Bela.control.send({ event: 'custom', uiReset: true });
   ```
+- **Save `config.json` Directly to Bela (atomic write, replies with `configAction: 'save'` ACK):**
+  ```javascript
+  Bela.control.send({ event: 'custom', saveConfigText: jsonString, reqId: '...' });
+  ```
+- **Read Raw `config.json` Fallback (replies with `configAction: 'read'`):**
+  ```javascript
+  Bela.control.send({ event: 'custom', readConfig: true, reqId: '...' });
+  ```
+- **Restart Bela Audio Program (~2–3 s, 30 ms fade-out, Wi-Fi preserved):**
+  ```javascript
+  Bela.control.send({ event: 'custom', restartAudio: true, reqId: '...' });
+  ```
+- **Reboot Entire Bela Board (~25–30 s OS reboot, 30 ms fade-out):**
+  ```javascript
+  Bela.control.send({ event: 'custom', rebootBoard: true, reqId: '...' });
+  ```
 
 ### 4.2 C++ to UI (Data Buffers)
 - **Buffer 0:** 60 named potentiometer positions (`kAllNamedPots`).
@@ -151,7 +171,7 @@ The GUI communicates with the C++ backend using Bela's bi-directional WebSocket 
 - **Buffer 2:** Siren state [presetIdx, gate, mod].
 - **Buffer 3:** Audio peak levels across all 13 monitored points.
 - **Buffer 4–5:** Pot and switch hardware mapping.
-- **Buffer 6:** Configuration metadata (routing, master stereo, `UI_DEV_MODE` at index 33, ignored pots).
+- **Buffer 6:** Configuration metadata (routing, master stereo, `UI_DEV_MODE` at index 33, ignored pots, `DEV_MODE` boot flag at index 99, Clip LEDs at indices 100–104).
 - **Buffer 7:** Raw 80-channel MUX grid for mapping discovery.
 - **Buffer 8:** Codec PGA ADC input / DAC output gains.
 - **Buffer 9:** CPU core temperature (°C).

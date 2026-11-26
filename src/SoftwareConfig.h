@@ -1,4 +1,5 @@
 #pragma once
+#include <cstddef>
 #include <cstdint>
 
 /**
@@ -498,15 +499,26 @@ constexpr int kGuiUpdateIntervalSamples = 2205;
 /// Resend static mapping/config-meta buffers every N GUI ticks (~2 s @ 20 fps).
 constexpr int kGuiStaticBufSendDivisor = 40;
 
-/// Float count for GUI buffer 6 (mux, routing, ignoredPots). Must match
-/// sketch.js. Layout: [0-4] mux/cal/i2c | [5-7] master outs | [8-9] fx sends |
-/// [10-13] vu outs
-///         [14-15] fx returns | [16-19] AUX channelL | [20-23] AUX micMode
-///         [24-27] AUX hpfHz | [28-31] AUX channelR | [32] masterStereo | [33] uiDevMode | [34]
-///         ignoredPotsCount | [35+] ignored pairs
+/// Float count for GUI buffer 6 (mux, routing, ignoredPots, boot dev mode,
+/// clip LEDs). Must match gui/config.js.
+/// Layout: [0-4] mux/cal/i2c | [5-7] master outs | [8-9] fx sends |
+///         [10-13] vu outs | [14-15] fx returns | [16-19] AUX channelL |
+///         [20-23] AUX micMode | [24-27] AUX hpfHz | [28-31] AUX channelR |
+///         [32] masterStereo | [33] uiDevMode | [34] ignoredPotsCount |
+///         [35-98] ignored pairs (32 max) | [99] devModeBoot |
+///         [100-104] clipLeds (master, aux1..4)
 constexpr int kGuiConfigMetaHeaderFloats = 35;
+constexpr int kGuiConfigMetaExtraBase = kGuiConfigMetaHeaderFloats + 64; // 99
+constexpr int kGuiConfigMetaClipLedCount = 5;
 constexpr int kGuiConfigMetaSize =
-    kGuiConfigMetaHeaderFloats + 64; // 32 ignored pairs max
+    kGuiConfigMetaExtraBase + 1 + kGuiConfigMetaClipLedCount; // 105
+
+/// Maximum accepted config.json payload size (bytes) when saving from GUI.
+constexpr std::size_t kConfigSaveMaxBytes = 262144;
+
+/// Maximum poll iterations (at 50 ms each = 2 s) waiting for clean audio
+/// shutdown before triggering restart/reboot.
+constexpr int kRestartWaitPollIterations = 40;
 
 /// Raw MUX grid for GUI buffer 7: kNumMux × kPotsPerMux (must match
 /// HardwareConfig.h).
@@ -643,4 +655,18 @@ constexpr float kDubDuckerReleaseMaxMs     = 1500.f;
 constexpr float kDubDuckerReleaseDefaultMs = 350.f;
 constexpr float kDubDuckerAmountDefault    = 0.75f;
 constexpr int   kDubDuckerSourceDefault    = 0; // 0: Siren, 1: Mic, 2: Master, 3: All
+
+// ---------------------------------------------------------------------------
+// FX Tab Direct Send Trigger & Test Signal
+// ---------------------------------------------------------------------------
+
+/// Fundamental frequency of the optional FX Send test signal (Hz).
+constexpr float kFxTestToneFreqHz = 220.f;
+
+/// Peak amplitude of the optional FX Send test signal.
+constexpr float kFxTestToneGain = 0.25f;
+
+/// Attack / release smoothing times for click-free FX Send test tone gating (ms).
+constexpr float kFxTestToneAttackMs  = 5.f;
+constexpr float kFxTestToneReleaseMs = 25.f;
 

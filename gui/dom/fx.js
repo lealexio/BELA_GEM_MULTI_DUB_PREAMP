@@ -1,6 +1,6 @@
 /**
- * Digital Multi-FX Engine UI pane (SUB ROAR, ECHO DUB, TUBBY SPRING, BLACK ARK,
- * TAPE DRIVE, SHIMMER DELAY, DUCKER).
+ * Digital Multi-FX Engine UI pane (Routing + Send Triggers, Tape Drive, Ducker,
+ * Sub Roar, Echo Dub, Tubby Spring, Shimmer Delay, Black Ark Phaser).
  */
 import { getContext } from '../context.js';
 import {
@@ -13,7 +13,9 @@ import {
     FX_DEST_SHIMMER_DELAY,
     FX_DEST_MUTE
 } from '../config.js';
-import { el } from './utils.js';
+import { el, svgIcon } from './utils.js';
+
+const ICON_SEND = ['M22 2L11 13', 'M22 2l-7 20-4-9-9-4 20-7Z'];
 
 function sendBelaControl(payload) {
     /* global Bela */
@@ -22,77 +24,166 @@ function sendBelaControl(payload) {
     }
 }
 
+/** Syncs UI button states and sends direct FX Send trigger state to render.cpp if changed. */
+function syncFxTriggerOutput(aux, send) {
+    const ctx = getContext();
+    if (!ctx.fxTriggers || !ctx.fxMomentaryTriggers || !ctx.fxLatchedTriggers) return;
+
+    const mom = !!ctx.fxMomentaryTriggers[aux][send];
+    const lat = !!ctx.fxLatchedTriggers[aux][send];
+    const effective = mom || lat;
+
+    (ctx.fxTriggerButtons || []).forEach(btn => {
+        if (parseInt(btn.dataset.aux, 10) === aux && parseInt(btn.dataset.send, 10) === send) {
+            btn.classList.toggle('active', mom);
+            btn.setAttribute('aria-pressed', mom ? 'true' : 'false');
+        }
+    });
+    (ctx.fxLatchButtons || []).forEach(btn => {
+        if (parseInt(btn.dataset.aux, 10) === aux && parseInt(btn.dataset.send, 10) === send) {
+            btn.classList.toggle('active', lat);
+            btn.setAttribute('aria-pressed', lat ? 'true' : 'false');
+        }
+    });
+
+    if (ctx.fxTriggers[aux][send] === effective) return;
+    ctx.fxTriggers[aux][send] = effective;
+
+    sendBelaControl({
+        event: 'custom',
+        fxTrigger: { aux, send, active: effective, testTone: !!ctx.fxTestTone }
+    });
+}
+
+function setMomentaryFxTrigger(aux, send, active) {
+    const ctx = getContext();
+    if (!ctx.fxMomentaryTriggers || ctx.fxMomentaryTriggers[aux][send] === active) return;
+    ctx.fxMomentaryTriggers[aux][send] = active;
+    syncFxTriggerOutput(aux, send);
+}
+
+function toggleLatchedFxTrigger(aux, send) {
+    const ctx = getContext();
+    if (!ctx.fxLatchedTriggers) return;
+    ctx.fxLatchedTriggers[aux][send] = !ctx.fxLatchedTriggers[aux][send];
+    syncFxTriggerOutput(aux, send);
+}
+
+/** Clears only momentary FX send triggers (preserves On/Off latched triggers). */
+export function clearMomentaryFxTriggers() {
+    const ctx = getContext();
+    if (!ctx || !ctx.fxMomentaryTriggers) return;
+    for (let a = 0; a < ctx.fxMomentaryTriggers.length; a++) {
+        for (let s = 0; s < 2; s++) {
+            if (ctx.fxMomentaryTriggers[a][s]) {
+                ctx.fxMomentaryTriggers[a][s] = false;
+                syncFxTriggerOutput(a, s);
+            }
+        }
+    }
+}
+
+function clearAllFxTriggers() {
+    const ctx = getContext();
+    if (ctx) {
+        [ctx.fxTriggers, ctx.fxMomentaryTriggers, ctx.fxLatchedTriggers].forEach(arr => {
+            if (!arr) return;
+            for (let a = 0; a < arr.length; a++) {
+                arr[a][0] = false;
+                arr[a][1] = false;
+            }
+        });
+        (ctx.fxTriggerButtons || []).forEach(btn => {
+            btn.classList.remove('active');
+            btn.setAttribute('aria-pressed', 'false');
+        });
+        (ctx.fxLatchButtons || []).forEach(btn => {
+            btn.classList.remove('active');
+            btn.setAttribute('aria-pressed', 'false');
+        });
+    }
+    sendBelaControl({ event: 'custom', fxTriggerClearAll: true });
+}
+
+let _windowBlurBound = false;
+
 /** Builds the full FX tab pane. */
 export function buildFxPane() {
     const pane = el('div', { className: 'tab-pane', id: 'tab-fx' });
     const container = el('div', { className: 'fx-pane-container' });
 
-    // Top Header Banner
-    const hdr = el('div', { className: 'fx-header-banner' });
-    const titleBox = el('div', { className: 'fx-title-box' });
-    titleBox.appendChild(el('h2', { textContent: 'DIGITAL MULTI-FX ENGINE', className: 'fx-main-title' }));
-    titleBox.appendChild(el('p', {
-        textContent: 'Divert channel FX sends to internal real-time DSP effects (Echo, Spring, Saturation, Shimmer, Ducker)',
-        className: 'fx-subtitle'
-    }));
-    hdr.appendChild(titleBox);
-    container.appendChild(hdr);
+    if (!_windowBlurBound && typeof window !== 'undefined') {
+        _windowBlurBound = true;
+        window.addEventListener('blur', clearMomentaryFxTriggers);
+    }
 
-    // 1. ROUTING MATRIX SECTION
     container.appendChild(buildRoutingMatrixCard());
 
-    // 2. EFFECTS GRID
     const fxGrid = el('div', { className: 'fx-modules-grid' });
-    // Analog Coloration & Dynamics
     fxGrid.appendChild(buildTapeDriveCard());
     fxGrid.appendChild(buildDubDuckerCard());
     fxGrid.appendChild(buildSubRoarCard());
-
-    // Delays & Space Reverb
     fxGrid.appendChild(buildEchoDubCard());
     fxGrid.appendChild(buildTubbySpringCard());
     fxGrid.appendChild(buildShimmerDelayCard());
-
-    // Modulation & Psychedelic Dub
     fxGrid.appendChild(buildBlackArkPhaserCard());
 
     container.appendChild(fxGrid);
-
     pane.appendChild(container);
     return pane;
 }
 
-/** Builds the channel FX send routing matrix card. */
+/** Builds the channel FX send routing matrix card with direct Send Trigger buttons. */
 function buildRoutingMatrixCard() {
+    const ctx = getContext();
     const card = el('div', { className: 'fx-card fx-card-routing' });
     const cardHdr = el('div', { className: 'fx-card-header' });
-    cardHdr.appendChild(el('div', { className: 'fx-card-title', textContent: '🎛️ CHANNEL SENDS ROUTING MATRIX' }));
-    cardHdr.appendChild(el('div', {
-        className: 'fx-card-badge',
-        textContent: 'Hardware Knobs → Internal DSP'
-    }));
+    cardHdr.appendChild(el('div', { className: 'fx-card-title', textContent: 'Send Routing' }));
+
+    const tools = el('div', { className: 'fx-routing-tools' });
+
+    const testToneBtn = el('button', {
+        type: 'button',
+        className: 'fx-tool-btn' + (ctx.fxTestTone ? ' active' : ''),
+        textContent: 'Test Tone',
+        title: 'Inject 220/440 Hz test signal when triggering AUX sends',
+        'aria-pressed': ctx.fxTestTone ? 'true' : 'false'
+    });
+    testToneBtn.addEventListener('click', () => {
+        ctx.fxTestTone = !ctx.fxTestTone;
+        testToneBtn.classList.toggle('active', ctx.fxTestTone);
+        testToneBtn.setAttribute('aria-pressed', ctx.fxTestTone ? 'true' : 'false');
+        sendBelaControl({ event: 'custom', fxTestTone: ctx.fxTestTone });
+    });
+
+    const allOffBtn = el('button', {
+        type: 'button',
+        className: 'fx-tool-btn',
+        textContent: 'All Off',
+        title: 'Turn off all active Send triggers'
+    });
+    allOffBtn.addEventListener('click', () => clearAllFxTriggers());
+
+    tools.appendChild(testToneBtn);
+    tools.appendChild(allOffBtn);
+    cardHdr.appendChild(tools);
     card.appendChild(cardHdr);
 
-    const desc = el('p', {
-        className: 'fx-routing-desc',
-        textContent: 'Choose destination for each channel\'s FX Send. Selecting an internal digital effect diverts the signal from physical Jack Out directly into the DSP engine.'
-    });
-    card.appendChild(desc);
-
     const table = el('div', { className: 'fx-matrix-table' });
-    const ctx = getContext();
-    ctx.fxRouteButtons = [];
+    ctx.fxRouteSelects = [];
+    ctx.fxTriggerButtons = [];
+    ctx.fxLatchButtons = [];
 
-    const auxNames = ['AUX 1', 'AUX 2', 'AUX 3', 'AUX 4', '🚨 SIREN'];
+    const auxNames = ['AUX 1', 'AUX 2', 'AUX 3', 'AUX 4', 'SIREN'];
     const destinations = [
-        { id: FX_DEST_HARDWARE,      label: 'HW',     cls: 'dest-hw' },
-        { id: FX_DEST_SUB_ROAR,      label: 'SUB',    cls: 'dest-sub' },
-        { id: FX_DEST_ECHO_DUB,      label: 'ECHO',   cls: 'dest-dub' },
-        { id: FX_DEST_TUBBY_SPRING,  label: 'SPRING', cls: 'dest-spring' },
-        { id: FX_DEST_BLACK_ARK,     label: 'PHASER', cls: 'dest-phase' },
-        { id: FX_DEST_TAPE_DRIVE,    label: 'TAPE',   cls: 'dest-tape' },
-        { id: FX_DEST_SHIMMER_DELAY, label: 'SHIM',   cls: 'dest-shimmer' },
-        { id: FX_DEST_MUTE,          label: 'OFF',    cls: 'dest-mute' }
+        { id: FX_DEST_HARDWARE,      label: 'HW — Physical' },
+        { id: FX_DEST_SUB_ROAR,      label: 'SUB — Sub Roar' },
+        { id: FX_DEST_ECHO_DUB,      label: 'ECHO — Echo Dub' },
+        { id: FX_DEST_TUBBY_SPRING,  label: 'SPRING — Tubby' },
+        { id: FX_DEST_BLACK_ARK,     label: 'PHASER — Black Ark' },
+        { id: FX_DEST_TAPE_DRIVE,    label: 'TAPE — Drive' },
+        { id: FX_DEST_SHIMMER_DELAY, label: 'SHIM — Shimmer' },
+        { id: FX_DEST_MUTE,          label: 'OFF — Mute' }
     ];
 
     auxNames.forEach((name, auxIdx) => {
@@ -101,58 +192,112 @@ function buildRoutingMatrixCard() {
         chLabel.appendChild(el('span', { className: 'fx-ch-badge', textContent: name }));
         row.appendChild(chLabel);
 
-        // Send 1 (FX1)
-        const send1Col = el('div', { className: 'fx-matrix-send-col' });
-        send1Col.appendChild(el('span', {
-            className: 'fx-send-title',
-            textContent: auxIdx === 4 ? 'SIREN SEND 1' : 'FX 1 SEND (OUT0)'
-        }));
-        const grp1 = el('div', { className: 'fx-pill-group' });
-
-        // Send 2 (FX2)
-        const send2Col = el('div', { className: 'fx-matrix-send-col' });
-        send2Col.appendChild(el('span', {
-            className: 'fx-send-title',
-            textContent: auxIdx === 4 ? 'SIREN SEND 2' : 'FX 2 SEND (OUT1)'
-        }));
-        const grp2 = el('div', { className: 'fx-pill-group' });
+        const sendsWrap = el('div', { className: 'fx-matrix-sends' });
 
         [0, 1].forEach(sendIdx => {
-            const grp = sendIdx === 0 ? grp1 : grp2;
+            const sendCol = el('div', { className: 'fx-matrix-send-col' });
+            sendCol.appendChild(el('span', {
+                className: 'fx-send-tag',
+                textContent: 'S' + (sendIdx + 1),
+                title: 'Send ' + (sendIdx + 1)
+            }));
+
+            const currentDest = ctx.fxRouting[auxIdx][sendIdx];
+            const select = el('select', {
+                className: 'fx-route-select',
+                'aria-label': `${name} Send ${sendIdx + 1} destination`
+            });
+            select.dataset.aux = String(auxIdx);
+            select.dataset.send = String(sendIdx);
+            select.dataset.dest = String(currentDest);
+
             destinations.forEach(dest => {
-                const btn = el('button', {
-                    type: 'button',
-                    className: `fx-pill-btn ${dest.cls}`,
+                const opt = el('option', {
+                    value: String(dest.id),
                     textContent: dest.label
                 });
-
-                const isCurrent = ctx.fxRouting[auxIdx][sendIdx] === dest.id;
-                if (isCurrent) btn.classList.add('active');
-
-                btn.dataset.aux = auxIdx;
-                btn.dataset.send = sendIdx;
-                btn.dataset.dest = dest.id;
-
-                btn.addEventListener('click', () => {
-                    ctx.fxRouting[auxIdx][sendIdx] = dest.id;
-                    grp.querySelectorAll('.fx-pill-btn').forEach(b => b.classList.remove('active'));
-                    btn.classList.add('active');
-
-                    sendBelaControl({
-                        event: 'custom',
-                        fxRoute: { aux: auxIdx, send: sendIdx, dest: dest.id }
-                    });
-                });
-
-                grp.appendChild(btn);
-                ctx.fxRouteButtons.push(btn);
+                select.appendChild(opt);
             });
+            select.value = String(currentDest);
+
+            select.addEventListener('change', () => {
+                const destId = parseInt(select.value, 10);
+                ctx.fxRouting[auxIdx][sendIdx] = destId;
+                select.dataset.dest = String(destId);
+                sendBelaControl({
+                    event: 'custom',
+                    fxRoute: { aux: auxIdx, send: sendIdx, dest: destId }
+                });
+            });
+
+            ctx.fxRouteSelects.push(select);
+            sendCol.appendChild(select);
+
+            const trigWrap = el('div', { className: 'fx-send-triggers' });
+
+            const trigBtn = el('button', {
+                type: 'button',
+                className: 'fx-trig-btn' + (ctx.fxMomentaryTriggers[auxIdx][sendIdx] ? ' active' : ''),
+                title: auxIdx === 4
+                    ? `Hold to trigger Siren on Send ${sendIdx + 1}`
+                    : `Hold to trigger ${name} Send ${sendIdx + 1}`,
+                'aria-label': `Momentary ${name} Send ${sendIdx + 1}`,
+                'aria-pressed': ctx.fxMomentaryTriggers[auxIdx][sendIdx] ? 'true' : 'false'
+            });
+            trigBtn.dataset.aux = String(auxIdx);
+            trigBtn.dataset.send = String(sendIdx);
+            trigBtn.appendChild(svgIcon(ICON_SEND, '0 0 24 24', 12));
+            trigBtn.appendChild(el('span', { textContent: 'Send' }));
+
+            trigBtn.addEventListener('pointerdown', (e) => {
+                e.preventDefault();
+                if (typeof trigBtn.setPointerCapture === 'function') {
+                    try { trigBtn.setPointerCapture(e.pointerId); } catch (_) {}
+                }
+                setMomentaryFxTrigger(auxIdx, sendIdx, true);
+            });
+            const releaseMomentary = () => setMomentaryFxTrigger(auxIdx, sendIdx, false);
+            trigBtn.addEventListener('pointerup', releaseMomentary);
+            trigBtn.addEventListener('pointercancel', releaseMomentary);
+            trigBtn.addEventListener('lostpointercapture', releaseMomentary);
+            trigBtn.addEventListener('blur', releaseMomentary);
+
+            trigBtn.addEventListener('keydown', (e) => {
+                if ((e.key === ' ' || e.key === 'Enter') && !e.repeat) {
+                    e.preventDefault();
+                    setMomentaryFxTrigger(auxIdx, sendIdx, true);
+                }
+            });
+            trigBtn.addEventListener('keyup', (e) => {
+                if (e.key === ' ' || e.key === 'Enter') {
+                    e.preventDefault();
+                    setMomentaryFxTrigger(auxIdx, sendIdx, false);
+                }
+            });
+
+            const latchBtn = el('button', {
+                type: 'button',
+                className: 'fx-trig-btn fx-trig-latch' + (ctx.fxLatchedTriggers[auxIdx][sendIdx] ? ' active' : ''),
+                textContent: 'On/Off',
+                title: auxIdx === 4
+                    ? `Toggle Siren on Send ${sendIdx + 1} (On/Off)`
+                    : `Toggle ${name} Send ${sendIdx + 1} (On/Off)`,
+                'aria-label': `Toggle ${name} Send ${sendIdx + 1}`,
+                'aria-pressed': ctx.fxLatchedTriggers[auxIdx][sendIdx] ? 'true' : 'false'
+            });
+            latchBtn.dataset.aux = String(auxIdx);
+            latchBtn.dataset.send = String(sendIdx);
+            latchBtn.addEventListener('click', () => toggleLatchedFxTrigger(auxIdx, sendIdx));
+
+            ctx.fxTriggerButtons.push(trigBtn);
+            ctx.fxLatchButtons.push(latchBtn);
+            trigWrap.appendChild(trigBtn);
+            trigWrap.appendChild(latchBtn);
+            sendCol.appendChild(trigWrap);
+            sendsWrap.appendChild(sendCol);
         });
 
-        send1Col.appendChild(grp1);
-        send2Col.appendChild(grp2);
-        row.appendChild(send1Col);
-        row.appendChild(send2Col);
+        row.appendChild(sendsWrap);
         table.appendChild(row);
     });
 
@@ -160,43 +305,49 @@ function buildRoutingMatrixCard() {
     return card;
 }
 
+/** Creates a compact header with title and enable toggle switch. */
+function buildFxCardHeader(title, enabled, onToggle) {
+    const cardHdr = el('div', { className: 'fx-card-header' });
+    cardHdr.appendChild(el('div', { className: 'fx-card-title', textContent: title }));
+
+    const pwrWrap = el('label', { className: 'fx-toggle-wrap', title: `Enable ${title}` });
+    const pwrCheck = el('input', {
+        type: 'checkbox',
+        checked: enabled,
+        'aria-label': `Enable ${title}`
+    });
+    pwrCheck.addEventListener('change', () => onToggle(pwrCheck.checked));
+    const track = el('span', { className: 'fx-toggle-track', 'aria-hidden': 'true' });
+    track.appendChild(el('span', { className: 'fx-toggle-thumb' }));
+    pwrWrap.appendChild(pwrCheck);
+    pwrWrap.appendChild(track);
+    cardHdr.appendChild(pwrWrap);
+    return cardHdr;
+}
+
+function buildFxMeter(fillCls) {
+    const track = el('div', { className: 'fx-meter-track' });
+    const fill = el('div', { className: 'fx-meter-fill ' + fillCls });
+    track.appendChild(fill);
+    return { track, fill };
+}
+
 /** 1. TAPE DRIVE CARD */
 function buildTapeDriveCard() {
     const ctx = getContext();
-    const card = el('div', { className: 'fx-card fx-card-tapedrive' });
+    const card = el('div', { className: 'fx-card' });
+    card.appendChild(buildFxCardHeader('Tape Drive', ctx.tapeDrive.enabled, (en) => {
+        ctx.tapeDrive.enabled = en;
+        sendBelaControl({ event: 'custom', tapeDrive: { enabled: en } });
+    }));
 
-    const cardHdr = el('div', { className: 'fx-card-header' });
-    const titleGroup = el('div', { className: 'fx-card-title-group' });
-    titleGroup.appendChild(el('div', { className: 'fx-card-title tape-title', textContent: '📼 TAPE SATURATION & DRIVE' }));
-    titleGroup.appendChild(el('div', { className: 'fx-card-desc', textContent: 'Analog Desk Coloration, Even Harmonics & Warm Bandwidth' }));
-    cardHdr.appendChild(titleGroup);
-
-    const pwrWrap = el('label', { className: 'fx-toggle-wrap' });
-    const pwrCheck = el('input', { type: 'checkbox', checked: ctx.tapeDrive.enabled });
-    pwrCheck.addEventListener('change', () => {
-        ctx.tapeDrive.enabled = pwrCheck.checked;
-        sendBelaControl({ event: 'custom', tapeDrive: { enabled: pwrCheck.checked } });
-    });
-    pwrWrap.appendChild(pwrCheck);
-    pwrWrap.appendChild(el('span', { className: 'fx-toggle-label', textContent: 'ACTIVE' }));
-    cardHdr.appendChild(pwrWrap);
-    card.appendChild(cardHdr);
-
-    const meterBox = el('div', { className: 'fx-meter-box' });
-    meterBox.appendChild(el('span', { className: 'fx-meter-lbl', textContent: 'TAPE DRIVE LEVEL' }));
-    const meterTrack = el('div', { className: 'fx-meter-track' });
-    const meterFill = el('div', { className: 'fx-meter-fill tape-fill' });
-    meterTrack.appendChild(meterFill);
-    meterBox.appendChild(meterTrack);
-    card.appendChild(meterBox);
-    ctx.fxTapeMeterEl = meterFill;
+    const meter = buildFxMeter('tape-fill');
+    card.appendChild(meter.track);
+    ctx.fxTapeMeterEl = meter.fill;
 
     const controls = el('div', { className: 'fx-controls-list' });
-
     controls.appendChild(createFxSlider({
-        label: 'DRIVE (Saturation)',
-        unit: '%',
-        min: 0, max: 100, step: 1,
+        label: 'Drive', unit: '%', min: 0, max: 100, step: 1,
         value: Math.round(ctx.tapeDrive.drive * 100),
         onChange: val => {
             const d = val / 100.0;
@@ -204,22 +355,16 @@ function buildTapeDriveCard() {
             sendBelaControl({ event: 'custom', tapeDrive: { drive: d } });
         }
     }));
-
     controls.appendChild(createFxSlider({
-        label: 'TAPE WARMTH (High-Cut LPF)',
-        unit: ' Hz',
-        min: 6000, max: 16000, step: 100,
+        label: 'Warmth', unit: ' Hz', min: 6000, max: 16000, step: 100,
         value: ctx.tapeDrive.warmth,
         onChange: val => {
             ctx.tapeDrive.warmth = val;
             sendBelaControl({ event: 'custom', tapeDrive: { warmth: val } });
         }
     }));
-
     controls.appendChild(createFxSlider({
-        label: 'ASYMMETRY (Even Harmonics)',
-        unit: '%',
-        min: 0, max: 100, step: 1,
+        label: 'Asymmetry', unit: '%', min: 0, max: 100, step: 1,
         value: Math.round(ctx.tapeDrive.asymmetry * 100),
         onChange: val => {
             const a = val / 100.0;
@@ -227,11 +372,8 @@ function buildTapeDriveCard() {
             sendBelaControl({ event: 'custom', tapeDrive: { asymmetry: a } });
         }
     }));
-
     controls.appendChild(createFxSlider({
-        label: 'RETURN LEVEL',
-        unit: '%',
-        min: 0, max: 150, step: 1,
+        label: 'Return', unit: '%', min: 0, max: 150, step: 1,
         value: Math.round(ctx.tapeDrive.level * 100),
         onChange: val => {
             const l = val / 100.0;
@@ -240,61 +382,47 @@ function buildTapeDriveCard() {
         }
     }));
     card.appendChild(controls);
-
     return card;
 }
 
-/** 2. DUB DUCKER CARD (SIDECHAIN) */
+/** 2. DUB DUCKER CARD */
 function buildDubDuckerCard() {
     const ctx = getContext();
-    const card = el('div', { className: 'fx-card fx-card-ducker' });
+    const card = el('div', { className: 'fx-card' });
+    card.appendChild(buildFxCardHeader('Ducker', ctx.dubDucker.enabled, (en) => {
+        ctx.dubDucker.enabled = en;
+        sendBelaControl({ event: 'custom', dubDucker: { enabled: en } });
+    }));
 
-    const cardHdr = el('div', { className: 'fx-card-header' });
-    const titleGroup = el('div', { className: 'fx-card-title-group' });
-    titleGroup.appendChild(el('div', { className: 'fx-card-title ducker-title', textContent: '🦆 DUCKING SIDECHAIN' }));
-    titleGroup.appendChild(el('div', { className: 'fx-card-desc', textContent: 'Automatic Echo & Reverb Attenuation for MC Vocals & Siren' }));
-    cardHdr.appendChild(titleGroup);
-
-    const pwrWrap = el('label', { className: 'fx-toggle-wrap' });
-    const pwrCheck = el('input', { type: 'checkbox', checked: ctx.dubDucker.enabled });
-    pwrCheck.addEventListener('change', () => {
-        ctx.dubDucker.enabled = pwrCheck.checked;
-        sendBelaControl({ event: 'custom', dubDucker: { enabled: pwrCheck.checked } });
-    });
-    pwrWrap.appendChild(pwrCheck);
-    pwrWrap.appendChild(el('span', { className: 'fx-toggle-label', textContent: 'ACTIVE' }));
-    cardHdr.appendChild(pwrWrap);
-    card.appendChild(cardHdr);
-
-    const meterBox = el('div', { className: 'fx-meter-box' });
-    meterBox.appendChild(el('span', { className: 'fx-meter-lbl', textContent: 'GAIN REDUCTION (COMPRESSION)' }));
-    const meterTrack = el('div', { className: 'fx-meter-track ducker-track' });
-    const meterFill = el('div', { className: 'fx-meter-fill ducker-fill' });
-    meterTrack.appendChild(meterFill);
-    meterBox.appendChild(meterTrack);
-    card.appendChild(meterBox);
-    ctx.fxDuckerMeterEl = meterFill;
+    const meter = buildFxMeter('ducker-fill');
+    card.appendChild(meter.track);
+    ctx.fxDuckerMeterEl = meter.fill;
 
     const controls = el('div', { className: 'fx-controls-list' });
 
-    // Source Selector
     const srcRow = el('div', { className: 'fx-preset-row' });
     const sources = [
-        { id: 0, label: '🚨 Siren & Sampler' },
-        { id: 1, label: '🎤 Mic Inputs' },
-        { id: 2, label: '🎚️ Master Bus' },
-        { id: 3, label: '🌐 All Key Sources' }
+        { id: 0, label: 'Siren' },
+        { id: 1, label: 'Mic' },
+        { id: 2, label: 'Master' },
+        { id: 3, label: 'All' }
     ];
     sources.forEach(s => {
+        const isAct = ctx.dubDucker.source === s.id;
         const btn = el('button', {
             type: 'button',
-            className: 'fx-mini-btn' + (ctx.dubDucker.source === s.id ? ' active' : ''),
-            textContent: s.label
+            className: 'fx-mini-btn' + (isAct ? ' active' : ''),
+            textContent: s.label,
+            'aria-pressed': isAct ? 'true' : 'false'
         });
         btn.addEventListener('click', () => {
             ctx.dubDucker.source = s.id;
-            srcRow.querySelectorAll('.fx-mini-btn').forEach(b => b.classList.remove('active'));
+            srcRow.querySelectorAll('.fx-mini-btn').forEach(b => {
+                b.classList.remove('active');
+                b.setAttribute('aria-pressed', 'false');
+            });
             btn.classList.add('active');
+            btn.setAttribute('aria-pressed', 'true');
             sendBelaControl({ event: 'custom', dubDucker: { source: s.id } });
         });
         srcRow.appendChild(btn);
@@ -302,9 +430,7 @@ function buildDubDuckerCard() {
     controls.appendChild(srcRow);
 
     controls.appendChild(createFxSlider({
-        label: 'THRESHOLD',
-        unit: '%',
-        min: 1, max: 50, step: 1,
+        label: 'Threshold', unit: '%', min: 1, max: 50, step: 1,
         value: Math.round(ctx.dubDucker.threshold * 100),
         onChange: val => {
             const th = val / 100.0;
@@ -312,22 +438,16 @@ function buildDubDuckerCard() {
             sendBelaControl({ event: 'custom', dubDucker: { threshold: th } });
         }
     }));
-
     controls.appendChild(createFxSlider({
-        label: 'RELEASE TIME',
-        unit: ' ms',
-        min: 50, max: 1500, step: 25,
+        label: 'Release', unit: ' ms', min: 50, max: 1500, step: 25,
         value: ctx.dubDucker.releaseMs,
         onChange: val => {
             ctx.dubDucker.releaseMs = val;
             sendBelaControl({ event: 'custom', dubDucker: { releaseMs: val } });
         }
     }));
-
     controls.appendChild(createFxSlider({
-        label: 'DUCK AMOUNT (Attenuation)',
-        unit: '%',
-        min: 0, max: 100, step: 1,
+        label: 'Duck', unit: '%', min: 0, max: 100, step: 1,
         value: Math.round(ctx.dubDucker.duckAmount * 100),
         onChange: val => {
             const d = val / 100.0;
@@ -343,51 +463,27 @@ function buildDubDuckerCard() {
 /** 3. SUB ROAR CARD */
 function buildSubRoarCard() {
     const ctx = getContext();
-    const card = el('div', { className: 'fx-card fx-card-subroar' });
+    const card = el('div', { className: 'fx-card' });
+    card.appendChild(buildFxCardHeader('Sub Roar', ctx.subRoar.enabled, (en) => {
+        ctx.subRoar.enabled = en;
+        sendBelaControl({ event: 'custom', subRoar: { enabled: en } });
+    }));
 
-    const cardHdr = el('div', { className: 'fx-card-header' });
-    const titleGroup = el('div', { className: 'fx-card-title-group' });
-    titleGroup.appendChild(el('div', { className: 'fx-card-title sub-title', textContent: '⚡ SUB ROAR' }));
-    titleGroup.appendChild(el('div', { className: 'fx-card-desc', textContent: 'Sub-Harmonic Synthesizer & Roar Saturator (< 80 Hz)' }));
-    cardHdr.appendChild(titleGroup);
-
-    const pwrWrap = el('label', { className: 'fx-toggle-wrap' });
-    const pwrCheck = el('input', { type: 'checkbox', checked: ctx.subRoar.enabled });
-    pwrCheck.addEventListener('change', () => {
-        ctx.subRoar.enabled = pwrCheck.checked;
-        sendBelaControl({ event: 'custom', subRoar: { enabled: pwrCheck.checked } });
-    });
-    pwrWrap.appendChild(pwrCheck);
-    pwrWrap.appendChild(el('span', { className: 'fx-toggle-label', textContent: 'ACTIVE' }));
-    cardHdr.appendChild(pwrWrap);
-    card.appendChild(cardHdr);
-
-    const meterBox = el('div', { className: 'fx-meter-box' });
-    meterBox.appendChild(el('span', { className: 'fx-meter-lbl', textContent: 'SUB ACTIVITY' }));
-    const meterTrack = el('div', { className: 'fx-meter-track' });
-    const meterFill = el('div', { className: 'fx-meter-fill sub-fill' });
-    meterTrack.appendChild(meterFill);
-    meterBox.appendChild(meterTrack);
-    card.appendChild(meterBox);
-    ctx.fxSubMeterEl = meterFill;
+    const meter = buildFxMeter('sub-fill');
+    card.appendChild(meter.track);
+    ctx.fxSubMeterEl = meter.fill;
 
     const controls = el('div', { className: 'fx-controls-list' });
-
     controls.appendChild(createFxSlider({
-        label: 'TUNE FREQUENCY',
-        unit: ' Hz',
-        min: 30, max: 90, step: 1,
+        label: 'Tune', unit: ' Hz', min: 30, max: 90, step: 1,
         value: ctx.subRoar.tune,
         onChange: val => {
             ctx.subRoar.tune = val;
             sendBelaControl({ event: 'custom', subRoar: { tune: val } });
         }
     }));
-
     controls.appendChild(createFxSlider({
-        label: 'ROAR DRIVE (Saturation)',
-        unit: '%',
-        min: 0, max: 100, step: 1,
+        label: 'Drive', unit: '%', min: 0, max: 100, step: 1,
         value: Math.round(ctx.subRoar.drive * 100),
         onChange: val => {
             const d = val / 100.0;
@@ -395,33 +491,24 @@ function buildSubRoarCard() {
             sendBelaControl({ event: 'custom', subRoar: { drive: d } });
         }
     }));
-
     controls.appendChild(createFxSlider({
-        label: 'DROP DECAY TIME',
-        unit: ' ms',
-        min: 100, max: 3000, step: 50,
+        label: 'Decay', unit: ' ms', min: 100, max: 3000, step: 50,
         value: ctx.subRoar.decay,
         onChange: val => {
             ctx.subRoar.decay = val;
             sendBelaControl({ event: 'custom', subRoar: { decay: val } });
         }
     }));
-
     controls.appendChild(createFxSlider({
-        label: 'STEEP LPF CUTOFF (24 dB/oct)',
-        unit: ' Hz',
-        min: 40, max: 120, step: 1,
+        label: 'Cutoff', unit: ' Hz', min: 40, max: 120, step: 1,
         value: ctx.subRoar.cutoff,
         onChange: val => {
             ctx.subRoar.cutoff = val;
             sendBelaControl({ event: 'custom', subRoar: { cutoff: val } });
         }
     }));
-
     controls.appendChild(createFxSlider({
-        label: 'RETURN LEVEL',
-        unit: '%',
-        min: 0, max: 150, step: 1,
+        label: 'Return', unit: '%', min: 0, max: 150, step: 1,
         value: Math.round(ctx.subRoar.level * 100),
         onChange: val => {
             const l = val / 100.0;
@@ -429,7 +516,6 @@ function buildSubRoarCard() {
             sendBelaControl({ event: 'custom', subRoar: { level: l } });
         }
     }));
-
     card.appendChild(controls);
     return card;
 }
@@ -438,65 +524,42 @@ function buildSubRoarCard() {
 function buildEchoDubCard() {
     const ctx = getContext();
     const dub = ctx.echoDub || ctx.echuDub;
-    const card = el('div', { className: 'fx-card fx-card-echodub' });
+    const card = el('div', { className: 'fx-card' });
+    card.appendChild(buildFxCardHeader('Echo Dub', dub.enabled, (en) => {
+        dub.enabled = en;
+        sendBelaControl({ event: 'custom', echoDub: { enabled: en }, echuDub: { enabled: en } });
+    }));
 
-    const cardHdr = el('div', { className: 'fx-card-header' });
-    const titleGroup = el('div', { className: 'fx-card-title-group' });
-    titleGroup.appendChild(el('div', { className: 'fx-card-title dub-title', textContent: '📼 ECHO DUB' }));
-    titleGroup.appendChild(el('div', { className: 'fx-card-desc', textContent: 'Space Tape Echo & Saturating Dub Delay' }));
-    cardHdr.appendChild(titleGroup);
-
-    const pwrWrap = el('label', { className: 'fx-toggle-wrap' });
-    const pwrCheck = el('input', { type: 'checkbox', checked: dub.enabled });
-    pwrCheck.addEventListener('change', () => {
-        dub.enabled = pwrCheck.checked;
-        sendBelaControl({ event: 'custom', echoDub: { enabled: pwrCheck.checked }, echuDub: { enabled: pwrCheck.checked } });
-    });
-    pwrWrap.appendChild(pwrCheck);
-    pwrWrap.appendChild(el('span', { className: 'fx-toggle-label', textContent: 'ACTIVE' }));
-    cardHdr.appendChild(pwrWrap);
-    card.appendChild(cardHdr);
-
-    const meterBox = el('div', { className: 'fx-meter-box' });
-    meterBox.appendChild(el('span', { className: 'fx-meter-lbl', textContent: 'ECHO ACTIVITY' }));
-    const meterTrack = el('div', { className: 'fx-meter-track' });
-    const meterFill = el('div', { className: 'fx-meter-fill dub-fill' });
-    meterTrack.appendChild(meterFill);
-    meterBox.appendChild(meterTrack);
-    card.appendChild(meterBox);
-    ctx.fxDubMeterEl = meterFill;
+    const meter = buildFxMeter('dub-fill');
+    card.appendChild(meter.track);
+    ctx.fxDubMeterEl = meter.fill;
 
     const controls = el('div', { className: 'fx-controls-list' });
-
-    let timeSliderRef = null;
-    let timeBadgeRef = null;
     const timeCtrl = createFxSlider({
-        label: 'DELAY TIME',
-        unit: ' ms',
-        min: 40, max: 1500, step: 5,
+        label: 'Time', unit: ' ms', min: 40, max: 1500, step: 5,
         value: dub.time,
         onChange: val => {
             dub.time = val;
             sendBelaControl({ event: 'custom', echoDub: { time: val }, echuDub: { time: val } });
         }
     });
-    timeSliderRef = timeCtrl.querySelector('input[type=range]');
-    timeBadgeRef = timeCtrl.querySelector('.fx-slider-val');
+    const timeSliderRef = timeCtrl.querySelector('input[type=range]');
+    const timeBadgeRef = timeCtrl.querySelector('.fx-slider-val');
     controls.appendChild(timeCtrl);
 
     const syncRow = el('div', { className: 'fx-preset-row' });
-    const syncPresets = [
-        { label: '1/16 (125ms)', ms: 125 },
-        { label: '1/8 (250ms)', ms: 250 },
-        { label: '1/8d (375ms)', ms: 375 },
-        { label: '1/4 (500ms)', ms: 500 },
-        { label: 'Dub Long (750ms)', ms: 750 }
-    ];
-    syncPresets.forEach(preset => {
+    [
+        { label: '1/16', ms: 125 },
+        { label: '1/8', ms: 250 },
+        { label: '1/8d', ms: 375 },
+        { label: '1/4', ms: 500 },
+        { label: 'Dub', ms: 750 }
+    ].forEach(preset => {
         const pBtn = el('button', {
             type: 'button',
             className: 'fx-mini-btn',
-            textContent: preset.label
+            textContent: preset.label,
+            title: `${preset.ms} ms`
         });
         pBtn.addEventListener('click', () => {
             dub.time = preset.ms;
@@ -509,33 +572,24 @@ function buildEchoDubCard() {
     controls.appendChild(syncRow);
 
     controls.appendChild(createFxSlider({
-        label: 'FEEDBACK (>85% = Oscillation)',
-        unit: '%',
-        min: 0, max: 115, step: 1,
-        value: Math.round(dub.feedback * 100),
-        warnOver: 85,
+        label: 'Feedback', unit: '%', min: 0, max: 115, step: 1,
+        value: Math.round(dub.feedback * 100), warnOver: 85,
         onChange: val => {
             const fb = val / 100.0;
             dub.feedback = fb;
             sendBelaControl({ event: 'custom', echoDub: { feedback: fb }, echuDub: { feedback: fb } });
         }
     }));
-
     controls.appendChild(createFxSlider({
-        label: 'TAPE TONE (High-Cut)',
-        unit: ' Hz',
-        min: 1000, max: 5000, step: 50,
+        label: 'Tone', unit: ' Hz', min: 1000, max: 5000, step: 50,
         value: dub.tone,
         onChange: val => {
             dub.tone = val;
             sendBelaControl({ event: 'custom', echoDub: { tone: val }, echuDub: { tone: val } });
         }
     }));
-
     controls.appendChild(createFxSlider({
-        label: 'TAPE FLUTTER & WOW',
-        unit: '%',
-        min: 0, max: 100, step: 1,
+        label: 'Flutter', unit: '%', min: 0, max: 100, step: 1,
         value: Math.round(dub.flutter * 100),
         onChange: val => {
             const fl = val / 100.0;
@@ -543,11 +597,8 @@ function buildEchoDubCard() {
             sendBelaControl({ event: 'custom', echoDub: { flutter: fl }, echuDub: { flutter: fl } });
         }
     }));
-
     controls.appendChild(createFxSlider({
-        label: 'RETURN LEVEL',
-        unit: '%',
-        min: 0, max: 100, step: 1,
+        label: 'Return', unit: '%', min: 0, max: 100, step: 1,
         value: Math.round(dub.level * 100),
         onChange: val => {
             const l = val / 100.0;
@@ -555,77 +606,56 @@ function buildEchoDubCard() {
             sendBelaControl({ event: 'custom', echoDub: { level: l }, echuDub: { level: l } });
         }
     }));
-
     card.appendChild(controls);
 
     const actionBox = el('div', { className: 'fx-action-box dual-action' });
     const killBtn = el('button', {
         type: 'button',
         className: 'fx-big-btn btn-kill-send' + (dub.kill ? ' active' : ''),
-        textContent: dub.kill ? '⚡ SEND KILLED (Echo Looping)' : '✂️ KILL SEND (Cut Input)'
+        textContent: dub.kill ? 'Send Killed' : 'Kill Send',
+        'aria-pressed': dub.kill ? 'true' : 'false'
     });
     killBtn.addEventListener('click', () => {
         dub.kill = !dub.kill;
         killBtn.classList.toggle('active', dub.kill);
-        killBtn.textContent = dub.kill ? '⚡ SEND KILLED (Echo Looping)' : '✂️ KILL SEND (Cut Input)';
+        killBtn.setAttribute('aria-pressed', dub.kill ? 'true' : 'false');
+        killBtn.textContent = dub.kill ? 'Send Killed' : 'Kill Send';
         sendBelaControl({ event: 'custom', echoDub: { kill: dub.kill }, echuDub: { kill: dub.kill } });
     });
 
     const clearBtn = el('button', {
         type: 'button',
         className: 'fx-big-btn btn-clear-delay',
-        textContent: '🧹 CLEAR ECHO'
+        textContent: 'Clear'
     });
     clearBtn.addEventListener('click', () => {
         sendBelaControl({ event: 'custom', echoDubClear: true, echuDubClear: true });
         clearBtn.classList.add('flash');
-        setTimeout(() => clearBtn.classList.remove('flash'), 300);
+        setTimeout(() => clearBtn.classList.remove('flash'), 240);
     });
 
     actionBox.appendChild(killBtn);
     actionBox.appendChild(clearBtn);
     card.appendChild(actionBox);
-
     return card;
 }
 
 /** 5. TUBBY SPRING CARD */
 function buildTubbySpringCard() {
     const ctx = getContext();
-    const card = el('div', { className: 'fx-card fx-card-tubbyspring' });
+    const card = el('div', { className: 'fx-card' });
+    card.appendChild(buildFxCardHeader('Tubby Spring', ctx.tubbySpring.enabled, (en) => {
+        ctx.tubbySpring.enabled = en;
+        sendBelaControl({ event: 'custom', tubbySpring: { enabled: en } });
+    }));
 
-    const cardHdr = el('div', { className: 'fx-card-header' });
-    const titleGroup = el('div', { className: 'fx-card-title-group' });
-    titleGroup.appendChild(el('div', { className: 'fx-card-title spring-title', textContent: '🌊 TUBBY SPRING' }));
-    titleGroup.appendChild(el('div', { className: 'fx-card-desc', textContent: 'King Tubby Space Reverb & Mechanical Spring Tank' }));
-    cardHdr.appendChild(titleGroup);
-
-    const pwrWrap = el('label', { className: 'fx-toggle-wrap' });
-    const pwrCheck = el('input', { type: 'checkbox', checked: ctx.tubbySpring.enabled });
-    pwrCheck.addEventListener('change', () => {
-        ctx.tubbySpring.enabled = pwrCheck.checked;
-        sendBelaControl({ event: 'custom', tubbySpring: { enabled: pwrCheck.checked } });
-    });
-    pwrWrap.appendChild(pwrCheck);
-    pwrWrap.appendChild(el('span', { className: 'fx-toggle-label', textContent: 'ACTIVE' }));
-    cardHdr.appendChild(pwrWrap);
-    card.appendChild(cardHdr);
-
-    const meterBox = el('div', { className: 'fx-meter-box' });
-    meterBox.appendChild(el('span', { className: 'fx-meter-lbl', textContent: 'SPRING ACTIVITY' }));
-    const meterTrack = el('div', { className: 'fx-meter-track' });
-    const meterFill = el('div', { className: 'fx-meter-fill spring-fill' });
-    meterTrack.appendChild(meterFill);
-    meterBox.appendChild(meterTrack);
-    card.appendChild(meterBox);
-    ctx.fxSpringMeterEl = meterFill;
+    const meter = buildFxMeter('spring-fill');
+    card.appendChild(meter.track);
+    ctx.fxSpringMeterEl = meter.fill;
 
     const controls = el('div', { className: 'fx-controls-list' });
-
     controls.appendChild(createFxSlider({
-        label: 'DWELL (Input Drive & Saturation)',
-        unit: '%',
-        min: 0, max: 150, step: 1,
+        label: 'Dwell', unit: '%', min: 0, max: 150, step: 1,
         value: Math.round(ctx.tubbySpring.dwell * 100),
         onChange: val => {
             const d = val / 100.0;
@@ -633,11 +663,8 @@ function buildTubbySpringCard() {
             sendBelaControl({ event: 'custom', tubbySpring: { dwell: d } });
         }
     }));
-
     controls.appendChild(createFxSlider({
-        label: 'SPRING DECAY / TENSION',
-        unit: '%',
-        min: 20, max: 95, step: 1,
+        label: 'Decay', unit: '%', min: 20, max: 95, step: 1,
         value: Math.round(ctx.tubbySpring.decay * 100),
         onChange: val => {
             const d = val / 100.0;
@@ -645,22 +672,16 @@ function buildTubbySpringCard() {
             sendBelaControl({ event: 'custom', tubbySpring: { decay: d } });
         }
     }));
-
     controls.appendChild(createFxSlider({
-        label: 'SPRING TONE (High Damping)',
-        unit: ' Hz',
-        min: 1000, max: 5000, step: 50,
+        label: 'Tone', unit: ' Hz', min: 1000, max: 5000, step: 50,
         value: ctx.tubbySpring.tone,
         onChange: val => {
             ctx.tubbySpring.tone = val;
             sendBelaControl({ event: 'custom', tubbySpring: { tone: val } });
         }
     }));
-
     controls.appendChild(createFxSlider({
-        label: 'RETURN LEVEL',
-        unit: '%',
-        min: 0, max: 100, step: 1,
+        label: 'Return', unit: '%', min: 0, max: 100, step: 1,
         value: Math.round(ctx.tubbySpring.level * 100),
         onChange: val => {
             const l = val / 100.0;
@@ -668,69 +689,60 @@ function buildTubbySpringCard() {
             sendBelaControl({ event: 'custom', tubbySpring: { level: l } });
         }
     }));
-
     card.appendChild(controls);
+
+    const actionBox = el('div', { className: 'fx-action-box' });
+    const splashBtn = el('button', {
+        type: 'button',
+        className: 'fx-big-btn btn-splash',
+        textContent: 'Splash',
+        title: 'Trigger mechanical spring impact'
+    });
+    splashBtn.addEventListener('click', () => {
+        sendBelaControl({ event: 'custom', tubbySpringSplash: true });
+        splashBtn.classList.add('flash');
+        setTimeout(() => splashBtn.classList.remove('flash'), 240);
+    });
+    actionBox.appendChild(splashBtn);
+    card.appendChild(actionBox);
+
     return card;
 }
 
 /** 6. SHIMMER DELAY CARD */
 function buildShimmerDelayCard() {
     const ctx = getContext();
-    const card = el('div', { className: 'fx-card fx-card-shimmer' });
+    const card = el('div', { className: 'fx-card' });
+    card.appendChild(buildFxCardHeader('Shimmer Delay', ctx.shimmerDelay.enabled, (en) => {
+        ctx.shimmerDelay.enabled = en;
+        sendBelaControl({ event: 'custom', shimmerDelay: { enabled: en } });
+    }));
 
-    const cardHdr = el('div', { className: 'fx-card-header' });
-    const titleGroup = el('div', { className: 'fx-card-title-group' });
-    titleGroup.appendChild(el('div', { className: 'fx-card-title shimmer-title', textContent: '✨ SHIMMER DUB DELAY' }));
-    titleGroup.appendChild(el('div', { className: 'fx-card-desc', textContent: 'Pitch-Shifted Delay & Granular Re-pitch (-12 to +12 Semitones)' }));
-    cardHdr.appendChild(titleGroup);
-
-    const pwrWrap = el('label', { className: 'fx-toggle-wrap' });
-    const pwrCheck = el('input', { type: 'checkbox', checked: ctx.shimmerDelay.enabled });
-    pwrCheck.addEventListener('change', () => {
-        ctx.shimmerDelay.enabled = pwrCheck.checked;
-        sendBelaControl({ event: 'custom', shimmerDelay: { enabled: pwrCheck.checked } });
-    });
-    pwrWrap.appendChild(pwrCheck);
-    pwrWrap.appendChild(el('span', { className: 'fx-toggle-label', textContent: 'ACTIVE' }));
-    cardHdr.appendChild(pwrWrap);
-    card.appendChild(cardHdr);
-
-    const meterBox = el('div', { className: 'fx-meter-box' });
-    meterBox.appendChild(el('span', { className: 'fx-meter-lbl', textContent: 'SHIMMER ACTIVITY' }));
-    const meterTrack = el('div', { className: 'fx-meter-track' });
-    const meterFill = el('div', { className: 'fx-meter-fill shimmer-fill' });
-    meterTrack.appendChild(meterFill);
-    meterBox.appendChild(meterTrack);
-    card.appendChild(meterBox);
-    ctx.fxShimmerMeterEl = meterFill;
+    const meter = buildFxMeter('shimmer-fill');
+    card.appendChild(meter.track);
+    ctx.fxShimmerMeterEl = meter.fill;
 
     const controls = el('div', { className: 'fx-controls-list' });
-
-    let semiSliderRef = null;
-    let semiBadgeRef = null;
     const semiCtrl = createFxSlider({
-        label: 'PITCH SHIFT',
-        unit: ' st',
-        min: -12, max: 12, step: 1,
+        label: 'Pitch', unit: ' st', min: -12, max: 12, step: 1,
         value: ctx.shimmerDelay.semitones,
         onChange: val => {
             ctx.shimmerDelay.semitones = val;
             sendBelaControl({ event: 'custom', shimmerDelay: { semitones: val } });
         }
     });
-    semiSliderRef = semiCtrl.querySelector('input[type=range]');
-    semiBadgeRef = semiCtrl.querySelector('.fx-slider-val');
+    const semiSliderRef = semiCtrl.querySelector('input[type=range]');
+    const semiBadgeRef = semiCtrl.querySelector('.fx-slider-val');
     controls.appendChild(semiCtrl);
 
     const semiRow = el('div', { className: 'fx-preset-row' });
-    const semiPresets = [
-        { label: '-12 Oct Drop', st: -12 },
-        { label: '-7 Fifth Down', st: -7 },
-        { label: '0 Unison', st: 0 },
-        { label: '+7 Fifth Up', st: 7 },
-        { label: '+12 Shimmer Oct', st: 12 }
-    ];
-    semiPresets.forEach(preset => {
+    [
+        { label: '-12', st: -12 },
+        { label: '-7', st: -7 },
+        { label: '0', st: 0 },
+        { label: '+7', st: 7 },
+        { label: '+12', st: 12 }
+    ].forEach(preset => {
         const pBtn = el('button', {
             type: 'button',
             className: 'fx-mini-btn',
@@ -747,20 +759,15 @@ function buildShimmerDelayCard() {
     controls.appendChild(semiRow);
 
     controls.appendChild(createFxSlider({
-        label: 'DELAY TIME',
-        unit: ' ms',
-        min: 40, max: 1500, step: 5,
+        label: 'Time', unit: ' ms', min: 40, max: 1500, step: 5,
         value: ctx.shimmerDelay.delayTime,
         onChange: val => {
             ctx.shimmerDelay.delayTime = val;
             sendBelaControl({ event: 'custom', shimmerDelay: { delayTime: val } });
         }
     }));
-
     controls.appendChild(createFxSlider({
-        label: 'FEEDBACK (Cascade)',
-        unit: '%',
-        min: 0, max: 95, step: 1,
+        label: 'Feedback', unit: '%', min: 0, max: 95, step: 1,
         value: Math.round(ctx.shimmerDelay.feedback * 100),
         onChange: val => {
             const fb = val / 100.0;
@@ -768,22 +775,16 @@ function buildShimmerDelayCard() {
             sendBelaControl({ event: 'custom', shimmerDelay: { feedback: fb } });
         }
     }));
-
     controls.appendChild(createFxSlider({
-        label: 'GRAIN / CROSSFADE WINDOW',
-        unit: ' ms',
-        min: 20, max: 100, step: 5,
+        label: 'Grain', unit: ' ms', min: 20, max: 100, step: 5,
         value: ctx.shimmerDelay.grainSize,
         onChange: val => {
             ctx.shimmerDelay.grainSize = val;
             sendBelaControl({ event: 'custom', shimmerDelay: { grainSize: val } });
         }
     }));
-
     controls.appendChild(createFxSlider({
-        label: 'RETURN LEVEL',
-        unit: '%',
-        min: 0, max: 150, step: 1,
+        label: 'Return', unit: '%', min: 0, max: 150, step: 1,
         value: Math.round(ctx.shimmerDelay.level * 100),
         onChange: val => {
             const l = val / 100.0;
@@ -797,12 +798,12 @@ function buildShimmerDelayCard() {
     const clearBtn = el('button', {
         type: 'button',
         className: 'fx-big-btn btn-clear-delay',
-        textContent: '🧹 CLEAR SHIMMER'
+        textContent: 'Clear'
     });
     clearBtn.addEventListener('click', () => {
         sendBelaControl({ event: 'custom', shimmerClear: true });
         clearBtn.classList.add('flash');
-        setTimeout(() => clearBtn.classList.remove('flash'), 300);
+        setTimeout(() => clearBtn.classList.remove('flash'), 240);
     });
     actionBox.appendChild(clearBtn);
     card.appendChild(actionBox);
@@ -813,60 +814,36 @@ function buildShimmerDelayCard() {
 /** 7. BLACK ARK PHASER CARD */
 function buildBlackArkPhaserCard() {
     const ctx = getContext();
-    const card = el('div', { className: 'fx-card fx-card-blackark' });
+    const card = el('div', { className: 'fx-card' });
+    card.appendChild(buildFxCardHeader('Black Ark Phaser', ctx.blackArk.enabled, (en) => {
+        ctx.blackArk.enabled = en;
+        sendBelaControl({ event: 'custom', blackArk: { enabled: en } });
+    }));
 
-    const cardHdr = el('div', { className: 'fx-card-header' });
-    const titleGroup = el('div', { className: 'fx-card-title-group' });
-    titleGroup.appendChild(el('div', { className: 'fx-card-title phase-title', textContent: '🌀 BLACK ARK PHASER' }));
-    titleGroup.appendChild(el('div', { className: 'fx-card-desc', textContent: 'Lee Scratch Perry Mu-Tron Style Bi-Phase & Deep Dub Swirl' }));
-    cardHdr.appendChild(titleGroup);
-
-    const pwrWrap = el('label', { className: 'fx-toggle-wrap' });
-    const pwrCheck = el('input', { type: 'checkbox', checked: ctx.blackArk.enabled });
-    pwrCheck.addEventListener('change', () => {
-        ctx.blackArk.enabled = pwrCheck.checked;
-        sendBelaControl({ event: 'custom', blackArk: { enabled: pwrCheck.checked } });
-    });
-    pwrWrap.appendChild(pwrCheck);
-    pwrWrap.appendChild(el('span', { className: 'fx-toggle-label', textContent: 'ACTIVE' }));
-    cardHdr.appendChild(pwrWrap);
-    card.appendChild(cardHdr);
-
-    const meterBox = el('div', { className: 'fx-meter-box' });
-    meterBox.appendChild(el('span', { className: 'fx-meter-lbl', textContent: 'PHASER ACTIVITY' }));
-    const meterTrack = el('div', { className: 'fx-meter-track' });
-    const meterFill = el('div', { className: 'fx-meter-fill phase-fill' });
-    meterTrack.appendChild(meterFill);
-    meterBox.appendChild(meterTrack);
-    card.appendChild(meterBox);
-    ctx.fxPhaserMeterEl = meterFill;
+    const meter = buildFxMeter('phase-fill');
+    card.appendChild(meter.track);
+    ctx.fxPhaserMeterEl = meter.fill;
 
     const controls = el('div', { className: 'fx-controls-list' });
-
-    let rateSliderRef = null;
-    let rateBadgeRef = null;
     const rateCtrl = createFxSlider({
-        label: 'SWEEP RATE',
-        unit: ' Hz',
-        min: 0.05, max: 5.0, step: 0.05,
+        label: 'Rate', unit: ' Hz', min: 0.05, max: 5.0, step: 0.05,
         value: ctx.blackArk.rate,
         onChange: val => {
             ctx.blackArk.rate = val;
             sendBelaControl({ event: 'custom', blackArk: { rate: val } });
         }
     });
-    rateSliderRef = rateCtrl.querySelector('input[type=range]');
-    rateBadgeRef = rateCtrl.querySelector('.fx-slider-val');
+    const rateSliderRef = rateCtrl.querySelector('input[type=range]');
+    const rateBadgeRef = rateCtrl.querySelector('.fx-slider-val');
     controls.appendChild(rateCtrl);
 
     const ratePresetRow = el('div', { className: 'fx-preset-row' });
-    const ratePresets = [
-        { label: 'Roots (0.1Hz)', hz: 0.1 },
-        { label: 'Meditative (0.25Hz)', hz: 0.25 },
-        { label: 'Skank (0.8Hz)', hz: 0.8 },
-        { label: 'Fast Swirl (2.5Hz)', hz: 2.5 }
-    ];
-    ratePresets.forEach(preset => {
+    [
+        { label: '0.1 Hz', hz: 0.1 },
+        { label: '0.25 Hz', hz: 0.25 },
+        { label: '0.8 Hz', hz: 0.8 },
+        { label: '2.5 Hz', hz: 2.5 }
+    ].forEach(preset => {
         const pBtn = el('button', {
             type: 'button',
             className: 'fx-mini-btn',
@@ -883,9 +860,7 @@ function buildBlackArkPhaserCard() {
     controls.appendChild(ratePresetRow);
 
     controls.appendChild(createFxSlider({
-        label: 'SWEEP DEPTH',
-        unit: '%',
-        min: 0, max: 100, step: 1,
+        label: 'Depth', unit: '%', min: 0, max: 100, step: 1,
         value: Math.round(ctx.blackArk.depth * 100),
         onChange: val => {
             const d = val / 100.0;
@@ -893,11 +868,8 @@ function buildBlackArkPhaserCard() {
             sendBelaControl({ event: 'custom', blackArk: { depth: d } });
         }
     }));
-
     controls.appendChild(createFxSlider({
-        label: 'FEEDBACK RESONANCE (±90%)',
-        unit: '%',
-        min: -90, max: 90, step: 1,
+        label: 'Feedback', unit: '%', min: -90, max: 90, step: 1,
         value: Math.round(ctx.blackArk.feedback * 100),
         onChange: val => {
             const fb = val / 100.0;
@@ -905,11 +877,8 @@ function buildBlackArkPhaserCard() {
             sendBelaControl({ event: 'custom', blackArk: { feedback: fb } });
         }
     }));
-
     controls.appendChild(createFxSlider({
-        label: 'RETURN LEVEL',
-        unit: '%',
-        min: 0, max: 100, step: 1,
+        label: 'Return', unit: '%', min: 0, max: 100, step: 1,
         value: Math.round(ctx.blackArk.level * 100),
         onChange: val => {
             const l = val / 100.0;
@@ -920,15 +889,19 @@ function buildBlackArkPhaserCard() {
     card.appendChild(controls);
 
     const actionBox = el('div', { className: 'fx-action-box' });
+    const is12 = ctx.blackArk.stages === 12;
     const stagesBtn = el('button', {
         type: 'button',
-        className: 'fx-big-btn btn-stages' + (ctx.blackArk.stages === 12 ? ' active' : ''),
-        textContent: ctx.blackArk.stages === 12 ? '✨ 12-STAGE PHASER (Deep Cosmic Sweep)' : '📻 6-STAGE PHASER (Vintage Swirl)'
+        className: 'fx-big-btn btn-stages' + (is12 ? ' active' : ''),
+        textContent: is12 ? '12 Stages' : '6 Stages',
+        'aria-pressed': is12 ? 'true' : 'false'
     });
     stagesBtn.addEventListener('click', () => {
         ctx.blackArk.stages = (ctx.blackArk.stages === 12) ? 6 : 12;
-        stagesBtn.classList.toggle('active', ctx.blackArk.stages === 12);
-        stagesBtn.textContent = ctx.blackArk.stages === 12 ? '✨ 12-STAGE PHASER (Deep Cosmic Sweep)' : '📻 6-STAGE PHASER (Vintage Swirl)';
+        const active12 = ctx.blackArk.stages === 12;
+        stagesBtn.classList.toggle('active', active12);
+        stagesBtn.setAttribute('aria-pressed', active12 ? 'true' : 'false');
+        stagesBtn.textContent = active12 ? '12 Stages' : '6 Stages';
         sendBelaControl({ event: 'custom', blackArk: { stages: ctx.blackArk.stages } });
     });
     actionBox.appendChild(stagesBtn);
@@ -956,15 +929,14 @@ function createFxSlider({ label, unit, min, max, step, value, warnOver, onChange
         min: min,
         max: max,
         step: step || 1,
-        value: value
+        value: value,
+        'aria-label': label
     });
 
     slider.addEventListener('input', () => {
         const v = parseFloat(slider.value);
         badge.textContent = v + unit;
-        if (warnOver != null) {
-            badge.classList.toggle('warn', v >= warnOver);
-        }
+        if (warnOver != null) badge.classList.toggle('warn', v >= warnOver);
         onChange(v);
     });
 
@@ -972,62 +944,43 @@ function createFxSlider({ label, unit, min, max, step, value, warnOver, onChange
     return wrap;
 }
 
-/**
- * Real-time update called by p.draw() when Buffer 12 arrives from Bela.
- * Synchronises visual meters and routing indicators.
- */
+/** Real-time update called by p.draw() when Buffer 12 arrives from Bela. */
 export function updateFxLive() {
     const ctx = getContext();
     if (!ctx.fxState || ctx.fxState.length < 17) return;
 
-    // Buffer 12: [0..5] peaks, [6] ducker reduction, [7..16] 5 sources (AUX 1..4 + SIREN) routing
-    const subPeak     = ctx.fxState[0];
-    const echoPeak    = ctx.fxState[1];
-    const springPeak  = ctx.fxState[2];
-    const phaserPeak  = ctx.fxState[3];
-    const tapePeak    = ctx.fxState[4];
-    const shimmerPeak = ctx.fxState[5];
-    const duckGainRed = ctx.fxState[6];
+    autoMeter(ctx.fxSubMeterEl, ctx.fxState[0]);
+    autoMeter(ctx.fxDubMeterEl, ctx.fxState[1]);
+    autoMeter(ctx.fxSpringMeterEl, ctx.fxState[2]);
+    autoMeter(ctx.fxPhaserMeterEl, ctx.fxState[3]);
+    autoMeter(ctx.fxTapeMeterEl, ctx.fxState[4]);
+    autoMeter(ctx.fxShimmerMeterEl, ctx.fxState[5]);
 
-    autoMeter(ctx.fxSubMeterEl, subPeak, '#ffb300');
-    autoMeter(ctx.fxDubMeterEl, echoPeak, '#00e5ff');
-    autoMeter(ctx.fxSpringMeterEl, springPeak, '#f59e0b');
-    autoMeter(ctx.fxPhaserMeterEl, phaserPeak, '#a855f7');
-    autoMeter(ctx.fxTapeMeterEl, tapePeak, '#f97316');
-    autoMeter(ctx.fxShimmerMeterEl, shimmerPeak, '#eab308');
-
-    // Ducking Gain Reduction Meter
     if (ctx.fxDuckerMeterEl) {
-        const pct = Math.min(100, Math.round(duckGainRed * 100));
+        const pct = Math.min(100, Math.round((ctx.fxState[6] || 0) * 100));
         ctx.fxDuckerMeterEl.style.width = pct + '%';
-        if (pct > 25) ctx.fxDuckerMeterEl.style.boxShadow = '0 0 10px #ef4444';
-        else ctx.fxDuckerMeterEl.style.boxShadow = 'none';
     }
 
-    // Sync routing pills with hardware state
-    if (ctx.fxRouteButtons && ctx.fxRouteButtons.length) {
+    if (ctx.fxRouteSelects && ctx.fxRouteSelects.length) {
         for (let aux = 0; aux < 5; ++aux) {
             for (let send = 0; send < 2; ++send) {
-                const sDest = Math.round(ctx.fxState[7 + aux * 2 + send]);
-                ctx.fxRouting[aux][send] = sDest;
+                ctx.fxRouting[aux][send] = Math.round(ctx.fxState[7 + aux * 2 + send]);
             }
         }
-        ctx.fxRouteButtons.forEach(btn => {
-            const aux = parseInt(btn.dataset.aux, 10);
-            const send = parseInt(btn.dataset.send, 10);
-            const dest = parseInt(btn.dataset.dest, 10);
-            btn.classList.toggle('active', ctx.fxRouting[aux][send] === dest);
+        ctx.fxRouteSelects.forEach(sel => {
+            const aux = parseInt(sel.dataset.aux, 10);
+            const send = parseInt(sel.dataset.send, 10);
+            const destStr = String(ctx.fxRouting[aux][send]);
+            if (sel.value !== destStr && document.activeElement !== sel) {
+                sel.value = destStr;
+                sel.dataset.dest = destStr;
+            }
         });
     }
 }
 
-function autoMeter(el, peakVal, glowColor) {
-    if (!el) return;
+function autoMeter(elNode, peakVal) {
+    if (!elNode) return;
     const pct = Math.min(100, Math.round((peakVal || 0) * 110));
-    el.style.width = pct + '%';
-    if (pct > 80 && glowColor) {
-        el.style.boxShadow = `0 0 10px ${glowColor}`;
-    } else {
-        el.style.boxShadow = 'none';
-    }
+    elNode.style.width = pct + '%';
 }

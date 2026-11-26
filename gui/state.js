@@ -50,7 +50,31 @@ export function createState() {
         fxTapeMeterEl: null,
         fxShimmerMeterEl: null,
         fxDuckerMeterEl: null,
-        fxRouteButtons: [],
+        fxRouteSelects: [],
+        fxTriggers: [
+            [false, false],
+            [false, false],
+            [false, false],
+            [false, false],
+            [false, false]
+        ],
+        fxMomentaryTriggers: [
+            [false, false],
+            [false, false],
+            [false, false],
+            [false, false],
+            [false, false]
+        ],
+        fxLatchedTriggers: [
+            [false, false],
+            [false, false],
+            [false, false],
+            [false, false],
+            [false, false]
+        ],
+        fxTestTone: false,
+        fxTriggerButtons: [],
+        fxLatchButtons: [],
         potMapping: null,
         switchMapping: null,
         configMeta: null,
@@ -73,6 +97,10 @@ export function createState() {
         consoleFilterMode: 'normal',
         currentTab: 0,
         mappingBuilt: false,
+        mappingSubTab: 'controls',
+        mappingFilter: 'all',
+        mappingSearch: '',
+        mappingGuided: null,
         routingFilledFromMeta: false,
         detectMode: null,
         masterEqCurveDb: new Float32Array(MASTER_EQ_CONFIG.CURVE_POINTS),
@@ -93,6 +121,20 @@ export function createState() {
         belaRxPackets: 0,
         uiDevMode: false,
         devInteractingPot: -1,
-        devControlInitialized: false
+        devControlInitialized: false,
+        boardConfigJson: null,
+        boardConfigRawText: null,
+        loadedConfigBase: null,
+        mappingDirty: false,
+        mappingActionBusy: false,
+        awaitingRestartReconnect: false,
+        devModeBoot: false,
+        clipLedsConfig: {
+            master: { enabled: false, port: 'A', pin: 0, activeLow: false },
+            aux1: { enabled: false, port: 'A', pin: 0, activeLow: false },
+            aux2: { enabled: false, port: 'A', pin: 0, activeLow: false },
+            aux3: { enabled: false, port: 'A', pin: 0, activeLow: false },
+            aux4: { enabled: false, port: 'A', pin: 0, activeLow: false }
+        }
     };
 }

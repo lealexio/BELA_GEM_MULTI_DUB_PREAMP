@@ -22,7 +22,9 @@
 
 var __belaPreampSketch = (() => {
   var __defProp = Object.defineProperty;
+  var __defProps = Object.defineProperties;
   var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
+  var __getOwnPropDescs = Object.getOwnPropertyDescriptors;
   var __getOwnPropNames = Object.getOwnPropertyNames;
   var __getOwnPropSymbols = Object.getOwnPropertySymbols;
   var __hasOwnProp = Object.prototype.hasOwnProperty;
@@ -39,6 +41,7 @@ var __belaPreampSketch = (() => {
       }
     return a;
   };
+  var __spreadProps = (a, b) => __defProps(a, __getOwnPropDescs(b));
   var __export = (target, all) => {
     for (var name in all)
       __defProp(target, name, { get: all[name], enumerable: true });
@@ -61,6 +64,7 @@ var __belaPreampSketch = (() => {
 
   // gui/config.js
   var TAB_LIVE = 0;
+  var TAB_FX = 1;
   var TAB_MAPPING = 3;
   var FX_DEST_HARDWARE = 0;
   var FX_DEST_SUB_ROAR = 1;
@@ -293,8 +297,55 @@ var __belaPreampSketch = (() => {
     MASTER_STEREO: 32,
     UI_DEV_MODE: 33,
     IGNORED_COUNT: 34,
-    IGNORED_BASE: 35
+    IGNORED_BASE: 35,
+    DEV_MODE_BOOT: 99,
+    CLIP_LED_BASE: 100
   };
+  var CLIP_LED_KEYS = ["master", "aux1", "aux2", "aux3", "aux4"];
+  var CLIP_LED_LABELS = {
+    master: "Master",
+    aux1: "AUX 1",
+    aux2: "AUX 2",
+    aux3: "AUX 3",
+    aux4: "AUX 4"
+  };
+  function decodeClipLedMeta(val) {
+    const v = Math.round(val);
+    if (isNaN(v) || v < 0) {
+      return { enabled: false, port: "A", pin: 0, activeLow: false };
+    }
+    return {
+      enabled: true,
+      port: v & 8 ? "B" : "A",
+      pin: v & 7,
+      activeLow: !!(v & 16)
+    };
+  }
+  function parseClipLedConfigEntry(val) {
+    if (typeof val === "string" && val.length >= 2) {
+      const port = val[0].toUpperCase();
+      const pin = parseInt(val.slice(1), 10);
+      if ((port === "A" || port === "B") && !isNaN(pin) && pin >= 0 && pin <= 7) {
+        return { enabled: true, port, pin, activeLow: false };
+      }
+    } else if (val && typeof val === "object") {
+      const pin = parseInt(val.pin, 10);
+      const port = String(val.port || (val.portB ? "B" : "A")).toUpperCase().startsWith("B") ? "B" : "A";
+      if (!isNaN(pin) && pin >= 0 && pin <= 7) {
+        return { enabled: true, port, pin, activeLow: !!val.activeLow };
+      }
+    }
+    return { enabled: false, port: "A", pin: 0, activeLow: false };
+  }
+  function serializeClipLedEntry(entry) {
+    if (!entry || !entry.enabled) return null;
+    const port = entry.port === "B" ? "B" : "A";
+    const pin = Math.max(0, Math.min(7, Math.round(Number(entry.pin) || 0)));
+    if (entry.activeLow) {
+      return { port, pin, activeLow: true };
+    }
+    return `${port}${pin}`;
+  }
   var MIC_HPF_HZ_MIN = 0;
   var MIC_HPF_HZ_MAX = 300;
   var MASTER_EQ_CONFIG = {
@@ -489,7 +540,31 @@ var __belaPreampSketch = (() => {
       fxTapeMeterEl: null,
       fxShimmerMeterEl: null,
       fxDuckerMeterEl: null,
-      fxRouteButtons: [],
+      fxRouteSelects: [],
+      fxTriggers: [
+        [false, false],
+        [false, false],
+        [false, false],
+        [false, false],
+        [false, false]
+      ],
+      fxMomentaryTriggers: [
+        [false, false],
+        [false, false],
+        [false, false],
+        [false, false],
+        [false, false]
+      ],
+      fxLatchedTriggers: [
+        [false, false],
+        [false, false],
+        [false, false],
+        [false, false],
+        [false, false]
+      ],
+      fxTestTone: false,
+      fxTriggerButtons: [],
+      fxLatchButtons: [],
       potMapping: null,
       switchMapping: null,
       configMeta: null,
@@ -512,6 +587,10 @@ var __belaPreampSketch = (() => {
       consoleFilterMode: "normal",
       currentTab: 0,
       mappingBuilt: false,
+      mappingSubTab: "controls",
+      mappingFilter: "all",
+      mappingSearch: "",
+      mappingGuided: null,
       routingFilledFromMeta: false,
       detectMode: null,
       masterEqCurveDb: new Float32Array(MASTER_EQ_CONFIG.CURVE_POINTS),
@@ -532,7 +611,21 @@ var __belaPreampSketch = (() => {
       belaRxPackets: 0,
       uiDevMode: false,
       devInteractingPot: -1,
-      devControlInitialized: false
+      devControlInitialized: false,
+      boardConfigJson: null,
+      boardConfigRawText: null,
+      loadedConfigBase: null,
+      mappingDirty: false,
+      mappingActionBusy: false,
+      awaitingRestartReconnect: false,
+      devModeBoot: false,
+      clipLedsConfig: {
+        master: { enabled: false, port: "A", pin: 0, activeLow: false },
+        aux1: { enabled: false, port: "A", pin: 0, activeLow: false },
+        aux2: { enabled: false, port: "A", pin: 0, activeLow: false },
+        aux3: { enabled: false, port: "A", pin: 0, activeLow: false },
+        aux4: { enabled: false, port: "A", pin: 0, activeLow: false }
+      }
     };
   }
 
@@ -551,298 +644,336 @@ var __belaPreampSketch = (() => {
     const s = document.createElement("style");
     s.textContent = `
 :root{
---bg:#e8eaee;
+--bg:#eef0f3;
 --bg-elev:#ffffff;
---surface:#f4f5f7;
---ink:#1a1a2e;
---ink-soft:#3a3a44;
---muted:#6b6b76;
---line:#e2e2e8;
---line-soft:#ececf0;
---accent:#e74c3c;
---header-bg:#1a1a2e;
---btn-active-bg:#1a1a2e;
+--surface:#f5f6f8;
+--ink:#151922;
+--ink-soft:#3d4452;
+--muted:#646c7a;
+--line:#dce0e6;
+--line-soft:#eaedf1;
+--accent:#d94336;
+--ok:#1f9d55;
+--warn:#d97706;
+--danger:#dc2626;
+--info:#2563eb;
+--focus-ring:#2563eb;
+--header-bg:#141821;
+--btn-active-bg:#151922;
 --btn-active-text:#ffffff;
---bar-fill:#1a1a2e;
+--bar-fill:#2563eb;
 --input-bg:#ffffff;
---input-border:#dddddd;
---table-th-bg:#f5f5f5;
---table-hover:#fafafa;
---table-border:#f2f2f2;
+--input-border:#cfd5de;
 --radius:10px;
---shadow:0 1px 2px rgba(26,26,46,.04),0 4px 14px rgba(26,26,46,.06);
+--radius-sm:6px;
+--shadow:0 1px 2px rgba(15,23,42,.04),0 2px 8px rgba(15,23,42,.04);
+--z-chrome:100;
+--z-popup:200;
 --font:ui-sans-serif,system-ui,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;
 --mono:ui-monospace,'Cascadia Mono','SF Mono',Menlo,Consolas,monospace;
 }
 
 [data-theme="dark"]{
---bg:#0e1218;
---bg-elev:#161c24;
---surface:#1f2530;
---ink:#f0f3f6;
---ink-soft:#c2cad4;
---muted:#8b949e;
---line:#2e3644;
---line-soft:#222936;
---accent:#ff5447;
---header-bg:#0a0d12;
+--bg:#0d1016;
+--bg-elev:#141922;
+--surface:#1b222d;
+--ink:#edf1f7;
+--ink-soft:#b9c2d0;
+--muted:#848e9d;
+--line:#283140;
+--line-soft:#1e2531;
+--accent:#ef5347;
+--ok:#22c55e;
+--warn:#f59e0b;
+--danger:#ef4444;
+--info:#3b82f6;
+--focus-ring:#60a5fa;
+--header-bg:#090c11;
 --btn-active-bg:#3b82f6;
 --btn-active-text:#ffffff;
---bar-fill:#58a6ff;
---input-bg:#12161e;
---input-border:#2e3644;
---table-th-bg:#1a202a;
---table-hover:#1d232e;
---table-border:#222936;
---shadow:0 2px 6px rgba(0,0,0,.45),0 8px 24px rgba(0,0,0,.55);
+--bar-fill:#3b82f6;
+--input-bg:#11161f;
+--input-border:#2d3748;
+--shadow:0 1px 3px rgba(0,0,0,.35),0 4px 12px rgba(0,0,0,.25);
 }
 
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 html,body{
-width:100%;
-margin:0;
-padding:0;
-overflow-x:hidden;
+width:100%;height:100%;
+margin:0;padding:0;
+overflow:hidden;
 }
 body{
 font-family:var(--font);
 background:var(--bg);color:var(--ink);font-size:14px;
+line-height:1.4;
 -webkit-font-smoothing:antialiased;
-transition:background .15s ease,color .15s ease;
+text-rendering:optimizeLegibility;
 }
-/* p5.js injects <main> + canvas for draw() \u2014 not used by our DOM UI */
+/* p5.js injects <main> + canvas \u2014 hidden */
 body > main{
-display:none!important;
-visibility:hidden!important;
-width:0!important;height:0!important;
-overflow:hidden!important;position:absolute!important;
-pointer-events:none!important;
+display:none!important;visibility:hidden!important;
+width:0!important;height:0!important;overflow:hidden!important;
+position:absolute!important;pointer-events:none!important;
 }
+
+button,input,select{font-family:inherit}
+button:focus-visible,input:focus-visible,select:focus-visible,[tabindex]:focus-visible{
+outline:2px solid var(--focus-ring);outline-offset:2px;
+}
+
 #bela-gui{
 display:flex;flex-direction:column;
 width:100%;max-width:100%;
-height:100vh;overflow-x:hidden;
+height:100dvh;overflow:hidden;
 }
 
-/* Fixed top chrome \u2014 full viewport width without 100vw (no horizontal scroll). */
+/* --- Top chrome --- */
 #top-chrome{
-position:fixed;top:0;left:0;right:0;
-z-index:100;
-box-shadow:0 1px 0 rgba(0,0,0,.06);
+flex-shrink:0;position:relative;z-index:var(--z-chrome);
+padding-top:env(safe-area-inset-top);
+background:var(--header-bg);
 }
-
-/* --- Header --- */
 #gui-header{
 background:var(--header-bg);color:#fff;
-padding:8px 18px;display:flex;align-items:center;gap:10px;
-width:100%;
+padding:8px 16px;
+padding-left:max(16px,env(safe-area-inset-left));
+padding-right:max(16px,env(safe-area-inset-right));
+display:flex;align-items:center;gap:8px;flex-wrap:wrap;
+width:100%;min-height:46px;
 }
-#gui-header .spacer{flex:1}
+#gui-header .spacer{flex:1;min-width:8px}
 #gui-logo{
-height:42px;width:auto;
-mix-blend-mode:screen; /* blacks become transparent on the dark header */
-opacity:.92;
+height:34px;width:auto;
+mix-blend-mode:screen;opacity:.92;flex-shrink:0;
 }
 .badge{
-background:#555;color:#fff;font-size:10px;font-weight:700;
-padding:3px 9px;border-radius:999px;letter-spacing:.06em;
+background:#4b5563;color:#fff;font-size:10px;font-weight:700;
+padding:3px 8px;border-radius:999px;letter-spacing:.05em;
+line-height:1.2;white-space:nowrap;
 }
-.badge.live{background:#1f9d55}
-.badge.lag{background:#d97706}
+.badge.live{background:var(--ok)}
+.badge.lag{background:var(--warn);color:#111}
 .badge.temp{
-background:#2563eb;font-variant-numeric:tabular-nums;
+background:#1d4ed8;font-variant-numeric:tabular-nums;
 letter-spacing:.02em;min-width:3.6em;text-align:center;
 }
-.badge.temp.warm{background:#d97706}
-.badge.temp.hot{background:var(--accent)}
-.badge.temp.unknown{background:#555}
+.badge.temp.warm{background:var(--warn);color:#111}
+.badge.temp.hot{background:var(--danger)}
+.badge.temp.unknown{background:#4b5563}
+.badge.dev-badge{
+display:none;background:#0369a1;color:#fff;letter-spacing:.05em;
+}
+.badge.dev-badge.visible{display:inline-block}
 .clip-badges{
-display:flex;align-items:center;gap:6px;flex-wrap:wrap;min-width:0;
+display:flex;align-items:center;gap:5px;flex-wrap:wrap;min-width:0;
 }
 .badge.clip{
-display:none;
-background:#e11d2e;letter-spacing:.04em;
-animation:clip-badge-pulse 1s ease-in-out infinite;
+display:none;background:var(--danger);letter-spacing:.04em;
 }
 .badge.clip.on{display:inline-block}
-@keyframes clip-badge-pulse{
-0%,100%{opacity:1}
-50%{opacity:.72}
-}
 
 /* --- Tab bar --- */
 #tab-bar{
-display:flex;align-items:stretch;background:var(--bg-elev);
+display:flex;align-items:center;
+background:var(--bg-elev);
 border-bottom:1px solid var(--line);
 width:100%;
-padding:0 6px;
+padding:0 8px;
+padding-left:max(8px,env(safe-area-inset-left));
+padding-right:max(8px,env(safe-area-inset-right));
+overflow-x:auto;scrollbar-width:none;
 }
+#tab-bar::-webkit-scrollbar{display:none}
 .tab-btn{
-padding:12px 18px;font-size:13px;font-weight:600;color:var(--muted);
+flex-shrink:0;
+padding:11px 16px;min-height:42px;
+font-size:13px;font-weight:600;color:var(--muted);
 cursor:pointer;border:none;background:none;
-border-bottom:2px solid transparent;margin-bottom:-1px;
-transition:color .15s,border-color .15s;letter-spacing:.02em;
+border-bottom:2px solid transparent;
+white-space:nowrap;letter-spacing:.01em;
+transition:color .12s ease,border-color .12s ease;
 }
 .tab-btn:hover{color:var(--ink)}
 .tab-btn.active{color:var(--ink);border-bottom-color:var(--accent)}
 .tab-bar-spacer{flex:1;min-width:8px}
 
-.theme-toggle-btn{
-align-self:center;height:32px;margin-right:4px;
-padding:0 10px;font-size:12px;font-weight:600;letter-spacing:.02em;
-line-height:1;color:var(--muted);
-cursor:pointer;border:1px solid transparent;border-radius:7px;
-background:transparent;display:flex;align-items:center;gap:4px;
-transition:color .12s,background .12s,border-color .12s;
-user-select:none;
+.theme-toggle-btn,.live-layout-gear{
+flex-shrink:0;height:32px;padding:0 10px;margin-left:4px;
+font-size:12px;font-weight:600;color:var(--muted);
+cursor:pointer;border:1px solid transparent;border-radius:var(--radius-sm);
+background:transparent;display:inline-flex;align-items:center;gap:6px;
+user-select:none;white-space:nowrap;
+transition:color .12s ease,background .12s ease,border-color .12s ease;
 }
-.theme-toggle-btn:hover{color:var(--ink);background:var(--surface);border-color:var(--line)}
-@media(max-width:580px){
-.theme-btn-lbl{display:none}
+.theme-toggle-btn:hover,.live-layout-gear:hover{
+color:var(--ink);background:var(--surface);border-color:var(--line);
 }
-
-.live-layout-gear{
-align-self:center;height:32px;margin-right:4px;
-padding:0 10px;font-size:12px;font-weight:600;letter-spacing:.02em;
-line-height:1;color:var(--muted);
-cursor:pointer;border:1px solid transparent;border-radius:7px;
-background:transparent;position:relative;z-index:210;
-transition:color .12s,background .12s,border-color .12s;
-}
-.live-layout-gear:hover{color:var(--ink);background:var(--surface);border-color:var(--line)}
 .live-layout-gear.active{
 color:var(--btn-active-text);background:var(--btn-active-bg);border-color:var(--btn-active-bg);
 }
 
-/* --- Content --- */
+/* --- Main scroll container --- */
 #tab-content{
-flex:1;
-padding:14px;
-overflow-y:auto;
-overflow-x:hidden;
-max-width:100%;
-min-height:0;
+flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;
+padding:16px;
+padding-left:max(16px,env(safe-area-inset-left));
+padding-right:max(16px,env(safe-area-inset-right));
+padding-bottom:calc(20px + env(safe-area-inset-bottom));
 }
-.tab-pane{display:none;max-width:1100px;margin:0 auto}
+.tab-pane{display:none;max-width:1180px;margin:0 auto}
 .tab-pane.active{display:block}
-#pane-mapping{max-width:100%}
 
-/* --- Cards --- */
+/* --- Shared Cards --- */
 .card{
 background:var(--bg-elev);border-radius:var(--radius);
-border:1px solid var(--line);
-box-shadow:var(--shadow);
+border:1px solid var(--line);box-shadow:var(--shadow);
 padding:14px 16px;margin-bottom:12px;
 }
+.card-header-row{
+display:flex;align-items:center;justify-content:space-between;
+gap:10px;margin-bottom:12px;flex-wrap:wrap;
+}
+.card-header-row .card-title{margin-bottom:0}
 .card-title{
-font-size:11px;font-weight:700;letter-spacing:.1em;
+font-size:11px;font-weight:700;letter-spacing:.08em;
 text-transform:uppercase;color:var(--ink-soft);margin-bottom:12px;
+text-wrap:balance;
+}
+.card-meta{
+font-size:11px;font-weight:600;color:var(--muted);
+}
+
+/* --- Live Board & Grid --- */
+#live-board{display:flex;flex-direction:column;gap:12px}
+#live-board > .card,
+#live-board > #meters-wrap,
+#live-board > #live-grid{margin-bottom:0}
+#live-grid{display:grid;grid-template-columns:1fr;gap:12px}
+#live-grid > .card{margin-bottom:0;display:flex;flex-direction:column}
+@media(min-width:640px){
+#live-grid{grid-template-columns:1fr 1fr;align-items:stretch}
+#live-grid.live-grid-single{grid-template-columns:1fr}
+#live-grid > .card{height:100%}
+#live-grid #siren-body,
+#live-grid #mic-inputs-card .mic-live-list{flex:1}
 }
 
 /* --- Siren --- */
 #siren-body{display:flex;flex-direction:column;gap:12px}
 #siren-hero{
 background:var(--surface);border-radius:8px;padding:12px 14px;
-border:1px solid var(--line-soft);
-border-left:3px solid var(--accent);
+border:1px solid var(--line-soft);border-left:3px solid var(--accent);
 }
-#siren-hero-top{
-display:flex;align-items:center;justify-content:space-between;gap:10px;
-}
+#siren-hero-top{display:flex;align-items:center;justify-content:space-between;gap:10px}
 #siren-name{font-size:17px;font-weight:700;color:var(--ink);line-height:1.2}
-#siren-gate{
-display:flex;align-items:center;gap:6px;flex-shrink:0;
-}
+#siren-gate{display:flex;align-items:center;gap:6px;flex-shrink:0}
 #siren-gate-dot{
-display:inline-block;width:10px;height:10px;border-radius:50%;
-background:#888;
-transition:background .1s,box-shadow .1s;
+display:inline-block;width:9px;height:9px;border-radius:50%;
+background:var(--muted);transition:background .1s ease;
 }
-#siren-gate-dot.on{background:var(--accent);box-shadow:0 0 8px rgba(231,76,60,.8)}
-.gate-lbl{font-size:11px;font-weight:700;color:var(--muted);letter-spacing:.04em}
-#siren-mod-row{
-display:flex;align-items:center;gap:10px;margin-top:10px;
-}
+#siren-gate-dot.on{background:var(--accent)}
+.gate-lbl{font-size:11px;font-weight:700;color:var(--muted);letter-spacing:.04em;text-transform:uppercase}
+#siren-mod-row{display:flex;align-items:center;gap:10px;margin-top:10px}
 .siren-mod-label{
 flex:0 0 auto;font-size:10px;font-weight:700;color:var(--muted);
 letter-spacing:.05em;text-transform:uppercase;
 }
 #siren-mod-track{
-flex:1;height:6px;background:var(--line);
-border-radius:3px;overflow:hidden;min-width:0;
+flex:1;height:6px;background:var(--line);border-radius:3px;overflow:hidden;min-width:0;
 }
 #siren-mod-fill{
 display:block;height:100%;width:0%;background:var(--bar-fill);
-border-radius:3px;transition:width .04s;
+border-radius:3px;transition:width .05s linear;
 }
 #siren-mod-lbl{
-flex:0 0 36px;font-size:11px;font-weight:700;color:var(--muted);
-font-family:var(--mono);text-align:right;
+flex:0 0 38px;font-size:11px;font-weight:700;color:var(--muted);
+font-family:var(--mono);font-variant-numeric:tabular-nums;text-align:right;
 }
-#siren-presets{
-display:flex;gap:5px;flex-wrap:nowrap;width:100%;
-}
+#siren-presets{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:5px;width:100%}
 .spreset{
-flex:1 1 0;min-width:0;
-padding:8px 2px;border-radius:7px;
+padding:8px 4px;border-radius:var(--radius-sm);
 background:var(--surface);border:1px solid var(--line);
-font-size:9px;font-weight:700;color:var(--muted);
-text-align:center;letter-spacing:.02em;
-line-height:1.2;white-space:nowrap;overflow:hidden;
-text-overflow:ellipsis;
-transition:background .15s,color .15s,border-color .15s,box-shadow .15s;
+font-size:10px;font-weight:700;color:var(--muted);
+text-align:center;line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+transition:background .12s ease,color .12s ease,border-color .12s ease;
 }
-.spreset:hover{border-color:var(--muted);color:var(--ink)}
 .spreset.active{
 background:var(--btn-active-bg);border-color:var(--btn-active-bg);color:var(--btn-active-text);
 }
-.spreset.active.gate{
-border-color:var(--accent);
-box-shadow:0 0 10px rgba(231,76,60,.55);
+.spreset.active.gate{background:var(--accent);border-color:var(--accent);color:#fff}
+
+/* --- Mic inputs --- */
+#mic-inputs-card{margin:0;max-width:100%;display:flex;flex-direction:column}
+.mic-live-list{display:flex;flex-direction:column;gap:6px}
+.mic-live-row{
+display:flex;align-items:center;gap:10px;flex-wrap:wrap;
+padding:8px 10px;background:var(--surface);border:1px solid var(--line);border-radius:8px;
 }
+.mic-live-label{
+font-weight:700;font-size:12px;min-width:42px;letter-spacing:.04em;color:var(--ink);
+}
+.mic-toggle{
+display:inline-flex;align-items:center;gap:8px;cursor:pointer;user-select:none;min-height:28px;
+}
+.mic-toggle-input{position:absolute;opacity:0;width:0;height:0;pointer-events:none}
+.mic-toggle-track{
+position:relative;display:inline-block;width:36px;height:20px;
+background:var(--muted);border-radius:999px;transition:background .15s ease;flex-shrink:0;
+}
+.mic-toggle-thumb{
+position:absolute;top:2px;left:2px;width:16px;height:16px;
+background:#fff;border-radius:50%;transition:transform .15s ease;
+}
+.mic-toggle-input:checked + .mic-toggle-track{background:var(--ok)}
+.mic-toggle-input:checked + .mic-toggle-track .mic-toggle-thumb{transform:translateX(16px)}
+.mic-toggle-input:focus-visible + .mic-toggle-track{outline:2px solid var(--focus-ring);outline-offset:2px}
+.mic-toggle-text{font-size:12px;font-weight:600;color:var(--ink-soft);min-width:2em}
+.mic-toggle-input:checked ~ .mic-toggle-text{color:var(--ok)}
+.mic-live-hpf{
+display:flex;align-items:center;gap:5px;font-size:12px;margin-left:auto;
+color:var(--ink-soft);font-weight:600;
+}
+.mic-live-hpf input[type=number]{
+width:60px;padding:4px 6px;border:1px solid var(--input-border);border-radius:5px;
+font-size:12px;font-variant-numeric:tabular-nums;background:var(--input-bg);color:var(--ink);
+}
+.mic-live-hpf-unit{color:var(--muted);font-size:11px;font-weight:500}
 
 /* --- Sampler --- */
-#sampler-body{display:flex;flex-direction:column;gap:10px}
-.sampler-hint{
-font-size:11px;font-weight:600;color:var(--muted);letter-spacing:.02em;
-}
+#sampler-body{display:flex;flex-direction:column;gap:8px}
 .sampler-empty{
-padding:14px 12px;border:1px dashed var(--line);border-radius:8px;
+padding:12px;border:1px dashed var(--line);border-radius:8px;
 font-size:12px;line-height:1.45;color:var(--muted);background:var(--surface);
+text-wrap:pretty;
 }
 .sampler-grid{
-display:grid;
-grid-template-columns:repeat(auto-fill,minmax(168px,1fr));
-gap:8px;
+display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,142px),1fr));gap:8px;
 }
 .sampler-pad{
 display:flex;align-items:center;justify-content:flex-start;
-min-height:36px;height:36px;padding:0 12px;border-radius:8px;cursor:pointer;
+min-height:38px;padding:0 12px;border-radius:8px;cursor:pointer;
 background:var(--surface);border:1px solid var(--line);
 font-family:var(--mono);font-size:11px;font-weight:700;color:var(--ink);
-letter-spacing:.01em;text-align:left;line-height:1;
-white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
-transition:background .12s,border-color .12s,box-shadow .12s,transform .08s;
+text-align:left;line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+transition:background .12s ease,border-color .12s ease,transform .08s ease;
 }
 .sampler-pad:hover{border-color:var(--muted);background:var(--bg-elev)}
 .sampler-pad:active{transform:scale(.98)}
 .sampler-pad.playing{
-border-color:var(--accent);background:rgba(231,76,60,.16);color:var(--accent);
-box-shadow:0 0 0 1px rgba(231,76,60,.28);
+border-color:var(--accent);background:rgba(217,67,54,.14);color:var(--accent);
 }
 
 /* --- Console --- */
 .console-header{
-display:flex;align-items:center;justify-content:space-between;
-gap:8px;margin-bottom:10px;
+display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:10px;
 }
 .console-header .card-title{margin-bottom:0}
 .console-filter{display:flex;gap:4px}
 .console-filter-btn{
-padding:4px 11px;font-size:10px;font-weight:700;color:var(--muted);
+padding:4px 10px;font-size:11px;font-weight:600;color:var(--muted);
 cursor:pointer;border:1px solid var(--line);border-radius:999px;
-background:var(--surface);letter-spacing:.03em;
-transition:background .1s,color .1s,border-color .1s;
+background:var(--surface);transition:background .12s ease,color .12s ease,border-color .12s ease;
 }
 .console-filter-btn:hover{color:var(--ink);border-color:var(--muted)}
 .console-filter-btn.active{
@@ -853,1367 +984,664 @@ background:var(--btn-active-bg);color:var(--btn-active-text);border-color:var(--
 display:flex;align-items:center;gap:8px;
 padding:5px 6px;border-bottom:1px solid var(--line-soft);
 border-left:3px solid transparent;border-radius:4px;
-background:transparent;
-transition:background 1.2s ease,border-left-color 1.2s ease;
-will-change:transform,opacity;
+background:transparent;transition:background .4s ease,border-left-color .4s ease;
 }
 .crow:last-child{border-bottom:none}
 .crow.empty .cname{color:transparent}
 .crow.empty .cval-group{visibility:hidden}
 .cname{
-flex:0 0 160px;font-family:var(--mono);font-size:11px;
-font-weight:600;color:var(--ink);white-space:nowrap;overflow:hidden;
-text-overflow:ellipsis;
-transition:color .2s ease;
+flex:0 1 clamp(92px,30vw,160px);min-width:0;
+font-family:var(--mono);font-size:11px;font-weight:600;color:var(--ink);
+white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
 }
-.ctrack{flex:1;height:5px;background:var(--line-soft);border-radius:3px;overflow:hidden;position:relative}
+.ctrack{flex:1;min-width:36px;height:5px;background:var(--line-soft);border-radius:3px;overflow:hidden;position:relative}
 .cfill{
-display:block;height:100%;min-width:0;
-background:var(--bar-fill);border-radius:3px;
-transition:width .08s ease-out,background-color .4s ease;
+display:block;height:100%;min-width:0;background:var(--bar-fill);border-radius:3px;
+transition:width .08s ease-out;
 }
 .crow.sw .cfill{background:var(--accent)}
-.crow.empty .ctrack{background:var(--line-soft)}
-.crow.empty .cfill-loading{
-width:20%;background:#888;
-transition:none;
-animation:consoleBarFade 2s ease-in-out infinite;
-animation-delay:calc(var(--slot, 0) * 0.15s);
-}
-@keyframes consoleBarFade{
-0%,100%{width:12%;opacity:.3}
-50%{width:58%;opacity:.85}
-}
+.crow.empty .cfill-loading{width:18%;background:var(--line);transition:none}
 .cval-group{
-display:flex;align-items:center;gap:5px;
-flex:0 0 auto;font-family:var(--mono);font-size:11px;
+display:flex;align-items:center;gap:4px;flex:0 0 auto;
+font-family:var(--mono);font-size:11px;font-variant-numeric:tabular-nums;
 }
-.coldval{
-color:var(--muted);opacity:.6;
-min-width:38px;text-align:right;font-variant-numeric:tabular-nums;
-transition:opacity .3s ease,color .3s ease;
-}
-.cdir{
-width:12px;text-align:center;font-size:10px;line-height:1;
-opacity:.6;transition:opacity .3s ease;
-font-weight:700;user-select:none;
-}
-.cdir.up{color:#10b981}
-.cdir.down{color:#f59e0b}
+.coldval{color:var(--muted);opacity:.65;min-width:38px;text-align:right}
+.cdir{width:12px;text-align:center;font-size:10px;line-height:1;font-weight:700;user-select:none}
+.cdir.up{color:var(--ok)}
+.cdir.down{color:var(--warn)}
 .cdir.sw{color:var(--accent)}
-.cval{
-min-width:38px;text-align:right;color:var(--muted);font-variant-numeric:tabular-nums;
-transition:color .2s ease;
-}
-
-/* --- Active / Highlight state for recent changes --- */
-.crow.active{
-background:rgba(56,139,253,.1);
-border-left-color:#388bfd;
-transition:background .06s ease,border-left-color .06s ease;
-}
-.crow.active .cname{color:var(--ink);font-weight:700}
-.crow.active .cfill{
-background:#388bfd;
-box-shadow:0 0 6px rgba(56,139,253,.4);
-}
+.cval{min-width:38px;text-align:right;color:var(--muted)}
+.crow.active{background:rgba(37,99,235,.09);border-left-color:var(--info)}
+.crow.active .cname,.crow.active .cval{color:var(--ink);font-weight:700}
 .crow.active .coldval{opacity:1;color:var(--ink-soft)}
-.crow.active .cval{color:var(--ink);font-weight:700}
-.crow.active .cdir{opacity:1;transition:opacity .06s ease}
+.crow.sw.active{background:rgba(217,67,54,.09);border-left-color:var(--accent)}
 
-/* Switches in active state */
-.crow.sw.active{
-background:rgba(231,76,60,.1);
-border-left-color:var(--accent);
-}
-.crow.sw.active .cfill{
-background:var(--accent);
-box-shadow:0 0 6px rgba(231,76,60,.4);
-}
-
-/* --- Switches (grouped tiles) --- */
-.sw-grid{
-display:grid;grid-template-columns:repeat(3,1fr);
-gap:10px;margin-top:6px;
-}
+/* --- Switches --- */
+.sw-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-top:4px}
+@media(max-width:720px){.sw-grid{grid-template-columns:1fr}}
 .sw-group{
 background:var(--surface);border:1px solid var(--line);
-border-radius:8px;padding:10px 12px 12px;
+border-radius:8px;padding:10px 12px;
 }
-.sw-group-kill{border-top:2px solid rgba(231,76,60,.35)}
-.sw-group-fx{border-top:2px solid rgba(243,156,18,.35)}
-.sw-group-siren{border-top:2px solid rgba(41,128,185,.35)}
+.sw-group-kill{border-top:2px solid var(--danger)}
+.sw-group-fx{border-top:2px solid var(--warn)}
+.sw-group-siren{border-top:2px solid var(--info)}
 .sw-group-title{
 font-size:11px;font-weight:700;text-transform:uppercase;
-letter-spacing:.08em;color:var(--ink-soft);margin-bottom:8px;
+letter-spacing:.06em;color:var(--ink-soft);margin-bottom:8px;
 }
-.sw-group-items{display:flex;flex-wrap:wrap;gap:6px}
-.sw-group-kill .sw-group-items,
-.sw-group-fx .sw-group-items{
-display:grid;grid-template-columns:1fr 1fr;gap:6px;
-}
+.sw-group-items{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+.sw-group-siren .sw-group-items{grid-template-columns:1fr}
 .sw-tile{
-display:flex;align-items:center;gap:8px;
-padding:8px 10px;background:var(--bg-elev);
-border:1px solid var(--line);border-radius:7px;
-transition:border-color .15s,background .15s,box-shadow .15s;
+display:flex;align-items:center;gap:8px;padding:8px 10px;
+background:var(--bg-elev);border:1px solid var(--line);border-radius:var(--radius-sm);
 }
-.sw-tile.on{background:var(--surface);border-color:var(--line)}
-.sw-tile-kill.on{border-color:rgba(231,76,60,.55);background:rgba(231,76,60,.12)}
-.sw-tile-fx.on{border-color:rgba(243,156,18,.5);background:rgba(243,156,18,.12)}
-.sw-tile-siren.on{border-color:rgba(41,128,185,.55);background:rgba(41,128,185,.12)}
-.sw-led{
-flex-shrink:0;width:9px;height:9px;border-radius:50%;
-background:#888;
-transition:background .15s,box-shadow .15s;
-}
-.sw-tile.on .sw-led{background:var(--ink);box-shadow:0 0 5px rgba(120,120,140,.35)}
-.sw-tile-kill.on .sw-led{background:var(--accent);box-shadow:0 0 7px rgba(231,76,60,.45)}
-.sw-tile-fx.on .sw-led{background:#d68910;box-shadow:0 0 6px rgba(214,137,16,.4)}
-.sw-tile-siren.on .sw-led{background:#2980b9;box-shadow:0 0 7px rgba(41,128,185,.45)}
-.sw-tile-name{
-font-size:10px;font-weight:700;color:var(--ink);
-letter-spacing:.04em;line-height:1.2;
-}
+.sw-tile-kill.on{border-color:var(--danger);background:rgba(220,38,38,.1)}
+.sw-tile-fx.on{border-color:var(--warn);background:rgba(217,119,6,.1)}
+.sw-tile-siren.on{border-color:var(--info);background:rgba(37,99,235,.1)}
+.sw-led{flex-shrink:0;width:8px;height:8px;border-radius:50%;background:var(--muted)}
+.sw-tile-kill.on .sw-led{background:var(--danger)}
+.sw-tile-fx.on .sw-led{background:var(--warn)}
+.sw-tile-siren.on .sw-led{background:var(--info)}
+.sw-tile-name{font-size:10px;font-weight:700;color:var(--ink);letter-spacing:.04em}
 
-/* --- Meters (canvas VU, horizontal) --- */
-#meters-wrap{
-display:flex;flex-direction:column;gap:10px;
-margin:0;
-}
-.meters-columns{
-display:grid;
-grid-template-columns:repeat(2,minmax(0,1fr));
-gap:12px;align-items:stretch;
-}
-.meters-card{
-min-width:0;height:100%;margin-bottom:0;
-display:flex;flex-direction:column;box-sizing:border-box;
-}
-.meter-group{
-display:flex;flex-direction:column;gap:4px;
-align-items:stretch;padding:4px 0 2px;flex:1;
-}
+/* --- VU Meters --- */
+#meters-wrap{display:flex;flex-direction:column;gap:10px;margin:0}
+.meters-columns{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;align-items:stretch}
+@media(max-width:760px){.meters-columns{grid-template-columns:1fr}}
+.meters-card{min-width:0;height:100%;margin-bottom:0;display:flex;flex-direction:column}
+.meter-group{display:flex;flex-direction:column;gap:6px;align-items:stretch;padding:2px 0;flex:1}
 .meter-ch{
 display:flex;flex-direction:row;align-items:center;gap:8px;
-width:100%;min-width:0;
-padding-top:11px;
+width:100%;min-width:0;padding-top:11px;
 }
 .meter-id{
-display:flex;flex-direction:column;gap:1px;
-min-width:64px;width:64px;flex-shrink:0;
-align-items:flex-start;text-align:left;
+display:flex;flex-direction:column;gap:2px;
+min-width:64px;width:64px;flex-shrink:0;align-items:flex-start;text-align:left;
 }
-.meter-strip{
-display:flex;flex-direction:row;align-items:stretch;
-flex:1 1 0;min-width:0;width:100%;max-width:none;gap:0;
-}
-.meter-body{
-display:flex;flex-direction:column;gap:1px;
-flex:1 1 0;min-width:0;width:100%;
-}
-.meter-wrap{
-position:relative;flex:1 1 0;min-width:0;
-width:100%;height:26px;margin-bottom:0;
-cursor:pointer;
-}
-.meter-canvas{
-display:block;width:100%;height:26px;
-border-radius:0;
-}
+.meter-strip{display:flex;flex-direction:row;align-items:stretch;flex:1 1 0;min-width:0}
+.meter-body{display:flex;flex-direction:column;gap:2px;flex:1 1 0;min-width:0}
+.meter-wrap{position:relative;flex:1 1 0;min-width:0;width:100%;height:26px;cursor:pointer}
+.meter-canvas{display:block;width:100%;height:26px}
 .meter-scale{
-display:flex;justify-content:space-between;
-width:100%;padding:0 1px;
-font-size:7px;font-family:var(--mono);color:#9a9aa3;
+display:flex;justify-content:space-between;width:100%;padding:0 1px;
+font-size:8px;font-family:var(--mono);font-variant-numeric:tabular-nums;color:var(--muted);
 line-height:1;user-select:none;pointer-events:none;
 }
 .meter-peak-db{
-position:absolute;top:-11px;left:0;
-font-size:8px;font-family:var(--mono);color:var(--muted);
-transform:translateX(-50%);
-white-space:nowrap;pointer-events:none;
-opacity:0;
+position:absolute;top:-12px;left:0;font-size:9px;font-family:var(--mono);
+font-variant-numeric:tabular-nums;color:var(--muted);
+transform:translateX(-50%);white-space:nowrap;pointer-events:none;opacity:0;
 transition:left 60ms linear,opacity 120ms ease;
 }
-.meter-lbl{
-font-size:10px;font-weight:700;color:var(--ink-soft);
-text-align:left;letter-spacing:.03em;
-}
+.meter-peak-db.clip{color:var(--danger);font-weight:700}
+.meter-lbl{font-size:10px;font-weight:700;color:var(--ink-soft);letter-spacing:.03em}
 .meter-gain-val{
-font-size:12px;font-family:var(--mono);font-weight:700;
-color:var(--ink);line-height:1.2;
+font-size:11px;font-family:var(--mono);font-variant-numeric:tabular-nums;
+font-weight:700;color:var(--ink);line-height:1.2;
 }
-.meter-peak-db.clip{color:#ff3b2a;font-weight:700}
-.meter-clip-led{
-position:relative;flex:0 0 auto;
-width:10px;height:10px;
-align-self:center;
-}
+.meter-clip-led{position:relative;flex:0 0 auto;width:10px;height:10px;align-self:center}
 .meter-clip-led__bezel{
 position:absolute;inset:0;border-radius:50%;
-background:linear-gradient(145deg,#3a3a3a 0%,#1a1a1a 55%,#2e2e2e 100%);
-box-shadow:inset 0 1px 2px rgba(255,255,255,.12),0 1px 2px rgba(0,0,0,.45);
+background:#262b35;border:1px solid #3c4352;
 }
 .meter-clip-led__core{
 position:absolute;inset:2px;border-radius:50%;
-background:radial-gradient(circle at 35% 30%,#5a2018 0%,#2a0a06 70%,#180604 100%);
-box-shadow:inset 0 1px 3px rgba(0,0,0,.6);
-transition:background 120ms ease,box-shadow 120ms ease;
+background:#471a16;transition:background 100ms ease;
 }
-.meter-clip-led.on .meter-clip-led__core{
-background:radial-gradient(circle at 35% 28%,#ffb0a0 0%,#ff4028 35%,#c01808 85%);
-box-shadow:0 0 8px rgba(255,59,42,.85),0 0 14px rgba(255,59,42,.45),inset 0 -1px 2px rgba(0,0,0,.35);
-}
-.meter-clip-led.on .meter-clip-led__bezel{
-box-shadow:inset 0 1px 2px rgba(255,255,255,.18),0 0 6px rgba(255,59,42,.35);
-}
-
-/* Gain \xB1 flush with VU bar (same height as canvas row) */
+.meter-clip-led.on .meter-clip-led__core{background:#ef4444}
 .meter-gain-btn{
-flex:0 0 auto;align-self:flex-start;
-width:22px;height:26px;padding:0;margin:0;
-border:none;background:#202020;color:#c8c8c8;
+flex:0 0 auto;align-self:flex-start;width:24px;height:26px;padding:0;margin:0;
+border:1px solid var(--line);background:var(--surface);color:var(--ink-soft);
 font-size:13px;font-weight:700;line-height:1;cursor:pointer;
-transition:background .1s,color .1s;
+transition:background .1s ease,color .1s ease;
 }
-.meter-gain-btn--dec{border-radius:3px 0 0 3px}
-.meter-gain-btn--inc{border-radius:0 3px 3px 0}
-.meter-gain-btn:hover{background:#2e2e2e;color:#fff}
-.meter-gain-btn:active{background:#3a3a3a}
-.meter-gain-btn:disabled{color:#555;cursor:default;background:#1a1a1a}
-
-/* Master Stereo / Mono pill button on VU meter */
+.meter-gain-btn--dec{border-radius:4px 0 0 4px;border-right:none}
+.meter-gain-btn--inc{border-radius:0 4px 4px 0;border-left:none}
+.meter-gain-btn:hover:not(:disabled){background:var(--bg-elev);color:var(--ink)}
+.meter-gain-btn:disabled{opacity:.35;cursor:default}
 .meter-mode-btn{
-align-self:flex-start;
-padding:1px 5px;
-font-size:8px;
-font-family:var(--mono);
-font-weight:700;
-line-height:12px;
-border-radius:3px;
-border:1px solid transparent;
-cursor:pointer;
-letter-spacing:.04em;
-user-select:none;
-margin-top:1px;
-transition:background .15s ease,color .15s ease,border-color .15s ease;
+align-self:flex-start;padding:2px 6px;font-size:9px;font-family:var(--mono);
+font-weight:700;line-height:1.2;border-radius:4px;border:1px solid transparent;
+cursor:pointer;letter-spacing:.04em;user-select:none;
 }
-.meter-mode-btn.stereo{
-background:#1a7a3a;
-color:#fff;
-border-color:#28a745;
+.meter-mode-btn.stereo{background:var(--ok);color:#fff}
+.meter-mode-btn.mono{background:var(--warn);color:#111}
+
+@media(max-width:480px){
+.meter-ch{
+display:grid;grid-template-columns:1fr auto;grid-template-rows:auto auto;
+gap:4px 8px;padding-top:12px;
 }
-.meter-mode-btn.stereo:hover{
-background:#218838;
+.meter-id{
+grid-column:1;grid-row:1;width:auto;min-width:0;
+flex-direction:row;align-items:center;gap:8px;
 }
-.meter-mode-btn.mono{
-background:#d35400;
-color:#fff;
-border-color:#e67e22;
-}
-.meter-mode-btn.mono:hover{
-background:#e67e22;
+.meter-clip-led{grid-column:2;grid-row:1}
+.meter-strip{grid-column:1 / -1;grid-row:2}
+.meter-gain-btn{width:28px}
 }
 
-/* --- Mapping --- */
-#mapping-note{
-font-size:11px;color:#856404;background:#fffbe6;
-border-left:3px solid #f39c12;padding:8px 12px;
-border-radius:0 4px 4px 0;margin-bottom:12px;
-}
-[data-theme="dark"] #mapping-note{
-color:#e5c07b;background:#262010;border-left-color:#f39c12;
-}
-#mapping-note a{color:#1a5276;font-weight:700;text-decoration:underline}
-[data-theme="dark"] #mapping-note a{color:#58a6ff}
-#mapping-note a:hover{color:#0d3d56}
-[data-theme="dark"] #mapping-note a:hover{color:#79c0ff}
-#mapping-conflicts{
-display:none;font-size:12px;color:#922;
-background:#fdecea;border-left:3px solid #e74c3c;
-padding:8px 12px;border-radius:0 4px 4px 0;margin-bottom:12px;
-}
-[data-theme="dark"] #mapping-conflicts{
-color:#ff7b72;background:#2d1517;border-left-color:#ff5447;
-}
-#mapping-conflicts.show{display:block}
-#mapping-conflicts ul{margin:6px 0 0 18px;padding:0}
-#mapping-conflicts li{margin:2px 0}
-.mtable tr.dup-conflict td{background:#fff5f5}
-[data-theme="dark"] .mtable tr.dup-conflict td{background:#2d1517}
-.mtable tr.dup-conflict input[type=number],
-.mtable tr.dup-conflict select{border-color:#e74c3c;background:#fffafa}
-[data-theme="dark"] .mtable tr.dup-conflict input[type=number],
-[data-theme="dark"] .mtable tr.dup-conflict select{border-color:#ff5447;background:#201012}
-#detect-status{
-display:none;font-size:12px;color:#1a5276;
-background:#eaf4fb;border-left:3px solid #2980b9;
-padding:8px 12px;border-radius:0 4px 4px 0;margin-bottom:12px;
-}
-[data-theme="dark"] #detect-status{
-color:#79c0ff;background:#132338;border-left-color:#388bfd;
-}
-#detect-status.show{display:block}
-#detect-status.err{color:#922;background:#fdecea;border-left-color:#e74c3c}
-[data-theme="dark"] #detect-status.err{color:#ff7b72;background:#2d1517;border-left-color:#ff5447}
-.mtable tr.row-detecting td{
-background:#fff8e6;
-animation:detectPulse 0.9s ease-in-out infinite alternate;
-}
-[data-theme="dark"] .mtable tr.row-detecting td{
-background:#302510;
-}
-@keyframes detectPulse{
-from{background:#fff8e6}
-to{background:#ffe9a8}
-}
-[data-theme="dark"] @keyframes detectPulse{
-from{background:#302510}
-to{background:#453515}
-}
-.btn-detect-row{
-display:block;width:100%;margin:0 auto;
-padding:4px 2px;background:#2980b9;color:#fff;
-border:none;border-radius:4px;font-size:9px;font-weight:700;
-cursor:pointer;letter-spacing:.02em;white-space:nowrap;
-line-height:1.3;
-}
-.btn-detect-row:hover{background:#1f6391}
-.btn-detect-row:disabled{background:#ccc;cursor:default}
-.btn-detect-row.detect-active{
-background:#fff;color:#e74c3c;border:2px solid #e74c3c;
-font-size:12px;padding:2px 0;
-}
-.btn-detect-row.detect-active:hover{background:#fdecea}
-.routing-hint{
-font-size:11px;color:var(--muted);margin:-4px 0 10px;
-}
-.routing-grid{
-display:grid;
-grid-template-columns:1fr 1fr;
-gap:16px;
-margin-bottom:8px;
-}
-@media (max-width:720px){
-.routing-grid{grid-template-columns:1fr}
-}
-.msec-subtitle{
-font-size:11px;font-weight:700;text-transform:uppercase;
-letter-spacing:.06em;color:var(--muted);margin:0 0 6px;
-}
-.routing-table col.col-name{width:40%}
-.routing-table col.col-num{width:20%}
-.routing-table col.col-check{width:12%}
-.routing-table input[type=text]{
-width:100%;min-width:0;max-width:100%;
-padding:3px 4px;border:1px solid var(--input-border);
-border-radius:4px;font-size:12px;font-family:inherit;
-background:var(--input-bg);color:var(--ink);
-}
-.mtable-wrap{
-width:100%;max-width:100%;
-margin-bottom:4px;
-}
-.mtable{
-width:100%;max-width:100%;
-table-layout:fixed;
-border-collapse:collapse;
-font-size:12px;
-}
-.mtable col.col-name{width:32%}
-.mtable col.col-num{width:10%}
-.mtable col.col-check{width:9%}
-.mtable col.col-port{width:11%}
-.mtable col.col-detect{width:15%}
-.mtable th,.mtable td{
-overflow:hidden;
-vertical-align:middle;
-}
-.mtable th.detect-col,
-.mtable td.detect-cell{
-text-align:center;
-padding:4px 3px!important;
-}
-.mtable th.detect-col{
-font-size:9px;line-height:1.2;text-align:center;
-letter-spacing:.03em;white-space:normal;
-word-break:break-word;
-}
-.mtable th.col-check,.mtable td.col-check{text-align:center}
-#mapping-toolbar{
-display:flex;align-items:center;gap:12px;
-margin-bottom:14px;flex-wrap:wrap;
-}
-#btn-download{
-padding:9px 22px;background:var(--btn-active-bg);color:var(--btn-active-text);
-border:none;border-radius:6px;font-size:13px;font-weight:600;
-cursor:pointer;letter-spacing:.03em;transition:background .15s,opacity .15s;
-}
-#btn-download:hover{opacity:.9}
-#download-status{font-size:12px;font-weight:600;color:#27ae60}
-#download-status.err{color:#e74c3c}
-.msec-title{
-font-size:12px;font-weight:700;text-transform:uppercase;
-letter-spacing:.07em;color:var(--ink-soft);margin:14px 0 7px;
-}
-.mtable th{
-background:var(--table-th-bg);text-align:left;
-padding:6px 6px;font-weight:700;
-border-bottom:2px solid var(--line);color:var(--muted);
-font-size:10px;letter-spacing:.05em;text-transform:uppercase;
-}
-.mtable td{padding:4px 6px;border-bottom:1px solid var(--table-border);color:var(--ink)}
-.mtable tr:hover td{background:var(--table-hover)}
-.mtable input[type=number]{
-width:100%;min-width:0;max-width:100%;
-padding:3px 4px;border:1px solid var(--input-border);
-border-radius:4px;font-size:12px;font-family:inherit;
-background:var(--input-bg);color:var(--ink);
-}
-.mtable input[type=checkbox]{width:16px;height:16px;cursor:pointer;margin:0 auto;display:block}
-.mtable input[type=checkbox]:disabled{cursor:not-allowed;opacity:0.6}
-.mtable select{
-width:100%;min-width:0;max-width:100%;
-padding:3px 4px;border:1px solid var(--input-border);
-border-radius:4px;font-size:12px;font-family:inherit;
-background:var(--input-bg);color:var(--ink);
-}
-.pname{
-font-family:var(--mono);font-size:11px;
-font-weight:700;color:var(--ink);
-white-space:nowrap;text-overflow:ellipsis;overflow:hidden;
-}
-.loading-cell{font-style:italic;color:#bbb;padding:10px}
-.btn-add-ign{
-padding:5px 12px;background:var(--surface);color:var(--ink);border:1px solid var(--line);
-border-radius:4px;font-size:11px;font-weight:600;cursor:pointer;transition:all .15s;
-}
-.btn-add-ign:hover{background:var(--bg-elev);border-color:var(--muted)}
-.btn-add-ign:disabled{opacity:.4;cursor:not-allowed}
-.btn-del-ign{
-padding:2px 7px;background:rgba(231,76,60,.15);color:var(--accent);border:1px solid rgba(231,76,60,.35);
-border-radius:4px;font-size:11px;font-weight:700;cursor:pointer;transition:all .15s;line-height:1.2;
-}
-.btn-del-ign:hover{background:rgba(231,76,60,.25)}
+/* --- Master EQ --- */
+.master-eq-wrap{width:100%;max-width:920px;margin:0 auto}
+.master-eq-canvas{display:block;width:100%;height:220px;min-height:220px;border-radius:6px}
+@media(min-width:720px){.master-eq-canvas{height:300px;min-height:300px}}
 
-/* --- Responsive --- */
-@media(min-width:580px){
-#tab-content{padding:18px}
-#live-grid{
-display:grid;grid-template-columns:1fr 1fr;gap:12px;
-align-items:stretch;margin-bottom:0;
-}
-#live-grid > .card{
-height:100%;margin-bottom:0;
-display:flex;flex-direction:column;box-sizing:border-box;
-}
-#live-grid #siren-body,
-#live-grid #mic-inputs-card .mic-live-list{
-flex:1;
-}
-}
-
-#live-layout-popup{
-position:fixed;inset:0;z-index:200;
-}
+/* --- Live layout popup --- */
+#live-layout-popup{position:fixed;inset:0;z-index:var(--z-popup)}
 #live-layout-popup[hidden]{display:none!important}
-.live-layout-backdrop{
-position:absolute;inset:0;
-background:rgba(0,0,0,.5);
-}
+.live-layout-backdrop{position:absolute;inset:0;background:rgba(0,0,0,.48)}
 .live-layout-panel{
-position:absolute;z-index:1;
-max-height:min(70vh,520px);overflow-y:auto;
+position:absolute;z-index:1;max-height:min(72dvh,520px);overflow-y:auto;
 background:var(--bg-elev);border:1px solid var(--line);border-radius:var(--radius);
-box-shadow:0 8px 28px rgba(0,0,0,.35),var(--shadow);
-padding:12px 14px;
+box-shadow:var(--shadow);padding:14px;
 }
 .live-layout-title{
-font-size:11px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;
+font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;
 color:var(--ink-soft);margin-bottom:4px;
 }
-.live-layout-hint{
-font-size:11px;color:var(--muted);line-height:1.4;margin-bottom:10px;
-}
-.live-layout-list{
-display:flex;flex-direction:column;gap:6px;
-}
+.live-layout-hint{font-size:11px;color:var(--muted);margin-bottom:10px}
+.live-layout-list{display:flex;flex-direction:column;gap:6px}
 .live-layout-row{
 display:flex;align-items:center;justify-content:space-between;gap:10px;
 font-size:13px;font-weight:600;color:var(--ink);user-select:none;
 padding:6px 8px;border-radius:6px;background:var(--surface);border:1px solid var(--line-soft);
 }
-.live-layout-check{
-display:flex;align-items:center;gap:8px;cursor:pointer;flex:1;min-width:0;
-}
-.live-layout-check input{width:15px;height:15px;accent-color:var(--accent);cursor:pointer}
+.live-layout-check{display:flex;align-items:center;gap:8px;cursor:pointer;flex:1;min-width:0}
+.live-layout-check input{width:16px;height:16px;accent-color:var(--accent);cursor:pointer}
 .live-layout-moves{display:flex;gap:4px;flex-shrink:0}
 .live-layout-move{
-width:28px;height:28px;padding:0;font-size:11px;line-height:1;
+width:30px;height:30px;padding:0;font-size:11px;line-height:1;
 color:var(--muted);cursor:pointer;border:1px solid var(--line);
 border-radius:6px;background:var(--bg-elev);
 }
 .live-layout-move:hover:not(:disabled){color:var(--ink);border-color:var(--muted)}
 .live-layout-move:disabled{opacity:.35;cursor:default}
-#live-board{display:flex;flex-direction:column;gap:12px}
-#live-board > .card,
-#live-board > #meters-wrap,
-#live-board > #live-grid{margin-bottom:0}
-#live-grid.live-grid-single{grid-template-columns:1fr}
 
-/* --- Live mic inputs --- */
-#mic-inputs-card{
-margin:0;
-max-width:100%;
+/* --- Controls Tab (Virtual / Dev) --- */
+.dev-banner{
+margin-bottom:12px;padding:12px 16px;border-left:3px solid var(--muted);
+}
+.dev-banner.dev-active{border-left-color:var(--ok)}
+.dev-banner-top{
+display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;
+margin-bottom:10px;
+}
+.dev-banner-title-box{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.dev-banner-title{font-size:15px;font-weight:700;color:var(--ink)}
+.dev-mode-pill{
+font-size:11px;font-weight:600;padding:2px 8px;border-radius:999px;
+background:var(--surface);border:1px solid var(--line);color:var(--muted);
+}
+.dev-banner.dev-active .dev-mode-pill{
+border-color:var(--ok);color:var(--ok);background:rgba(31,157,85,.1);
+}
+.dev-toggle-btn{
+padding:8px 14px;font-size:12px;font-weight:700;
+border-radius:var(--radius-sm);border:1px solid var(--line);
+background:var(--surface);color:var(--ink-soft);cursor:pointer;
+transition:background .12s ease,color .12s ease,border-color .12s ease;
+}
+.dev-toggle-btn:hover{border-color:var(--muted);color:var(--ink)}
+.dev-toggle-btn.active{background:var(--ok);color:#fff;border-color:var(--ok)}
+.dev-actions-row{
+display:flex;gap:8px;flex-wrap:wrap;padding-top:10px;border-top:1px solid var(--line-soft);
+}
+.dev-action-btn,.dev-small-btn{
+padding:6px 12px;font-size:12px;font-weight:600;
+border-radius:var(--radius-sm);border:1px solid var(--line);
+background:var(--surface);color:var(--ink-soft);cursor:pointer;
+transition:background .12s ease,color .12s ease,border-color .12s ease;
+}
+.dev-action-btn:hover,.dev-small-btn:hover{background:var(--bg-elev);color:var(--ink);border-color:var(--muted)}
+.dev-controls-container{display:flex;flex-direction:column;gap:12px;transition:opacity .15s ease}
+.dev-controls-container.disabled-controls{opacity:.48;pointer-events:none;user-select:none}
+.dev-section{padding:14px 16px;margin-bottom:0}
+.dev-sub-panel{
+background:var(--surface);border:1px solid var(--line);
+border-radius:8px;padding:12px;display:flex;flex-direction:column;gap:10px;
+}
+.dev-sub-heading{
+font-size:11px;font-weight:700;color:var(--ink-soft);
+text-transform:uppercase;letter-spacing:.06em;
+}
+.dev-row-between{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.dev-grid-2col{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,280px),1fr));gap:12px;margin-top:10px}
+.dev-channels-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,210px),1fr));gap:12px;margin-top:4px}
+.dev-channel-col{
+background:var(--surface);border:1px solid var(--line);border-radius:8px;
+padding:12px;display:flex;flex-direction:column;gap:10px;
+}
+.dev-channel-hdr{
+font-size:12px;font-weight:700;color:var(--ink);letter-spacing:.04em;
+text-align:center;padding-bottom:6px;border-bottom:1px solid var(--line);
+}
+.dev-eq-box{
+background:var(--bg-elev);border:1px solid var(--line-soft);
+border-radius:6px;padding:8px;display:flex;flex-direction:column;gap:8px;
+}
+.dev-pot-grid-2{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,170px),1fr));gap:10px}
+.dev-geq-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,132px),1fr));gap:10px;margin-top:4px}
+.dev-pot-item{display:flex;flex-direction:column;gap:4px}
+.dev-pot-top{display:flex;justify-content:space-between;align-items:baseline;gap:6px;font-size:12px}
+.dev-pot-label{font-weight:600;color:var(--ink-soft);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dev-pot-val{
+font-family:var(--mono);font-size:11px;font-variant-numeric:tabular-nums;
+color:var(--ink);font-weight:700;flex-shrink:0;
+}
+.dev-pot-slider,.fx-range-slider{
+width:100%;height:6px;border-radius:3px;background:var(--line);
+outline:none;-webkit-appearance:none;appearance:none;cursor:pointer;
+}
+.dev-pot-slider::-webkit-slider-thumb,.fx-range-slider::-webkit-slider-thumb{
+-webkit-appearance:none;appearance:none;width:16px;height:16px;border-radius:50%;
+background:var(--ink);border:2px solid var(--bg-elev);cursor:pointer;
+}
+.dev-pot-slider.centered::-webkit-slider-thumb{background:var(--info)}
+.dev-kill-section{margin-bottom:10px}
+.dev-kill-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin-top:8px}
+@media(max-width:560px){.dev-kill-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.dev-kill-btn{
+padding:10px 8px;border-radius:var(--radius-sm);border:1px solid var(--line);
+background:var(--surface);color:var(--ink-soft);cursor:pointer;
+display:flex;flex-direction:column;align-items:center;gap:2px;
+font-size:13px;font-weight:800;letter-spacing:.04em;
+transition:background .12s ease,color .12s ease,border-color .12s ease;
+}
+.dev-kill-btn:hover{border-color:var(--muted);color:var(--ink)}
+.dev-kill-btn.active{background:var(--danger);color:#fff;border-color:var(--danger)}
+.dev-kill-sub{font-size:10px;font-weight:600;opacity:.75;font-variant-numeric:tabular-nums}
+.dev-fx-mode-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.dev-fx-mode-row .dev-pot-label{min-width:72px;font-size:12px}
+.dev-mode-btn{
+flex:1;min-width:76px;padding:6px 10px;font-size:11px;font-weight:700;
+border-radius:var(--radius-sm);border:1px solid var(--line);
+background:var(--bg-elev);color:var(--ink-soft);cursor:pointer;
+}
+.dev-mode-btn.active{background:var(--btn-active-bg);color:var(--btn-active-text);border-color:var(--btn-active-bg)}
+.dev-siren-trigger-box{display:flex;gap:8px;margin-top:4px;flex-wrap:wrap}
+.dev-siren-trig-btn{
+flex:2;min-width:140px;padding:12px;font-size:13px;font-weight:700;
+border-radius:var(--radius-sm);border:1px solid var(--warn);
+background:rgba(217,119,6,.1);color:var(--warn);cursor:pointer;
+user-select:none;touch-action:none;text-align:center;
+}
+.dev-siren-trig-btn.firing{background:var(--warn);color:#111}
+.dev-siren-latch-btn{
+flex:1;min-width:96px;padding:10px 12px;font-size:12px;font-weight:700;
+border-radius:var(--radius-sm);border:1px solid var(--line);
+background:var(--bg-elev);color:var(--ink-soft);cursor:pointer;
+}
+.dev-siren-latch-btn.active{background:var(--warn);color:#111;border-color:var(--warn)}
+
+/* --- FX Tab --- */
+.fx-pane-container{display:flex;flex-direction:column;gap:12px}
+.fx-card{
+background:var(--bg-elev);border:1px solid var(--line);
+border-radius:var(--radius);padding:14px 16px;box-shadow:var(--shadow);
 display:flex;flex-direction:column;
 }
-.mic-live-note{
-font-size:11px;color:var(--muted);line-height:1.4;margin-bottom:6px;
+.fx-card-header{
+display:flex;justify-content:space-between;align-items:center;
+gap:10px;margin-bottom:10px;flex-wrap:wrap;
 }
-.mic-live-list{display:flex;flex-direction:column;gap:6px}
-.mic-live-row{
-display:flex;align-items:center;gap:10px;flex-wrap:nowrap;
-padding:8px 10px;background:var(--surface);border:1px solid var(--line);border-radius:8px;
+.fx-card-title{
+font-size:12px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:var(--ink);
 }
-.mic-live-label{
-font-weight:700;font-size:12px;min-width:42px;letter-spacing:.04em;color:var(--ink);
+.fx-routing-tools{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.fx-tool-btn{
+display:inline-flex;align-items:center;gap:5px;
+padding:5px 10px;font-size:11px;font-weight:600;border-radius:999px;
+border:1px solid var(--line);background:var(--surface);color:var(--ink-soft);cursor:pointer;
+transition:background .12s ease,color .12s ease,border-color .12s ease;
 }
+.fx-tool-btn:hover{border-color:var(--muted);color:var(--ink)}
+.fx-tool-btn.active{background:var(--btn-active-bg);color:var(--btn-active-text);border-color:var(--btn-active-bg)}
+.fx-matrix-table{display:flex;flex-direction:column;gap:8px}
+.fx-matrix-row{
+display:flex;align-items:center;gap:10px;padding:8px 12px;
+background:var(--surface);border:1px solid var(--line-soft);border-radius:8px;
+}
+.fx-matrix-ch-label{min-width:58px;flex-shrink:0}
+.fx-ch-badge{
+display:inline-block;font-size:11px;font-weight:700;letter-spacing:.04em;
+padding:4px 8px;background:var(--bg-elev);border:1px solid var(--line);
+border-radius:var(--radius-sm);color:var(--ink);
+}
+.fx-matrix-sends{
+flex:1;min-width:0;display:grid;
+grid-template-columns:repeat(auto-fit,minmax(min(100%,340px),1fr));gap:8px 12px;
+}
+.fx-matrix-send-col{display:flex;flex-direction:row;align-items:center;gap:6px;min-width:0}
+.fx-send-tag{
+font-size:10px;font-weight:700;color:var(--muted);letter-spacing:.05em;
+text-transform:uppercase;flex-shrink:0;min-width:16px;
+}
+.fx-send-triggers{display:inline-flex;align-items:center;gap:4px;flex-shrink:0}
+.fx-trig-btn{
+display:inline-flex;align-items:center;gap:4px;
+padding:4px 9px;font-size:11px;font-weight:700;border-radius:var(--radius-sm);
+border:1px solid var(--line);background:var(--bg-elev);color:var(--ink-soft);
+cursor:pointer;user-select:none;touch-action:none;white-space:nowrap;
+transition:background .1s ease,color .1s ease,border-color .1s ease;
+}
+.fx-trig-btn:hover{border-color:var(--muted);color:var(--ink)}
+.fx-trig-btn.active{background:var(--accent);color:#fff;border-color:var(--accent)}
+.fx-trig-btn.fx-trig-latch.active{background:var(--info);color:#fff;border-color:var(--info)}
+.fx-route-select{
+flex:1;min-width:96px;padding:5px 8px;font-size:12px;font-weight:600;
+border-radius:var(--radius-sm);border:1px solid var(--line);
+background:var(--bg-elev);color:var(--ink);cursor:pointer;
+transition:border-color .12s ease,background .12s ease;
+}
+.fx-route-select:hover{border-color:var(--muted)}
+.fx-route-select:focus-visible{outline:2px solid var(--focus-ring);outline-offset:1px}
+.fx-route-select[data-dest="7"]{color:var(--muted)}
 
-/* Mic toggle switch */
-.mic-toggle{
-display:inline-flex;align-items:center;gap:8px;cursor:pointer;user-select:none;
+.fx-modules-grid{
+display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,300px),1fr));gap:12px;
 }
-.mic-toggle-input{
-position:absolute;opacity:0;width:0;height:0;pointer-events:none;
+.fx-toggle-wrap{
+display:inline-flex;align-items:center;gap:6px;cursor:pointer;user-select:none;
 }
-.mic-toggle-track{
-position:relative;display:inline-block;width:36px;height:20px;
-background:#64748b;border-radius:999px;transition:background .15s ease;
-flex-shrink:0;
+.fx-toggle-wrap input{position:absolute;opacity:0;width:0;height:0;pointer-events:none}
+.fx-toggle-track{
+position:relative;display:inline-block;width:34px;height:19px;
+background:var(--muted);border-radius:999px;transition:background .15s ease;
 }
-.mic-toggle-thumb{
-position:absolute;top:2px;left:2px;width:16px;height:16px;
-background:#fff;border-radius:50%;
-box-shadow:0 1px 3px rgba(0,0,0,.25);
-transition:transform .15s ease;
+.fx-toggle-thumb{
+position:absolute;top:2px;left:2px;width:15px;height:15px;
+background:#fff;border-radius:50%;transition:transform .15s ease;
 }
-.mic-toggle-input:checked + .mic-toggle-track{background:#1a7a3a}
-.mic-toggle-input:checked + .mic-toggle-track .mic-toggle-thumb{transform:translateX(16px)}
-.mic-toggle-input:focus-visible + .mic-toggle-track{
-outline:2px solid #1a5276;outline-offset:2px;
+.fx-toggle-wrap input:checked + .fx-toggle-track{background:var(--ok)}
+.fx-toggle-wrap input:checked + .fx-toggle-track .fx-toggle-thumb{transform:translateX(15px)}
+.fx-toggle-wrap input:focus-visible + .fx-toggle-track{outline:2px solid var(--focus-ring);outline-offset:2px}
+.fx-meter-track{
+height:4px;background:var(--surface);border-radius:2px;overflow:hidden;margin-bottom:12px;
+border:1px solid var(--line-soft);
 }
-.mic-toggle-text{
-font-size:12px;font-weight:600;color:var(--ink-soft);min-width:1.8em;
+.fx-meter-fill{height:100%;width:0%;background:var(--bar-fill);transition:width 60ms linear}
+.fx-meter-fill.ducker-fill{background:var(--danger)}
+.fx-meter-fill.sub-fill,.fx-meter-fill.spring-fill,.fx-meter-fill.shimmer-fill{background:var(--warn)}
+.fx-meter-fill.tape-fill,.fx-meter-fill.phase-fill{background:var(--accent)}
+.fx-controls-list{display:flex;flex-direction:column;gap:11px;flex:1}
+.fx-slider-item{display:flex;flex-direction:column;gap:4px}
+.fx-slider-top{display:flex;justify-content:space-between;align-items:baseline;gap:8px}
+.fx-slider-lbl{font-size:12px;font-weight:600;color:var(--ink-soft)}
+.fx-slider-val{
+font-family:var(--mono);font-size:11px;font-weight:700;font-variant-numeric:tabular-nums;
+color:var(--ink);background:var(--surface);padding:2px 6px;border-radius:4px;
+border:1px solid var(--line-soft);
 }
-.mic-toggle-input:checked ~ .mic-toggle-text{color:#1a7a3a}
+.fx-slider-val.warn{color:var(--danger);border-color:var(--danger);background:rgba(220,38,38,.1)}
+.fx-preset-row{display:flex;gap:5px;flex-wrap:wrap}
+.fx-mini-btn{
+padding:4px 8px;font-size:11px;font-weight:600;border-radius:5px;
+border:1px solid var(--line);background:var(--surface);color:var(--ink-soft);cursor:pointer;
+transition:background .1s ease,color .1s ease,border-color .1s ease;
+}
+.fx-mini-btn:hover{color:var(--ink);border-color:var(--muted)}
+.fx-mini-btn.active{background:var(--btn-active-bg);color:var(--btn-active-text);border-color:var(--btn-active-bg)}
+.fx-action-box{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap}
+.fx-big-btn{
+flex:1;min-width:100px;padding:9px 12px;font-size:12px;font-weight:700;
+border-radius:var(--radius-sm);cursor:pointer;text-align:center;
+border:1px solid var(--line);background:var(--surface);color:var(--ink-soft);
+transition:background .12s ease,color .12s ease,border-color .12s ease;
+}
+.fx-big-btn:hover{border-color:var(--muted);color:var(--ink)}
+.btn-kill-send.active{background:var(--danger);color:#fff;border-color:var(--danger)}
+.btn-stages.active{background:var(--btn-active-bg);color:var(--btn-active-text);border-color:var(--btn-active-bg)}
+.btn-clear-delay.flash,.btn-splash.flash{background:var(--info);color:#fff;border-color:var(--info)}
 
-.mic-live-hpf{
-display:flex;align-items:center;gap:5px;font-size:12px;margin-left:auto;
-color:var(--ink-soft);font-weight:600;
+/* --- Mapping Tab (3-view guided redesign) --- */
+.map-topbar{
+display:flex;align-items:center;justify-content:space-between;
+gap:10px;flex-wrap:wrap;margin-bottom:12px;
 }
-.mic-live-hpf input[type=number]{
-width:58px;padding:3px 5px;border:1px solid var(--input-border);border-radius:5px;
-font-size:12px;background:var(--input-bg);color:var(--ink);
+.map-subtabs{
+display:inline-flex;background:var(--surface);border:1px solid var(--line);
+border-radius:8px;padding:3px;gap:2px;flex-wrap:wrap;
 }
-.mic-live-hpf-unit{color:var(--muted);font-size:11px;font-weight:500}
+.map-subtab{
+padding:6px 12px;font-size:12px;font-weight:600;color:var(--muted);
+border:none;background:transparent;border-radius:6px;cursor:pointer;
+transition:background .12s ease,color .12s ease;
+}
+.map-subtab:hover{color:var(--ink)}
+.map-subtab.active{background:var(--bg-elev);color:var(--ink);box-shadow:0 1px 2px rgba(0,0,0,.08)}
+.map-topbar-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.map-conflict-pill{
+display:none;padding:6px 10px;font-size:11px;font-weight:700;border-radius:999px;
+border:1px solid var(--danger);background:rgba(220,38,38,.1);color:var(--danger);cursor:pointer;
+}
+.map-conflict-pill.show{display:inline-flex;align-items:center;gap:5px}
+.btn-export,.btn-map-secondary,.btn-save,.btn-restart,.btn-danger-outline,.btn-danger-solid{
+display:inline-flex;align-items:center;gap:6px;
+padding:8px 13px;border-radius:var(--radius-sm);font-size:12px;font-weight:600;cursor:pointer;
+border:1px solid transparent;transition:opacity .12s ease,background .12s ease,border-color .12s ease,color .12s ease;
+}
+.btn-export,.btn-save{background:var(--btn-active-bg);color:var(--btn-active-text)}
+.btn-map-secondary{background:var(--surface);color:var(--ink-soft);border-color:var(--line)}
+.btn-map-secondary:hover:not(:disabled){color:var(--ink);border-color:var(--muted);background:var(--bg-elev)}
+.btn-restart{background:rgba(217,119,6,.14);color:var(--warn);border-color:rgba(217,119,6,.45)}
+.btn-restart:hover:not(:disabled){background:var(--warn);color:#111;border-color:var(--warn)}
+.btn-danger-outline{background:rgba(220,38,38,.1);color:var(--danger);border-color:rgba(220,38,38,.35)}
+.btn-danger-outline:hover:not(:disabled){background:var(--danger);color:#fff;border-color:var(--danger)}
+.btn-danger-solid{background:var(--danger);color:#fff}
+.btn-export:hover:not(:disabled),.btn-save:hover:not(:disabled),.btn-danger-solid:hover:not(:disabled){opacity:.9}
+.btn-export:disabled,.btn-map-secondary:disabled,.btn-save:disabled,.btn-restart:disabled,.btn-danger-outline:disabled,.btn-danger-solid:disabled{
+opacity:.45;cursor:default;
+}
+.map-dirty-pill{
+display:none;padding:4px 9px;font-size:11px;font-weight:700;border-radius:999px;
+border:1px solid rgba(217,119,6,.45);background:rgba(217,119,6,.12);color:var(--warn);
+}
+.map-dirty-pill.show{display:inline-flex;align-items:center}
+.map-toast{
+position:fixed;right:max(18px,env(safe-area-inset-right));bottom:max(18px,env(safe-area-inset-bottom));
+z-index:calc(var(--z-popup) + 10);max-width:min(420px,calc(100vw - 36px));
+padding:10px 14px;border-radius:var(--radius-sm);
+background:var(--bg-elev);border:1px solid var(--ok);border-left:4px solid var(--ok);
+box-shadow:var(--shadow);font-size:12px;font-weight:600;color:var(--ink);
+opacity:0;transform:translateY(8px);pointer-events:none;
+transition:opacity .15s ease,transform .15s ease;
+}
+.map-toast.show{opacity:1;transform:translateY(0)}
+.map-toast.err{border-color:var(--danger);border-left-color:var(--danger);color:var(--danger)}
+.map-conflicts-box{
+display:none;font-size:12px;color:var(--danger);
+background:rgba(220,38,38,.08);border:1px solid rgba(220,38,38,.35);
+border-left:3px solid var(--danger);padding:10px 12px;border-radius:var(--radius-sm);margin-bottom:12px;
+}
+.map-conflicts-box.show{display:block}
+.map-conflicts-box ul{margin:6px 0 0 16px}
+.map-conflicts-box li{margin:2px 0;font-family:var(--mono);font-size:11px}
+
+.map-guided-bar{
+display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;
+padding:10px 14px;margin-bottom:12px;border-radius:var(--radius);
+background:var(--bg-elev);border:1px solid var(--line);
+}
+.map-guided-bar.listening{
+border-color:var(--info);background:rgba(37,99,235,.08);
+}
+.map-guided-info{display:flex;flex-direction:column;gap:2px;min-width:0;flex:1}
+.map-guided-step{
+font-size:11px;font-weight:700;color:var(--info);text-transform:uppercase;
+letter-spacing:.05em;font-variant-numeric:tabular-nums;
+}
+.map-guided-prompt{font-size:13px;font-weight:600;color:var(--ink)}
+.map-guided-actions{display:flex;gap:6px;flex-shrink:0}
+.map-filter-bar{
+display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:10px;
+}
+.map-filter-pills{display:flex;gap:4px;flex-wrap:wrap}
+.map-filter-pill{
+padding:5px 10px;font-size:11px;font-weight:600;border-radius:999px;
+border:1px solid var(--line);background:var(--bg-elev);color:var(--muted);cursor:pointer;
+}
+.map-filter-pill:hover{color:var(--ink);border-color:var(--muted)}
+.map-filter-pill.active{background:var(--btn-active-bg);color:var(--btn-active-text);border-color:var(--btn-active-bg)}
+.map-search{
+padding:6px 10px;border:1px solid var(--input-border);border-radius:var(--radius-sm);
+background:var(--input-bg);color:var(--ink);font-size:12px;min-width:170px;
+}
+.map-groups{display:flex;flex-direction:column;gap:10px}
+.map-group{
+background:var(--bg-elev);border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;
+}
+.map-group-hdr{
+display:flex;align-items:center;justify-content:space-between;gap:8px;
+width:100%;padding:10px 14px;border:none;background:var(--surface);
+color:var(--ink);cursor:pointer;text-align:left;border-bottom:1px solid var(--line-soft);
+}
+.map-group[data-collapsed="true"] .map-group-hdr{border-bottom-color:transparent}
+.map-group[data-collapsed="true"] .map-group-body{display:none}
+.map-group-title{font-size:12px;font-weight:700;letter-spacing:.05em;text-transform:uppercase}
+.map-group-count{font-size:11px;font-family:var(--mono);font-variant-numeric:tabular-nums;color:var(--muted)}
+.map-group-body{display:flex;flex-direction:column}
+.map-row{
+display:grid;grid-template-columns:minmax(140px,1.3fr) minmax(70px,.7fr) auto auto auto;
+align-items:center;gap:10px;padding:8px 14px;
+border-bottom:1px solid var(--line-soft);
+}
+.map-row:last-child{border-bottom:none}
+.map-row.row-detecting{background:rgba(37,99,235,.1)}
+.map-row.dup-conflict{background:rgba(220,38,38,.08)}
+.map-row-main{min-width:0}
+.map-row-name{font-size:13px;font-weight:600;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.map-row-sub{font-size:10px;font-family:var(--mono);color:var(--muted)}
+.map-live-meter{
+height:5px;background:var(--surface);border-radius:3px;overflow:hidden;
+border:1px solid var(--line-soft);min-width:54px;
+}
+.map-live-fill{height:100%;width:0%;background:var(--bar-fill)}
+.map-live-fill.sw{background:var(--accent)}
+.map-row-fields{display:flex;align-items:center;gap:6px}
+.map-field{display:inline-flex;align-items:center;gap:4px}
+.map-field-lbl{font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase}
+.map-num,.map-select{
+width:54px;padding:4px 5px;border:1px solid var(--input-border);border-radius:5px;
+background:var(--input-bg);color:var(--ink);font-size:12px;
+font-family:var(--mono);font-variant-numeric:tabular-nums;
+}
+.map-row.dup-conflict .map-num,.map-row.dup-conflict .map-select{border-color:var(--danger)}
+.btn-rev-toggle{
+padding:5px 8px;font-size:11px;font-weight:700;border-radius:5px;
+border:1px solid var(--line);background:var(--surface);color:var(--muted);cursor:pointer;
+}
+.btn-rev-toggle.active{background:var(--warn);color:#111;border-color:var(--warn)}
+.btn-detect-row{
+min-width:74px;padding:6px 10px;font-size:11px;font-weight:700;
+border-radius:5px;border:1px solid var(--info);
+background:rgba(37,99,235,.1);color:var(--info);cursor:pointer;
+}
+.btn-detect-row:hover:not(:disabled){background:var(--info);color:#fff}
+.btn-detect-row:disabled{opacity:.35;cursor:default}
+.btn-detect-row.detect-active{background:var(--danger);color:#fff;border-color:var(--danger)}
+
 @media(max-width:720px){
-.sw-grid{grid-template-columns:1fr}
-.meters-columns{grid-template-columns:1fr}
-.mtable col.col-name{width:26%}
-.mtable col.col-num{width:11%}
-.mtable col.col-check{width:10%}
-.mtable col.col-port{width:12%}
-.mtable col.col-detect{width:16%}
-.mtable th,.mtable td{padding-left:4px;padding-right:4px}
-.mtable th{font-size:9px}
-.mtable input[type=number],.mtable select{font-size:11px}
+.map-row{
+grid-template-columns:1fr auto;grid-template-rows:auto auto;gap:6px 8px;padding:10px 12px;
+}
+.map-row-main{grid-column:1;grid-row:1}
+.map-live-meter{grid-column:2;grid-row:1;width:72px;justify-self:end}
+.map-row-fields{grid-column:1;grid-row:2;flex-wrap:wrap}
+.map-row-actions{grid-column:2;grid-row:2;display:flex;gap:6px;justify-self:end}
+}
+@media(min-width:721px){
+.map-row-actions{display:contents}
 }
 
-/* --- Master EQ curve --- */
-.live-tile[data-tile="masterEq"]{margin-bottom:12px}
-.master-eq-notice{
-font-size:12px;font-weight:700;color:var(--ink-soft);
-margin-bottom:6px;line-height:1.4;
+.map-io-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,320px),1fr));gap:12px}
+.map-io-card{margin-bottom:0}
+.map-io-list{display:flex;flex-direction:column;gap:8px}
+.map-io-row{
+display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;
+padding:8px 10px;background:var(--surface);border:1px solid var(--line-soft);border-radius:8px;
 }
-.master-eq-caption{
-font-size:11px;color:var(--muted);margin-bottom:10px;line-height:1.45;
+.map-io-row.dup-conflict{border-color:var(--danger);background:rgba(220,38,38,.08)}
+.map-io-label{font-size:12px;font-weight:700;color:var(--ink);min-width:86px}
+.map-io-fields{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-left:auto}
+.map-io-fields input[type=text]{
+width:64px;padding:4px 6px;border:1px solid var(--input-border);border-radius:5px;
+background:var(--input-bg);color:var(--ink);font-size:12px;font-family:var(--mono);
 }
-.master-eq-wrap{
-width:100%;max-width:900px;margin:0 auto;
+.map-io-check{display:inline-flex;align-items:center;gap:4px;font-size:11px;font-weight:600;color:var(--ink-soft);cursor:pointer}
+.map-io-check input{width:15px;height:15px;accent-color:var(--accent);cursor:pointer}
+
+.map-ign-toolbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px}
+.map-ign-list{display:flex;flex-direction:column;gap:6px}
+.map-ign-row{
+display:flex;align-items:center;gap:8px;flex-wrap:wrap;
+padding:7px 10px;background:var(--surface);border:1px solid var(--line-soft);border-radius:6px;
 }
-.master-eq-canvas{
-display:block;width:100%;
-height:240px;min-height:240px;
-border-radius:6px;background:transparent;
+.map-ign-row.dup-conflict{border-color:var(--danger);background:rgba(220,38,38,.08)}
+.map-ign-status{font-size:12px;color:var(--muted);flex:1;min-width:120px}
+.map-ign-status.mapped{color:var(--warn);font-weight:600;font-family:var(--mono);font-size:11px}
+.btn-del-ign{
+padding:4px 8px;background:rgba(220,38,38,.12);color:var(--danger);
+border:1px solid rgba(220,38,38,.3);border-radius:5px;font-size:11px;font-weight:700;cursor:pointer;
 }
-@media(min-width:720px){
-.master-eq-canvas{height:320px;min-height:320px}
+.map-hw-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,150px),1fr));gap:8px}
+.map-hw-item{
+padding:8px 10px;background:var(--surface);border:1px solid var(--line-soft);border-radius:6px;
+}
+.map-hw-k{font-size:10px;font-weight:700;text-transform:uppercase;color:var(--muted)}
+.map-hw-v{font-size:13px;font-weight:700;font-family:var(--mono);font-variant-numeric:tabular-nums;color:var(--ink);margin-top:2px}
+.map-empty{padding:16px;text-align:center;font-size:12px;color:var(--muted)}
+
+.map-clip-list{display:flex;flex-direction:column;gap:8px}
+.map-clip-row{
+display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;
+padding:8px 10px;background:var(--surface);border:1px solid var(--line-soft);border-radius:8px;
+}
+.map-clip-row.is-disabled .map-io-fields{opacity:.5}
+.map-clip-row.dup-conflict{border-color:var(--danger);background:rgba(220,38,38,.08)}
+.map-clip-name{min-width:90px;font-size:12px;font-weight:700;color:var(--ink)}
+.map-boot-row{padding:4px 0 10px;border-bottom:1px solid var(--line-soft)}
+.map-boot-check{font-size:13px;font-weight:600;color:var(--ink)}
+.map-system-row{
+display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;
+padding-top:12px;
+}
+.map-system-hint{font-size:12px;color:var(--muted);flex:1;min-width:200px}
+
+.map-modal-backdrop{
+position:fixed;inset:0;z-index:calc(var(--z-popup) + 20);
+background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;padding:16px;
+}
+.map-modal-panel{
+width:min(440px,100%);background:var(--bg-elev);border:1px solid var(--line);
+border-radius:var(--radius);box-shadow:var(--shadow);padding:18px;
+}
+.map-modal-title{font-size:15px;font-weight:700;color:var(--ink);margin-bottom:8px}
+.map-modal-body{font-size:13px;line-height:1.5;color:var(--ink-soft);margin-bottom:16px}
+.map-modal-actions{display:flex;justify-content:flex-end;gap:8px;flex-wrap:wrap}
+
+@media(max-width:580px){
+#tab-content{padding:10px;padding-bottom:calc(14px + env(safe-area-inset-bottom))}
+#gui-header{padding:6px 12px}
+#gui-logo{height:28px}
+.tab-btn{padding:10px 12px;font-size:12px}
+.theme-btn-lbl,.gear-btn-lbl{display:none}
+.map-search{width:100%}
+.fx-matrix-row{flex-direction:column;align-items:stretch;gap:6px;padding:8px 10px}
+.fx-matrix-ch-label{min-width:0;padding-top:0}
+.fx-trig-btn{padding:4px 7px}
 }
 
-/* --- UI Dev Controls Tab & Badge --- */
-.badge.dev-badge {
-  display: none;
-  background: #0284c7;
-  color: #ffffff;
-  font-weight: 700;
-  letter-spacing: 0.5px;
-  animation: devPulse 2s infinite ease-in-out;
-}
-.badge.dev-badge.visible {
-  display: inline-block;
-}
-@keyframes devPulse {
-  0%, 100% { opacity: 0.9; }
-  50% { opacity: 0.65; }
+@media(pointer:coarse){
+.dev-pot-slider::-webkit-slider-thumb,.fx-range-slider::-webkit-slider-thumb{width:20px;height:20px}
+.fx-route-select,.fx-trig-btn,.btn-detect-row,.btn-rev-toggle{min-height:32px}
 }
 
-.dev-banner {
-  margin-bottom: 16px;
-  padding: 16px 20px;
-  border-left: 5px solid var(--muted);
-  transition: border-color 0.2s ease, background-color 0.2s ease;
+@media(prefers-reduced-motion:reduce){
+*,*::before,*::after{
+transition-duration:.01ms!important;
+animation-duration:.01ms!important;
 }
-.dev-banner.dev-active {
-  border-left-color: #10b981;
-  background: rgba(16, 185, 129, 0.05);
-}
-.dev-banner-top {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 16px;
-  flex-wrap: wrap;
-  margin-bottom: 12px;
-}
-.dev-banner-title {
-  font-size: 16px;
-  font-weight: 700;
-  color: var(--ink);
-  margin-bottom: 4px;
-}
-.dev-mode-desc {
-  font-size: 13px;
-  color: var(--ink-soft);
-  line-height: 1.4;
-}
-.dev-toggle-btn {
-  padding: 10px 20px;
-  font-size: 13px;
-  font-weight: 700;
-  letter-spacing: 0.5px;
-  border-radius: var(--radius);
-  border: 1px solid var(--line);
-  background: var(--surface);
-  color: var(--muted);
-  cursor: pointer;
-  transition: all 0.2s ease;
-}
-.dev-toggle-btn:hover {
-  border-color: var(--ink-soft);
-  color: var(--ink);
-}
-.dev-toggle-btn.active {
-  background: #10b981;
-  color: #ffffff;
-  border-color: #059669;
-  box-shadow: 0 0 12px rgba(16, 185, 129, 0.4);
-}
-.dev-actions-row {
-  display: flex;
-  gap: 10px;
-  flex-wrap: wrap;
-  padding-top: 10px;
-  border-top: 1px solid var(--line-soft);
-}
-.dev-action-btn, .dev-small-btn {
-  padding: 6px 12px;
-  font-size: 12px;
-  font-weight: 600;
-  border-radius: 6px;
-  border: 1px solid var(--line);
-  background: var(--bg-elev);
-  color: var(--ink-soft);
-  cursor: pointer;
-  transition: all 0.15s ease;
-}
-.dev-action-btn:hover, .dev-small-btn:hover {
-  background: var(--surface);
-  color: var(--ink);
-  border-color: var(--muted);
-}
-
-.dev-controls-container {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-  transition: opacity 0.2s ease, filter 0.2s ease;
-}
-.dev-controls-container.disabled-controls {
-  opacity: 0.55;
-  pointer-events: none;
-  user-select: none;
-  filter: grayscale(40%);
-}
-
-.dev-section {
-  padding: 16px 20px;
-}
-.dev-sub-panel {
-  background: var(--surface);
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  padding: 14px;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-.dev-sub-heading {
-  font-size: 13px;
-  font-weight: 700;
-  color: var(--ink);
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-}
-.dev-row-between {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 8px;
-}
-.dev-grid-2col {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
-  gap: 14px;
-  margin-top: 12px;
-}
-.dev-channels-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: 14px;
-  margin-top: 10px;
-}
-.dev-channel-col {
-  background: var(--surface);
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  padding: 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-.dev-channel-hdr {
-  font-size: 14px;
-  font-weight: 800;
-  color: var(--accent);
-  text-align: center;
-  padding-bottom: 6px;
-  border-bottom: 1px solid var(--line);
-  letter-spacing: 0.5px;
-}
-.dev-eq-box {
-  background: var(--bg-elev);
-  border: 1px solid var(--line-soft);
-  border-radius: 6px;
-  padding: 8px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-.dev-pot-grid-2 {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-  gap: 10px;
-}
-.dev-geq-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-  gap: 10px;
-  margin-top: 10px;
-}
-
-.dev-pot-item {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-.dev-pot-top {
-  display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-  font-size: 12px;
-}
-.dev-pot-label {
-  font-weight: 600;
-  color: var(--ink-soft);
-}
-.dev-pot-val {
-  font-family: var(--mono);
-  font-size: 11px;
-  color: var(--accent);
-  font-weight: 600;
-}
-.dev-pot-slider {
-  width: 100%;
-  height: 6px;
-  border-radius: 3px;
-  background: var(--line);
-  outline: none;
-  -webkit-appearance: none;
-  cursor: pointer;
-  transition: background 0.15s ease;
-}
-.dev-pot-slider::-webkit-slider-thumb {
-  -webkit-appearance: none;
-  width: 16px;
-  height: 16px;
-  border-radius: 50%;
-  background: var(--ink);
-  border: 2px solid #ffffff;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.3);
-  cursor: pointer;
-  transition: transform 0.1s ease, background 0.15s ease;
-}
-.dev-pot-slider:hover::-webkit-slider-thumb {
-  transform: scale(1.15);
-}
-.dev-pot-slider.centered::-webkit-slider-thumb {
-  background: #3b82f6;
-}
-
-.dev-kill-section {
-  margin-bottom: 14px;
-}
-.dev-kill-grid {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 10px;
-  margin-top: 8px;
-}
-@media (max-width: 600px) {
-  .dev-kill-grid {
-    grid-template-columns: repeat(2, 1fr);
-  }
-}
-.dev-kill-btn {
-  padding: 12px 8px;
-  font-size: 13px;
-  font-weight: 800;
-  border-radius: var(--radius);
-  border: 2px solid var(--line);
-  background: var(--surface);
-  color: var(--muted);
-  cursor: pointer;
-  text-align: center;
-  letter-spacing: 0.5px;
-  transition: all 0.15s ease;
-}
-.dev-kill-btn:hover {
-  border-color: var(--ink-soft);
-  color: var(--ink);
-}
-.dev-kill-btn.active {
-  background: #dc2626;
-  color: #ffffff;
-  border-color: #ef4444;
-  box-shadow: 0 0 14px rgba(220, 38, 38, 0.6);
-  animation: killGlow 1.5s infinite alternate;
-}
-@keyframes killGlow {
-  from { box-shadow: 0 0 8px rgba(220, 38, 38, 0.4); }
-  to { box-shadow: 0 0 16px rgba(220, 38, 38, 0.8); }
-}
-.dev-fx-mode-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-bottom: 6px;
-}
-.dev-mode-btn {
-  flex: 1;
-  padding: 6px 10px;
-  font-size: 11px;
-  font-weight: 700;
-  border-radius: 6px;
-  border: 1px solid var(--line);
-  background: var(--bg-elev);
-  color: var(--ink-soft);
-  cursor: pointer;
-  transition: all 0.15s ease;
-}
-.dev-mode-btn:hover {
-  border-color: var(--muted);
-}
-.dev-mode-btn.active {
-  background: #8b5cf6;
-  color: #ffffff;
-  border-color: #7c3aed;
-  box-shadow: 0 0 8px rgba(139, 92, 246, 0.4);
-}
-.dev-siren-trigger-box {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  margin-top: 10px;
-}
-.dev-siren-trig-btn {
-  padding: 14px;
-  font-size: 14px;
-  font-weight: 800;
-  letter-spacing: 0.5px;
-  border-radius: var(--radius);
-  border: 2px solid #f59e0b;
-  background: rgba(245, 158, 11, 0.1);
-  color: #d97706;
-  cursor: pointer;
-  user-select: none;
-  touch-action: none;
-  transition: all 0.1s ease;
-  text-align: center;
-}
-.dev-siren-trig-btn:hover {
-  background: rgba(245, 158, 11, 0.2);
-}
-.dev-siren-trig-btn.firing {
-  background: #f59e0b;
-  color: #000000;
-  box-shadow: 0 0 18px rgba(245, 158, 11, 0.7);
-  transform: scale(0.98);
-}
-.dev-siren-latch-btn {
-  padding: 8px;
-  font-size: 12px;
-  font-weight: 700;
-  border-radius: 6px;
-  border: 1px solid var(--line);
-  background: var(--bg-elev);
-  color: var(--ink-soft);
-  cursor: pointer;
-  transition: all 0.15s ease;
-}
-.dev-siren-latch-btn.active {
-  background: #f59e0b;
-  color: #000000;
-  border-color: #d97706;
-  box-shadow: 0 0 10px rgba(245, 158, 11, 0.5);
-}
-
-/* ===========================================================================
-   Digital Multi-FX Engine (SUB ROAR, ECHO DUB & Routing Matrix)
-   =========================================================================== */
-.fx-pane-container {
-  max-width: 1200px;
-  margin: 0 auto;
-  padding: 14px;
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-.fx-header-banner {
-  background: var(--surface);
-  border: 1px solid var(--line);
-  border-left: 4px solid #f59e0b;
-  border-radius: var(--radius);
-  padding: 12px 16px;
-}
-.fx-main-title {
-  font-size: 16px;
-  font-weight: 800;
-  letter-spacing: 0.8px;
-  color: var(--ink);
-  margin: 0 0 4px 0;
-}
-.fx-subtitle {
-  font-size: 12px;
-  color: var(--ink-soft);
-  margin: 0;
-}
-.fx-card {
-  background: var(--surface);
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  padding: 16px;
-  box-shadow: var(--shadow-sm);
-}
-.fx-card-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 12px;
-  gap: 12px;
-}
-.fx-card-title {
-  font-size: 14px;
-  font-weight: 800;
-  letter-spacing: 0.5px;
-}
-.fx-card-title.sub-title { color: #f59e0b; }
-.fx-card-title.dub-title { color: #06b6d4; }
-.fx-card-title.spring-title { color: #f59e0b; }
-.fx-card-title.phase-title { color: #a855f7; }
-.fx-card-title.chop-title { color: #ef4444; }
-.fx-card-desc {
-  font-size: 11px;
-  color: var(--ink-soft);
-  margin-top: 2px;
-}
-.fx-card-badge {
-  font-size: 11px;
-  font-weight: 700;
-  padding: 3px 8px;
-  border-radius: 4px;
-  background: var(--bg-elev);
-  border: 1px solid var(--line);
-  color: var(--ink-soft);
-}
-.fx-routing-desc {
-  font-size: 12px;
-  color: var(--ink-soft);
-  margin-bottom: 14px;
-  line-height: 1.4;
-}
-.fx-matrix-table {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-.fx-matrix-row {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  padding: 10px 14px;
-  background: var(--bg-elev);
-  border: 1px solid var(--line-soft);
-  border-radius: 8px;
-  flex-wrap: wrap;
-}
-.fx-matrix-ch-label {
-  min-width: 65px;
-}
-.fx-ch-badge {
-  font-size: 12px;
-  font-weight: 800;
-  padding: 4px 8px;
-  background: var(--surface);
-  border: 1px solid var(--line);
-  border-radius: 5px;
-  color: var(--ink);
-}
-.fx-matrix-send-col {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  flex: 1;
-  min-width: 260px;
-}
-.fx-send-title {
-  font-size: 10px;
-  font-weight: 700;
-  color: var(--muted);
-  letter-spacing: 0.5px;
-}
-.fx-pill-group {
-  display: flex;
-  gap: 4px;
-  flex-wrap: wrap;
-}
-.fx-pill-btn {
-  padding: 5px 9px;
-  font-size: 11px;
-  font-weight: 700;
-  border-radius: 5px;
-  border: 1px solid var(--line);
-  background: var(--surface);
-  color: var(--muted);
-  cursor: pointer;
-  transition: all 0.15s ease;
-}
-.fx-pill-btn:hover {
-  border-color: var(--ink-soft);
-  color: var(--ink);
-}
-.fx-pill-btn.dest-hw.active {
-  background: #2563eb;
-  color: #ffffff;
-  border-color: #1d4ed8;
-  box-shadow: 0 0 8px rgba(37, 99, 235, 0.4);
-}
-.fx-pill-btn.dest-sub.active {
-  background: #f59e0b;
-  color: #000000;
-  border-color: #d97706;
-  box-shadow: 0 0 10px rgba(245, 158, 11, 0.5);
-}
-.fx-pill-btn.dest-dub.active {
-  background: #06b6d4;
-  color: #000000;
-  border-color: #0891b2;
-  box-shadow: 0 0 10px rgba(6, 182, 212, 0.5);
-}
-.fx-pill-btn.dest-spring.active {
-  background: #d97706;
-  color: #ffffff;
-  border-color: #b45309;
-  box-shadow: 0 0 10px rgba(217, 119, 6, 0.5);
-}
-.fx-pill-btn.dest-phase.active {
-  background: #8b5cf6;
-  color: #ffffff;
-  border-color: #7c3aed;
-  box-shadow: 0 0 10px rgba(139, 92, 246, 0.5);
-}
-.fx-pill-btn.dest-tape.active {
-  background: #f97316;
-  color: #ffffff;
-  border-color: #ea580c;
-  box-shadow: 0 0 10px rgba(249, 115, 22, 0.5);
-}
-.fx-pill-btn.dest-flanger.active {
-  background: #06b6d4;
-  color: #000000;
-  border-color: #0891b2;
-  box-shadow: 0 0 10px rgba(6, 182, 212, 0.5);
-}
-.fx-pill-btn.dest-filter.active {
-  background: #10b981;
-  color: #000000;
-  border-color: #059669;
-  box-shadow: 0 0 10px rgba(16, 185, 129, 0.5);
-}
-.fx-pill-btn.dest-shimmer.active {
-  background: #eab308;
-  color: #000000;
-  border-color: #ca8a04;
-  box-shadow: 0 0 10px rgba(234, 179, 8, 0.5);
-}
-.fx-pill-btn.dest-chop.active {
-  background: #ef4444;
-  color: #ffffff;
-  border-color: #dc2626;
-  box-shadow: 0 0 10px rgba(239, 68, 68, 0.5);
-}
-.fx-pill-btn.dest-mute.active {
-  background: #64748b;
-  color: #ffffff;
-  border-color: #475569;
-}
-.fx-modules-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
-  gap: 16px;
-}
-.fx-toggle-wrap {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 11px;
-  font-weight: 700;
-  cursor: pointer;
-  color: var(--ink-soft);
-}
-.fx-meter-box {
-  margin-bottom: 14px;
-}
-.fx-meter-lbl {
-  font-size: 10px;
-  font-weight: 700;
-  color: var(--muted);
-  letter-spacing: 0.5px;
-}
-.fx-meter-track {
-  height: 6px;
-  background: rgba(0, 0, 0, 0.35);
-  border-radius: 3px;
-  overflow: hidden;
-  margin-top: 4px;
-}
-.fx-meter-fill {
-  height: 100%;
-  width: 0%;
-  transition: width 0.05s ease;
-}
-.fx-meter-fill.sub-fill {
-  background: linear-gradient(90deg, #d97706, #f59e0b, #ef4444);
-}
-.fx-meter-fill.dub-fill {
-  background: linear-gradient(90deg, #0891b2, #06b6d4, #38bdf8);
-}
-.fx-meter-fill.spring-fill {
-  background: linear-gradient(90deg, #b45309, #d97706, #fbbf24);
-}
-.fx-meter-fill.phase-fill {
-  background: linear-gradient(90deg, #6d28d9, #8b5cf6, #c084fc);
-}
-.fx-meter-fill.tape-fill {
-  background: linear-gradient(90deg, #c2410c, #ea580c, #fb923c);
-}
-.fx-meter-fill.ducker-fill {
-  background: linear-gradient(90deg, #991b1b, #ef4444, #f87171);
-}
-.fx-meter-fill.flanger-fill {
-  background: linear-gradient(90deg, #0e7490, #06b6d4, #67e8f9);
-}
-.fx-meter-fill.filter-fill {
-  background: linear-gradient(90deg, #047857, #10b981, #6ee7b7);
-}
-.fx-meter-fill.shimmer-fill {
-  background: linear-gradient(90deg, #a16207, #eab308, #fde047);
-}
-.tape-title { color: #f97316; }
-.ducker-title { color: #ef4444; }
-.flanger-title { color: #06b6d4; }
-.filter-title { color: #10b981; }
-.shimmer-title { color: #eab308; }
-.fx-meter-fill.chop-fill {
-  background: linear-gradient(90deg, #b91c1c, #ef4444, #f87171);
-}
-.fx-controls-list {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  margin-bottom: 16px;
-}
-.fx-slider-item {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-.fx-slider-top {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-.fx-slider-lbl {
-  font-size: 11px;
-  font-weight: 700;
-  color: var(--ink-soft);
-}
-.fx-slider-val {
-  font-size: 11px;
-  font-weight: 800;
-  color: var(--ink);
-  background: var(--bg-elev);
-  padding: 2px 6px;
-  border-radius: 4px;
-  border: 1px solid var(--line-soft);
-}
-.fx-slider-val.warn {
-  color: #ef4444;
-  background: rgba(239, 68, 68, 0.15);
-  border-color: #ef4444;
-}
-.fx-range-slider {
-  -webkit-appearance: none;
-  width: 100%;
-  height: 6px;
-  border-radius: 3px;
-  background: var(--line);
-  outline: none;
-  cursor: pointer;
-}
-.fx-preset-row {
-  display: flex;
-  gap: 6px;
-  flex-wrap: wrap;
-  margin: -4px 0 6px 0;
-}
-.fx-mini-btn {
-  padding: 3px 8px;
-  font-size: 10px;
-  font-weight: 700;
-  border-radius: 4px;
-  border: 1px solid var(--line);
-  background: var(--bg-elev);
-  color: var(--ink-soft);
-  cursor: pointer;
-  transition: all 0.15s ease;
-}
-.fx-mini-btn:hover {
-  background: var(--surface);
-  color: var(--ink);
-  border-color: var(--muted);
-}
-.fx-action-box {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-.fx-action-box.dual-action {
-  flex-direction: row;
-  gap: 10px;
-}
-.fx-big-btn {
-  flex: 1;
-  padding: 12px;
-  font-size: 13px;
-  font-weight: 800;
-  border-radius: var(--radius);
-  cursor: pointer;
-  text-align: center;
-  border: 1px solid transparent;
-  transition: all 0.15s ease;
-}
-.btn-kill-send {
-  background: var(--bg-elev);
-  color: var(--ink-soft);
-  border: 1px solid var(--line);
-}
-.btn-kill-send:hover {
-  border-color: var(--ink-soft);
-  color: var(--ink);
-}
-.btn-kill-send.active {
-  background: #ef4444;
-  color: #ffffff;
-  border-color: #dc2626;
-  box-shadow: 0 0 14px rgba(239, 68, 68, 0.6);
-}
-.btn-clear-delay {
-  background: var(--bg-elev);
-  color: var(--ink-soft);
-  border: 1px solid var(--line);
-}
-.btn-clear-delay:hover {
-  border-color: var(--ink-soft);
-  color: var(--ink);
-}
-.btn-clear-delay.flash {
-  background: #06b6d4;
-  color: #000000;
-  border-color: #0891b2;
-}
-.btn-stages {
-  background: var(--bg-elev);
-  color: var(--ink-soft);
-  border: 1px solid var(--line);
-}
-.btn-stages:hover {
-  border-color: var(--ink-soft);
-  color: var(--ink);
-}
-.btn-stages.active {
-  background: #8b5cf6;
-  color: #ffffff;
-  border-color: #7c3aed;
-  box-shadow: 0 0 12px rgba(139, 92, 246, 0.5);
-}
-.btn-chop-momentary {
-  background: #dc2626;
-  color: #ffffff;
-  border: 1px solid #b91c1c;
-}
-.btn-chop-momentary:hover {
-  background: #b91c1c;
-}
-.btn-chop-momentary.active {
-  background: #7f1d1d;
-  color: #fca5a5;
-  transform: scale(0.97);
-  box-shadow: 0 0 20px #ef4444;
-}
-.fx-mini-btn.active {
-  background: #2563eb;
-  color: #ffffff;
-  border-color: #1d4ed8;
 }
     `;
     document.head.appendChild(s);
@@ -2240,12 +1668,33 @@ border-radius:6px;background:transparent;
     if (!props) return e;
     for (const key of Object.keys(props)) {
       const val = props[key];
-      if (key.indexOf("-") >= 0)
+      if (key === "style" && typeof val === "string")
+        e.style.cssText = val;
+      else if (key.indexOf("-") >= 0)
         e.setAttribute(key, val);
       else
         e[key] = val;
     }
     return e;
+  }
+  function svgIcon(paths, viewBox = "0 0 24 24", size = 15) {
+    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    svg.setAttribute("width", String(size));
+    svg.setAttribute("height", String(size));
+    svg.setAttribute("viewBox", viewBox);
+    svg.setAttribute("fill", "none");
+    svg.setAttribute("stroke", "currentColor");
+    svg.setAttribute("stroke-width", "2");
+    svg.setAttribute("stroke-linecap", "round");
+    svg.setAttribute("stroke-linejoin", "round");
+    svg.setAttribute("aria-hidden", "true");
+    const list = Array.isArray(paths) ? paths : [paths];
+    list.forEach((d) => {
+      const p = document.createElementNS("http://www.w3.org/2000/svg", "path");
+      p.setAttribute("d", d);
+      svg.appendChild(p);
+    });
+    return svg;
   }
   function cardTitle(text) {
     const d = el("div", { className: "card-title" });
@@ -2253,13 +1702,12 @@ border-radius:6px;background:transparent;
     return d;
   }
   function layoutTopChrome() {
-    const chrome = document.getElementById("top-chrome");
     const content = document.getElementById("tab-content");
-    if (chrome && content)
-      content.style.paddingTop = chrome.offsetHeight + 14 + "px";
+    if (content && content.style.paddingTop)
+      content.style.paddingTop = "";
   }
   function hideP5Dom() {
-    document.querySelectorAll("body > main").forEach((el2) => el2.remove());
+    document.querySelectorAll("body > main").forEach((node) => node.remove());
   }
 
   // gui/live-layout.js
@@ -2661,6 +2109,119 @@ border-radius:6px;background:transparent;
     }
   ];
 
+  // gui/board-config.js
+  var _reqSeq = 0;
+  var _listenerRegistered = false;
+  var _pendingRequests = /* @__PURE__ */ new Map();
+  function escapeAsciiJson(text) {
+    return String(text).replace(
+      /[\u007f-\uffff]/g,
+      (c) => "\\u" + ("0000" + c.charCodeAt(0).toString(16)).slice(-4)
+    );
+  }
+  function ensureConfigControlListener() {
+    if (_listenerRegistered) return true;
+    if (typeof Bela === "undefined" || !Bela.control || typeof Bela.control.registerCallback !== "function") {
+      return false;
+    }
+    _listenerRegistered = true;
+    Bela.control.registerCallback("preampConfig", (data) => {
+      if (!data || data.event !== "custom" || !data.configAction) return;
+      const reqId = data.reqId || "";
+      const pending = reqId && _pendingRequests.get(reqId);
+      if (pending) {
+        clearTimeout(pending.timer);
+        _pendingRequests.delete(reqId);
+        pending.resolve({
+          ok: !!data.ok,
+          error: data.error || "",
+          content: data.content || ""
+        });
+        return;
+      }
+      for (const [id, entry] of _pendingRequests.entries()) {
+        if (entry.action === data.configAction) {
+          clearTimeout(entry.timer);
+          _pendingRequests.delete(id);
+          entry.resolve({
+            ok: !!data.ok,
+            error: data.error || "",
+            content: data.content || ""
+          });
+          break;
+        }
+      }
+    });
+    return true;
+  }
+  function sendConfigRequest(payload, expectedAction, timeoutMs = 6e3) {
+    ensureConfigControlListener();
+    if (!belaControlReady()) {
+      return Promise.resolve({
+        ok: false,
+        error: "Bela control WebSocket not connected"
+      });
+    }
+    const reqId = `${expectedAction}_${Date.now()}_${++_reqSeq}`;
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        _pendingRequests.delete(reqId);
+        resolve({
+          ok: false,
+          error: `Timeout waiting for Bela (${expectedAction})`
+        });
+      }, timeoutMs);
+      _pendingRequests.set(reqId, { action: expectedAction, resolve, timer });
+      Bela.control.send(__spreadProps(__spreadValues({ event: "custom" }, payload), { reqId }));
+    });
+  }
+  async function fetchBoardConfigJson() {
+    const baseUrl = projectFileUrl("config.json");
+    const sep = baseUrl.indexOf("?") >= 0 ? "&" : "?";
+    const url = `${baseUrl}${sep}t=${Date.now()}`;
+    try {
+      const res = await fetch(url, { cache: "no-store" });
+      if (!res.ok) {
+        return {
+          ok: false,
+          status: res.status,
+          error: res.status === 404 ? "config.json not found on Bela" : `HTTP ${res.status}`
+        };
+      }
+      const text = await res.text();
+      const parsed = JSON.parse(text);
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+        return { ok: false, error: "Invalid config.json object on Bela" };
+      }
+      return { ok: true, text, parsed };
+    } catch (err) {
+      return { ok: false, error: err && err.message ? err.message : "Fetch failed" };
+    }
+  }
+  function getEffectiveRouting() {
+    const ctx = getContext();
+    if (ctx && ctx.boardConfigJson && ctx.boardConfigJson.routing && typeof ctx.boardConfigJson.routing === "object") {
+      return ctx.boardConfigJson.routing;
+    }
+    return ROUTING_CONFIG;
+  }
+  function saveConfigToBela(jsonText) {
+    return sendConfigRequest(
+      { saveConfigText: escapeAsciiJson(jsonText) },
+      "save",
+      8e3
+    );
+  }
+  function readConfigViaControl() {
+    return sendConfigRequest({ readConfig: true }, "read", 5e3);
+  }
+  function restartBelaAudio() {
+    return sendConfigRequest({ restartAudio: true }, "restartAudio", 5e3);
+  }
+  function rebootBelaBoard() {
+    return sendConfigRequest({ rebootBoard: true }, "rebootBoard", 5e3);
+  }
+
   // gui/dom/meters.js
   var INPUT_GAIN_MIN = -12;
   var INPUT_GAIN_MAX = 10;
@@ -2701,7 +2262,6 @@ border-radius:6px;background:transparent;
   }
   var _masterStereoBtn = null;
   var _masterStereoSyncHoldUntil = 0;
-  var _masterStereoMapCb = null;
   var MASTER_STEREO_SYNC_HOLD_MS = 2500;
   function _sendMasterStereo(payload) {
     if (!belaControlReady()) return;
@@ -2806,6 +2366,7 @@ border-radius:6px;background:transparent;
   }
   function syncCodecGains(buf) {
     if (!buf || buf.length < 20) return;
+    getContext().lastCodecGainsBuf = buf;
     const now = Date.now();
     for (let ch = 0; ch < 10; ch++) {
       const inPicker = _inputPickers[ch];
@@ -2954,15 +2515,16 @@ border-radius:6px;background:transparent;
     const dB = raw > 32e-6 ? 20 * Math.log10(raw) : -90;
     return dB < -80 ? "-\u221E" : dB.toFixed(1) + "\u202FdB";
   }
-  function ensureClipBadges() {
-    if (_clipBadgesByIdx) {
-      const sample = Object.values(_clipBadgesByIdx)[0];
-      if (sample && sample.isConnected) return _clipBadgesByIdx;
-      _clipBadgesByIdx = null;
-    }
+  function ensureClipBadges(forceRebuild = false) {
     const host = document.getElementById("clip-badges");
     if (!host) return null;
-    const { inputChannels, outputChannels } = buildFullRouting(ROUTING_CONFIG);
+    if (!forceRebuild && _clipBadgesByIdx) {
+      const sample = Object.values(_clipBadgesByIdx)[0];
+      if (sample && sample.isConnected) return _clipBadgesByIdx;
+    }
+    _clipBadgesByIdx = null;
+    host.innerHTML = "";
+    const { inputChannels, outputChannels } = buildFullRouting(getEffectiveRouting());
     const byIdx = {};
     [...inputChannels, ...outputChannels].forEach((ch) => {
       if (ch.buf3 == null || byIdx[ch.buf3]) return;
@@ -3026,15 +2588,15 @@ border-radius:6px;background:transparent;
     if (ctx && ctx.clipHoldUntil)
       ctx.clipHoldUntil.fill(0);
   }
-  function buildMetersSection() {
-    const wrap = el("div", { id: "meters-wrap" });
-    const columns = el("div", { className: "meters-columns" });
-    const { levelGroups, levelLabels, inputChannels, outputChannels } = buildFullRouting(ROUTING_CONFIG);
+  function _populateMetersColumns(columns) {
+    const routing = getEffectiveRouting();
+    const { levelGroups, levelLabels, inputChannels, outputChannels } = buildFullRouting(routing);
     const gainByBuf3 = _buildGainByBuf3(inputChannels, outputChannels);
     for (let ch = 0; ch < 10; ch++) {
       _inputPickers[ch] = null;
       _outputPickers[ch] = null;
     }
+    _masterStereoBtn = null;
     const ctx = getContext();
     ctx.meterVu = [];
     ctx.meterPeakDbs = [];
@@ -3050,7 +2612,7 @@ border-radius:6px;background:transparent;
         lbl.textContent = levelLabels[idx] || String(idx);
         mid.appendChild(lbl);
         if (idx === ROUTING_KEY_TO_BUFFER3.master) {
-          const initIsStereo = ROUTING_CONFIG.out && ROUTING_CONFIG.out.master && ROUTING_CONFIG.out.master.stereo !== void 0 ? !!ROUTING_CONFIG.out.master.stereo : true;
+          const initIsStereo = routing.out && routing.out.master && routing.out.master.stereo !== void 0 ? !!routing.out.master.stereo : true;
           const modeBtn = el("button", {
             className: "meter-mode-btn " + (initIsStereo ? "stereo" : "mono"),
             type: "button"
@@ -3063,8 +2625,6 @@ border-radius:6px;background:transparent;
             _setMasterStereoBtnState(modeBtn, nextIsStereo);
             _masterStereoSyncHoldUntil = Date.now() + MASTER_STEREO_SYNC_HOLD_MS;
             _sendMasterStereo({ event: "custom", masterStereo: nextIsStereo });
-            const mapCb = document.querySelector('.ri-stereo[data-key="master"]');
-            if (mapCb) mapCb.checked = nextIsStereo;
           });
           _masterStereoBtn = modeBtn;
           mid.appendChild(modeBtn);
@@ -3127,8 +2687,33 @@ border-radius:6px;background:transparent;
       card.appendChild(row);
       columns.appendChild(card);
     });
+  }
+  function buildMetersSection() {
+    const wrap = el("div", { id: "meters-wrap" });
+    const columns = el("div", { className: "meters-columns" });
+    _populateMetersColumns(columns);
     wrap.appendChild(columns);
     return wrap;
+  }
+  function rebuildMetersSection() {
+    ensureClipBadges(true);
+    const wrap = document.getElementById("meters-wrap");
+    if (!wrap) return;
+    const columns = el("div", { className: "meters-columns" });
+    _populateMetersColumns(columns);
+    wrap.innerHTML = "";
+    wrap.appendChild(columns);
+    _inputGainSyncHoldUntil.fill(0);
+    _outputGainSyncHoldUntil.fill(0);
+    _masterStereoSyncHoldUntil = 0;
+    const ctx = getContext();
+    if (ctx.configMeta) syncMasterStereo(ctx.configMeta);
+    if (ctx.lastCodecGainsBuf) syncCodecGains(ctx.lastCodecGainsBuf);
+    if (ctx.currentTab === TAB_LIVE) {
+      ctx.meterVu.forEach((vu) => {
+        if (vu) vu.resize();
+      });
+    }
   }
   function startMeterAnim() {
     if (getContext().meterAnimId != null) return;
@@ -3203,10 +2788,6 @@ border-radius:6px;background:transparent;
         _setMasterStereoBtnState(_masterStereoBtn, remoteIsStereo);
       }
     }
-    const mapCb = _masterStereoMapCb && _masterStereoMapCb.isConnected ? _masterStereoMapCb : _masterStereoMapCb = document.querySelector('.ri-stereo[data-key="master"]');
-    if (mapCb && now >= _masterStereoSyncHoldUntil) {
-      mapCb.checked = remoteIsStereo;
-    }
   }
 
   // gui/dom/mapping.js
@@ -3216,29 +2797,157 @@ border-radius:6px;background:transparent;
   var INPUT_GAIN_MAX2 = 10;
   var OUTPUT_GAIN_MIN2 = -63;
   var OUTPUT_GAIN_MAX2 = 0;
-  var ROUTING_IN_KEYS = [
-    "fx1Return",
-    "fx2Return",
-    "aux1",
-    "aux2",
-    "aux3",
-    "aux4"
+  var GUIDED_SETTLE_MS = 450;
+  var DEFAULT_CONFIG_COMMENT = "Dub Preamp BELA GEM MULTI -- hardware mapping config. Edit this file to remap pots/switches without recompiling. Restart the Bela project to apply changes.";
+  var ICON_DOWNLOAD = ["M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4", "M7 10l5 5 5-5", "M12 15V3"];
+  var ICON_UPLOAD = ["M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4", "M17 8l-5-5-5 5", "M12 3v12"];
+  var ICON_SAVE = ["M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z", "M17 21v-8H7v8", "M7 3v5h8"];
+  var ICON_RESTART = ["M23 4v6h-6", "M1 20v-6h6", "M3.51 9a9 9 0 0 1 14.85-3.36L23 10", "M1 14l4.64 4.36A9 9 0 0 0 20.49 15"];
+  var ROUTING_IN_KEYS = ["aux1", "aux2", "aux3", "aux4", "fx1Return", "fx2Return"];
+  var ROUTING_OUT_KEYS = ["master", "fx1Send", "fx2Send", "vuSub", "vuKick", "vuMid", "vuTop"];
+  var ROUTING_LABELS = {
+    aux1: "AUX 1",
+    aux2: "AUX 2",
+    aux3: "AUX 3",
+    aux4: "AUX 4",
+    fx1Return: "FX1 Return",
+    fx2Return: "FX2 Return",
+    master: "Master Out",
+    fx1Send: "FX1 Send",
+    fx2Send: "FX2 Send",
+    vuSub: "VU Sub",
+    vuKick: "VU Kick",
+    vuMid: "VU Mid",
+    vuTop: "VU Top"
+  };
+  var POT_INDEX = Object.fromEntries(POT_NAMES.map((n, i) => [n, i]));
+  var SW_INDEX = Object.fromEntries(SWITCH_NAMES.map((n, i) => [n, i]));
+  var CONTROL_GROUPS = [
+    {
+      id: "master",
+      title: "Master & Filters",
+      defaultOpen: true,
+      items: [
+        { table: "pot", name: "MASTER_GAIN", label: "Master Gain" },
+        { table: "pot", name: "MASTER_HPF_FREQ", label: "HPF Freq" },
+        { table: "pot", name: "MASTER_HPF_RES", label: "HPF Resonance" },
+        { table: "pot", name: "MASTER_LPF_FREQ", label: "LPF Freq" },
+        { table: "pot", name: "MASTER_LPF_RES", label: "LPF Resonance" },
+        { table: "pot", name: "BTRIM_SUB", label: "Band Trim Sub" },
+        { table: "pot", name: "BTRIM_KICK", label: "Band Trim Kick" },
+        { table: "pot", name: "BTRIM_MID", label: "Band Trim Mid" },
+        { table: "pot", name: "BTRIM_TOP", label: "Band Trim Top" },
+        { table: "sw", name: "KILL_SUB", label: "Kill Sub" },
+        { table: "sw", name: "KILL_KICK", label: "Kill Kick" },
+        { table: "sw", name: "KILL_MID", label: "Kill Mid" },
+        { table: "sw", name: "KILL_TOP", label: "Kill Top" }
+      ]
+    },
+    ...[1, 2, 3, 4].map((n) => ({
+      id: "aux" + n,
+      title: "AUX " + n,
+      defaultOpen: n === 1,
+      items: [
+        { table: "pot", name: `AUX${n}_INPUT_GAIN`, label: "Input Gain" },
+        { table: "pot", name: `AUX${n}_EQ_HIGH`, label: "EQ High" },
+        { table: "pot", name: `AUX${n}_EQ_MID`, label: "EQ Mid" },
+        { table: "pot", name: `AUX${n}_EQ_LOW`, label: "EQ Low" },
+        { table: "pot", name: `AUX${n}_FX_SEND`, label: "FX1 Send" },
+        { table: "pot", name: `AUX${n}_FX2_SEND`, label: "FX2 Send" }
+      ]
+    })),
+    {
+      id: "peq",
+      title: "Parametric EQ",
+      defaultOpen: false,
+      items: [
+        { table: "pot", name: "MASTER_EQ_SUB_FREQ", label: "Sub Freq" },
+        { table: "pot", name: "MASTER_EQ_SUB_GAIN", label: "Sub Gain" },
+        { table: "pot", name: "MASTER_EQ_KICK_FREQ", label: "Kick Freq" },
+        { table: "pot", name: "MASTER_EQ_KICK_GAIN", label: "Kick Gain" },
+        { table: "pot", name: "MASTER_EQ_MID_FREQ", label: "Mid Freq" },
+        { table: "pot", name: "MASTER_EQ_MID_GAIN", label: "Mid Gain" },
+        { table: "pot", name: "MASTER_EQ_TOP_FREQ", label: "Top Freq" },
+        { table: "pot", name: "MASTER_EQ_TOP_GAIN", label: "Top Gain" }
+      ]
+    },
+    {
+      id: "geq",
+      title: "Graphic EQ (12-Band)",
+      defaultOpen: false,
+      items: [
+        "40HZ",
+        "60HZ",
+        "80HZ",
+        "100HZ",
+        "125HZ",
+        "250HZ",
+        "500HZ",
+        "1KHZ",
+        "2KHZ",
+        "4KHZ",
+        "8KHZ",
+        "16KHZ"
+      ].map((f) => ({
+        table: "pot",
+        name: "GEQ_" + f,
+        label: f.replace("HZ", " Hz").replace("KHZ", " kHz")
+      }))
+    },
+    {
+      id: "fx_siren",
+      title: "Siren & FX",
+      defaultOpen: false,
+      items: [
+        { table: "pot", name: "SIREN_TYPE", label: "Siren Preset" },
+        { table: "pot", name: "SIREN_MOD", label: "Siren Mod" },
+        { table: "pot", name: "SIREN_GAIN", label: "Siren Gain" },
+        { table: "pot", name: "SIREN_FX_SEND", label: "Siren FX1 Send" },
+        { table: "pot", name: "SIREN_FX2_SEND", label: "Siren FX2 Send" },
+        { table: "sw", name: "SIREN_TRIGGER", label: "Siren Gate" },
+        { table: "pot", name: "FX1_RETURN_GAIN", label: "FX1 Return Gain" },
+        { table: "pot", name: "FX2_RETURN_GAIN", label: "FX2 Return Gain" },
+        { table: "sw", name: "FX_FILTER_MIDS", label: "FX1 Filter Mids" },
+        { table: "sw", name: "FX_FILTER_TOPS", label: "FX1 Filter Tops" },
+        { table: "sw", name: "FX2_FILTER_MIDS", label: "FX2 Filter Mids" },
+        { table: "sw", name: "FX2_FILTER_TOPS", label: "FX2 Filter Tops" }
+      ]
+    }
   ];
-  var ROUTING_OUT_KEYS = [
-    "master",
-    "fx1Send",
-    "fx2Send",
-    "vuSub",
-    "vuKick",
-    "vuMid",
-    "vuTop"
-  ];
+  var _guidedTimer = null;
+  var _potLiveFills = new Array(POT_NAMES.length);
+  var _swLiveFills = new Array(SWITCH_NAMES.length);
+  var _potRevButtons = new Array(POT_NAMES.length);
+  var _swRevButtons = new Array(SWITCH_NAMES.length);
+  var _hwValues = {};
+  var _clipLedInputs = {};
+  var _devModeBootCb = null;
+  var _modalOverlay = null;
+  var _modalEscBound = null;
+  var _statusClearTimer = null;
+  function setMappingDirty(dirty) {
+    const ctx = getContext();
+    ctx.mappingDirty = !!dirty;
+    const pill = document.getElementById("map-dirty-pill");
+    if (pill) {
+      pill.classList.toggle("show", ctx.mappingDirty);
+    }
+  }
+  function markMappingDirty() {
+    setMappingDirty(true);
+  }
+  function setActionButtonsDisabled(disabled) {
+    getContext().mappingActionBusy = !!disabled;
+    ["btn-load-config", "btn-save-config", "btn-restart-audio", "btn-download", "btn-reboot-bela"].forEach((id) => {
+      const b = document.getElementById(id);
+      if (b) b.disabled = !!disabled;
+    });
+  }
   function routingInChannel(val) {
     if (val != null && typeof val === "object" && !Array.isArray(val)) {
       if (Array.isArray(val.channels)) return val.channels;
       if (val.channel != null) {
-        if (val.channelR != null && val.channelR >= 0)
-          return [val.channel, val.channelR];
+        if (val.channelR != null && val.channelR >= 0) return [val.channel, val.channelR];
         return val.channel;
       }
       return 0;
@@ -3251,6 +2960,7 @@ border-radius:6px;background:transparent;
       if (Array.isArray(val.channels)) return val.channels;
       return val.channel != null ? val.channel : 0;
     }
+    if (Array.isArray(val)) return val;
     return val;
   }
   function routingOutStereo(val) {
@@ -3261,9 +2971,7 @@ border-radius:6px;background:transparent;
     return true;
   }
   function routingInMic(val) {
-    if (val != null && typeof val === "object" && !Array.isArray(val))
-      return !!val.mic;
-    return false;
+    return val != null && typeof val === "object" && !Array.isArray(val) ? !!val.mic : false;
   }
   function routingInHpf(val) {
     if (val != null && typeof val === "object" && !Array.isArray(val)) {
@@ -3280,167 +2988,580 @@ border-radius:6px;background:transparent;
     return 0;
   }
   function buildMappingPane() {
+    const ctx = getContext();
     const pane = el("div", { id: "pane-mapping", className: "tab-pane" });
-    const note = el("div", { id: "mapping-note" });
-    note.innerHTML = 'Current mapping loaded from config.json on the Bela. Edit the values below, then download the file \u2014 replace config.json in the project folder and restart. <a href="http://bela.local/" target="_blank" rel="noopener noreferrer">Open Bela IDE</a>';
-    pane.appendChild(note);
-    const conflicts = el("div", { id: "mapping-conflicts" });
-    conflicts.innerHTML = '<strong>Mapping conflicts</strong><ul id="mapping-conflicts-list"></ul>';
+    const topbar = el("div", { className: "map-topbar" });
+    const subtabs = el("div", { className: "map-subtabs", role: "tablist", "aria-label": "Mapping sections" });
+    [
+      { id: "controls", label: "Controls" },
+      { id: "io", label: "Audio I/O" },
+      { id: "advanced", label: "Advanced" }
+    ].forEach((t) => {
+      const active = ctx.mappingSubTab === t.id;
+      const btn = el("button", {
+        type: "button",
+        className: "map-subtab" + (active ? " active" : ""),
+        role: "tab",
+        "aria-selected": active ? "true" : "false",
+        textContent: t.label
+      });
+      btn.dataset.subtab = t.id;
+      btn.addEventListener("click", () => setMappingSubTab(t.id));
+      subtabs.appendChild(btn);
+    });
+    topbar.appendChild(subtabs);
+    const dirtyPill = el("span", {
+      id: "map-dirty-pill",
+      className: "map-dirty-pill" + (ctx.mappingDirty ? " show" : ""),
+      textContent: "Unsaved",
+      title: "Local changes not yet saved to Bela"
+    });
+    topbar.appendChild(dirtyPill);
+    const actions = el("div", { className: "map-topbar-actions" });
+    const conflictPill = el("button", {
+      type: "button",
+      id: "map-conflict-pill",
+      className: "map-conflict-pill",
+      textContent: "0 Conflicts"
+    });
+    conflictPill.addEventListener("click", () => {
+      const box = document.getElementById("mapping-conflicts");
+      if (box) box.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      if (ctx.mappingSubTab === "controls") {
+        setMappingFilter("conflicts");
+      }
+    });
+    actions.appendChild(conflictPill);
+    ctx.downloadStatusEl = el("div", {
+      id: "download-status",
+      className: "map-toast",
+      role: "status",
+      "aria-live": "polite"
+    });
+    pane.appendChild(ctx.downloadStatusEl);
+    const fileInput = el("input", {
+      type: "file",
+      id: "map-load-file",
+      accept: ".json,application/json",
+      style: "display:none",
+      "aria-label": "Load config.json file"
+    });
+    fileInput.addEventListener("change", handleLoadFileChange);
+    actions.appendChild(fileInput);
+    const loadBtn = el("button", {
+      type: "button",
+      id: "btn-load-config",
+      className: "btn-map-secondary",
+      title: "Load a local config.json file into the Mapping form"
+    });
+    loadBtn.appendChild(svgIcon(ICON_UPLOAD, "0 0 24 24", 14));
+    loadBtn.appendChild(el("span", { textContent: "Load" }));
+    loadBtn.addEventListener("click", () => fileInput.click());
+    actions.appendChild(loadBtn);
+    const exportBtn = el("button", {
+      type: "button",
+      id: "btn-download",
+      className: "btn-map-secondary",
+      title: "Download the exact config.json currently saved on Bela"
+    });
+    exportBtn.appendChild(svgIcon(ICON_DOWNLOAD, "0 0 24 24", 14));
+    exportBtn.appendChild(el("span", { textContent: "Export config.json" }));
+    exportBtn.addEventListener("click", exportBoardConfigJson);
+    actions.appendChild(exportBtn);
+    const saveBtn = el("button", {
+      type: "button",
+      id: "btn-save-config",
+      className: "btn-save",
+      title: "Save current Mapping form directly to config.json on Bela"
+    });
+    saveBtn.appendChild(svgIcon(ICON_SAVE, "0 0 24 24", 14));
+    saveBtn.appendChild(el("span", { textContent: "Save" }));
+    saveBtn.addEventListener("click", saveConfigAction);
+    actions.appendChild(saveBtn);
+    const restartBtn = el("button", {
+      type: "button",
+      id: "btn-restart-audio",
+      className: "btn-restart",
+      title: "Restart Bela audio program (~2\u20133 s, keeps Wi-Fi/hotspot connected)"
+    });
+    restartBtn.appendChild(svgIcon(ICON_RESTART, "0 0 24 24", 14));
+    restartBtn.appendChild(el("span", { textContent: "Restart" }));
+    restartBtn.addEventListener("click", confirmAndRestartAudio);
+    actions.appendChild(restartBtn);
+    topbar.appendChild(actions);
+    pane.appendChild(topbar);
+    const conflicts = el("div", { id: "mapping-conflicts", className: "map-conflicts-box" });
+    conflicts.innerHTML = '<strong>Conflicts</strong><ul id="mapping-conflicts-list"></ul>';
     pane.appendChild(conflicts);
     const detectBanner = el("div", { id: "detect-status" });
+    ctx.detectStatusEl = detectBanner;
     pane.appendChild(detectBanner);
-    const toolbar = el("div", { id: "mapping-toolbar" });
-    const btn = el("button", { id: "btn-download" });
-    btn.textContent = "Download config.json";
-    btn.addEventListener("click", downloadConfigJson);
-    toolbar.appendChild(btn);
-    getContext().downloadStatusEl = el("span", { id: "download-status" });
-    toolbar.appendChild(getContext().downloadStatusEl);
-    getContext().detectStatusEl = detectBanner;
-    pane.appendChild(toolbar);
-    pane.appendChild(buildRoutingSection());
-    const potTitle = el("div", { className: "msec-title" });
-    potTitle.textContent = "Potentiometers";
-    pane.appendChild(potTitle);
-    const potWrap = el("div", { className: "mtable-wrap" });
-    const potTbl = el("table", { className: "mtable", id: "pot-table" });
-    potTbl.innerHTML = `
-        <colgroup>
-            <col class="col-name">
-            <col class="col-num"><col class="col-num">
-            <col class="col-check"><col class="col-check">
-            <col class="col-detect">
-        </colgroup>
-        <thead><tr>
-            <th>Name</th><th>MUX</th><th>Channel</th>
-            <th class="col-check">Reversed</th><th class="col-check">Centered</th>
-            <th class="detect-col">Auto detect</th>
-        </tr></thead>
-        <tbody id="pot-tbody">
-            <tr><td colspan="6" class="loading-cell">Waiting for connection\u2026</td></tr>
-        </tbody>`;
-    potWrap.appendChild(potTbl);
-    pane.appendChild(potWrap);
-    const swTitle = el("div", { className: "msec-title" });
-    swTitle.textContent = "Switches (MCP23017)";
-    pane.appendChild(swTitle);
-    const swWrap = el("div", { className: "mtable-wrap" });
-    const swTbl = el("table", { className: "mtable", id: "sw-table" });
-    swTbl.innerHTML = `
-        <colgroup>
-            <col class="col-name">
-            <col class="col-num"><col class="col-port">
-            <col class="col-check">
-            <col class="col-detect">
-        </colgroup>
-        <thead><tr>
-            <th>Name</th><th>Pin</th><th>Port</th>
-            <th class="col-check">Reversed</th>
-            <th class="detect-col">Auto map</th>
-        </tr></thead>
-        <tbody id="sw-tbody">
-            <tr><td colspan="5" class="loading-cell">Waiting for connection\u2026</td></tr>
-        </tbody>`;
-    swWrap.appendChild(swTbl);
-    pane.appendChild(swWrap);
-    pane.appendChild(buildIgnoredPotsSection());
+    pane.appendChild(buildControlsView());
+    pane.appendChild(buildRoutingView());
+    pane.appendChild(buildAdvancedView());
+    setMappingSubTab(ctx.mappingSubTab || "controls");
     return pane;
   }
-  function buildRoutingSection() {
-    const section = el("div", { id: "routing-section" });
-    const title = el("div", { className: "msec-title" });
-    title.textContent = "Audio I/O Routing";
-    section.appendChild(title);
-    const hint = el("div", { className: "routing-hint" });
-    hint.textContent = "Physical Bela channel numbers (0\u20139). Master may list one or two outputs, e.g. 0 or 0,1. Stereo: checked = stereo (L on 1st out, R on 2nd); unchecked = mono (L+R on both outs). Gain (dB): codec default at boot (ADC \u221212\u202610, DAC \u221263\u20260). Mic: bypass master ParamEQ / HPF-LPF / kills (Graphic EQ + Band Trim still apply). HPF (Hz): mic dry high-pass (0 = off, 20\u2013300); DSP only when Mic is on.";
-    section.appendChild(hint);
-    const grid = el("div", { className: "routing-grid" });
-    grid.appendChild(buildRoutingTable(
-      "Inputs (routing.in)",
-      "in",
-      ROUTING_IN_KEYS,
-      ROUTING_CONFIG.in || {},
-      true
-    ));
-    grid.appendChild(buildRoutingTable(
-      "Outputs (routing.out)",
-      "out",
-      ROUTING_OUT_KEYS,
-      ROUTING_CONFIG.out || {},
-      false
-    ));
-    section.appendChild(grid);
-    section.querySelectorAll(".ri").forEach((inp) => {
-      inp.addEventListener("input", updateMappingConflicts);
-      inp.addEventListener("change", updateMappingConflicts);
+  function setMappingSubTab(subId) {
+    const ctx = getContext();
+    if (subId !== "controls") cancelDetect();
+    ctx.mappingSubTab = subId;
+    document.querySelectorAll(".map-subtab").forEach((btn) => {
+      const active = btn.dataset.subtab === subId;
+      btn.classList.toggle("active", active);
+      btn.setAttribute("aria-selected", active ? "true" : "false");
+    });
+    document.querySelectorAll(".map-subview").forEach((view) => {
+      view.style.display = view.dataset.subview === subId ? "" : "none";
+    });
+  }
+  function buildControlsView() {
+    const view = el("div", { className: "map-subview" });
+    view.dataset.subview = "controls";
+    const guidedBar = el("div", { id: "map-guided-bar", className: "map-guided-bar" });
+    const guidedInfo = el("div", { className: "map-guided-info" });
+    guidedInfo.appendChild(el("div", { id: "map-guided-step", className: "map-guided-step", textContent: "Setup Assistant" }));
+    guidedInfo.appendChild(el("div", { id: "map-guided-prompt", className: "map-guided-prompt", textContent: "Map pots and switches step by step" }));
+    guidedBar.appendChild(guidedInfo);
+    const guidedActions = el("div", { id: "map-guided-actions", className: "map-guided-actions" });
+    const startBtn = el("button", {
+      type: "button",
+      id: "btn-guided-start",
+      className: "btn-detect-row",
+      textContent: "Guided Setup"
+    });
+    startBtn.addEventListener("click", startGuidedSetup);
+    const skipBtn = el("button", {
+      type: "button",
+      id: "btn-guided-skip",
+      className: "dev-small-btn",
+      textContent: "Skip"
+    });
+    skipBtn.style.display = "none";
+    skipBtn.addEventListener("click", skipGuidedStep);
+    const stopBtn = el("button", {
+      type: "button",
+      id: "btn-guided-stop",
+      className: "btn-del-ign",
+      textContent: "Stop"
+    });
+    stopBtn.style.display = "none";
+    stopBtn.addEventListener("click", cancelDetect);
+    guidedActions.appendChild(startBtn);
+    guidedActions.appendChild(skipBtn);
+    guidedActions.appendChild(stopBtn);
+    guidedBar.appendChild(guidedActions);
+    view.appendChild(guidedBar);
+    const filterBar = el("div", { className: "map-filter-bar" });
+    const pills = el("div", { className: "map-filter-pills" });
+    [
+      { id: "all", label: "All" },
+      { id: "pots", label: "Pots" },
+      { id: "switches", label: "Switches" },
+      { id: "conflicts", label: "Conflicts" }
+    ].forEach((f) => {
+      const b = el("button", {
+        type: "button",
+        className: "map-filter-pill" + (getContext().mappingFilter === f.id ? " active" : ""),
+        textContent: f.label,
+        "aria-pressed": getContext().mappingFilter === f.id ? "true" : "false"
+      });
+      b.dataset.filter = f.id;
+      b.addEventListener("click", () => setMappingFilter(f.id));
+      pills.appendChild(b);
+    });
+    filterBar.appendChild(pills);
+    const searchInp = el("input", {
+      type: "search",
+      id: "map-search-input",
+      className: "map-search",
+      placeholder: "Filter controls\u2026",
+      "aria-label": "Filter controls"
+    });
+    searchInp.addEventListener("input", () => {
+      getContext().mappingSearch = searchInp.value.trim().toLowerCase();
+      applyControlFilters();
+    });
+    filterBar.appendChild(searchInp);
+    view.appendChild(filterBar);
+    const groupsHost = el("div", { id: "map-groups-host", className: "map-groups" });
+    groupsHost.appendChild(el("div", { className: "map-empty", textContent: "Waiting for Bela connection\u2026" }));
+    view.appendChild(groupsHost);
+    return view;
+  }
+  function setMappingFilter(filterId) {
+    const ctx = getContext();
+    ctx.mappingFilter = filterId;
+    document.querySelectorAll(".map-filter-pill").forEach((b) => {
+      const active = b.dataset.filter === filterId;
+      b.classList.toggle("active", active);
+      b.setAttribute("aria-pressed", active ? "true" : "false");
+    });
+    applyControlFilters();
+  }
+  function applyControlFilters() {
+    const ctx = getContext();
+    const filter = ctx.mappingFilter || "all";
+    const q = ctx.mappingSearch || "";
+    document.querySelectorAll("#map-groups-host .map-group").forEach((grp) => {
+      let visibleCount = 0;
+      grp.querySelectorAll(".map-row").forEach((row) => {
+        const table = row.dataset.mapTable;
+        const searchHay = (row.dataset.search || "").toLowerCase();
+        const hasConflict = row.classList.contains("dup-conflict");
+        let matchFilter = true;
+        if (filter === "pots") matchFilter = table === "pot";
+        else if (filter === "switches") matchFilter = table === "sw";
+        else if (filter === "conflicts") matchFilter = hasConflict;
+        const matchSearch = !q || searchHay.includes(q);
+        const show = matchFilter && matchSearch;
+        row.style.display = show ? "" : "none";
+        if (show) visibleCount++;
+      });
+      grp.style.display = visibleCount > 0 ? "" : "none";
+      if ((q || filter === "conflicts") && visibleCount > 0) {
+        grp.dataset.collapsed = "false";
+      }
+    });
+  }
+  function buildRoutingView() {
+    const view = el("div", { className: "map-subview", id: "routing-section" });
+    view.dataset.subview = "io";
+    const routing = getEffectiveRouting();
+    const grid = el("div", { className: "map-io-grid" });
+    grid.appendChild(buildRoutingCard("Inputs", "in", ROUTING_IN_KEYS, routing.in || {}, true));
+    grid.appendChild(buildRoutingCard("Outputs", "out", ROUTING_OUT_KEYS, routing.out || {}, false));
+    view.appendChild(grid);
+    const onRoutingChange = () => {
+      getContext().mappingUserEdited = true;
+      markMappingDirty();
+      updateMappingConflicts();
+    };
+    view.querySelectorAll(".ri, .ri-gain, .ri-mic, .ri-hpf, .ri-stereo").forEach((inp) => {
+      inp.addEventListener("input", onRoutingChange);
+      inp.addEventListener("change", onRoutingChange);
     });
     updateMappingConflicts();
-    return section;
+    return view;
   }
-  function buildRoutingTable(heading, dir, keys, values, withMic) {
-    const wrap = el("div", { className: "mtable-wrap routing-table-wrap" });
-    const sub = el("div", { className: "msec-subtitle" });
-    sub.textContent = heading;
-    wrap.appendChild(sub);
-    const gainMin = withMic ? INPUT_GAIN_MIN2 : OUTPUT_GAIN_MIN2;
-    const gainMax = withMic ? INPUT_GAIN_MAX2 : OUTPUT_GAIN_MAX2;
-    const gainTitle = withMic ? `ADC gain at boot (${INPUT_GAIN_MIN2}\u2026${INPUT_GAIN_MAX2} dB)` : `DAC gain at boot (${OUTPUT_GAIN_MIN2}\u2026${OUTPUT_GAIN_MAX2} dB)`;
-    const tbl = el("table", { className: "mtable routing-table", id: `routing-${dir}-table` });
-    const isOut = dir === "out";
-    const extraCols = withMic ? '<col class="col-check"><col class="col-num">' : isOut ? '<col class="col-check">' : "";
-    const extraHead = withMic ? '<th class="col-check" title="Bypass ParamEQ / HPF-LPF / kills">Mic</th><th title="Mic dry HPF cutoff in Hz (0 = off)">HPF (Hz)</th>' : isOut ? '<th class="col-check" title="Master output mode: Stereo (checked) or Mono L+R (unchecked)">Stereo</th>' : "";
-    tbl.innerHTML = `
-        <colgroup>
-            <col class="col-name">
-            <col class="col-num">
-            <col class="col-num">
-            ${extraCols}
-        </colgroup>
-        <thead><tr>
-            <th>Signal</th><th>Channel</th>
-            <th title="${gainTitle}">Gain (dB)</th>${extraHead}
-        </tr></thead>
-        <tbody id="routing-${dir}-tbody"></tbody>`;
-    wrap.appendChild(tbl);
-    const tbody = tbl.querySelector("tbody");
+  function buildRoutingCard(heading, dir, keys, values, isIn) {
+    const card = el("div", { className: "card map-io-card" });
+    card.appendChild(el("div", { className: "card-title", textContent: heading }));
+    const list = el("div", { className: "map-io-list", id: `routing-${dir}-tbody` });
+    const gainMin = isIn ? INPUT_GAIN_MIN2 : OUTPUT_GAIN_MIN2;
+    const gainMax = isIn ? INPUT_GAIN_MAX2 : OUTPUT_GAIN_MAX2;
     keys.forEach((key) => {
       const raw = values[key];
       const isMaster = key === "master";
-      const isStereoCapable = isMaster || key.startsWith("aux");
-      const channelVal = withMic ? routingInChannel(raw) : routingOutChannel(raw);
+      const isAux = key.startsWith("aux");
+      const isStereoCapable = isMaster || isAux;
+      const channelVal = isIn ? routingInChannel(raw) : routingOutChannel(raw);
       const display = formatRoutingValue(channelVal, isStereoCapable);
       const gainVal = routingGain(raw);
-      const tr = document.createElement("tr");
-      tr.dataset.routingDir = dir;
-      tr.dataset.routingKey = key;
-      const inputType = isStereoCapable ? "text" : "number";
-      const extraAttrs = isStereoCapable ? 'placeholder="0 or 0,1" spellcheck="false"' : `min="${ROUTING_CH_MIN}" max="${ROUTING_CH_MAX}" step="1"`;
-      let cells = `<td class="pname" title="${key}">${key}</td><td><input type="${inputType}" value="${display}" data-dir="${dir}" data-key="${key}" class="ri" ${extraAttrs}></td><td><input type="number" class="ri-gain" data-dir="${dir}" data-key="${key}" value="${gainVal}" min="${gainMin}" max="${gainMax}" step="1" title="${gainTitle}"></td>`;
-      if (withMic) {
-        const micChecked = routingInMic(raw) ? "checked" : "";
-        const hpfVal = routingInHpf(raw);
-        cells += `<td class="col-check"><input type="checkbox" class="ri-mic" data-dir="${dir}" data-key="${key}" ${micChecked} title="Mic mode: bypass ParamEQ / HPF-LPF / kills"></td><td><input type="number" class="ri-hpf" data-dir="${dir}" data-key="${key}" value="${hpfVal}" min="${MIC_HPF_HZ_MIN}" max="${MIC_HPF_HZ_MAX}" step="1" title="Mic HPF Hz (0 = off)"></td>`;
-      } else if (isOut) {
-        if (key === "master") {
-          const stereoChecked = routingOutStereo(raw) ? "checked" : "";
-          cells += `<td class="col-check"><input type="checkbox" class="ri-stereo" data-dir="${dir}" data-key="${key}" ${stereoChecked} title="Master mode: Stereo (checked) or Mono L+R (unchecked)"></td>`;
-        } else {
-          cells += `<td class="col-check" style="color:#666;text-align:center">\u2014</td>`;
+      const row = el("div", { className: "map-io-row" });
+      row.dataset.routingDir = dir;
+      row.dataset.routingKey = key;
+      row.appendChild(el("span", {
+        className: "map-io-label",
+        textContent: ROUTING_LABELS[key] || key,
+        title: key
+      }));
+      const fields = el("div", { className: "map-io-fields" });
+      const chField = el("label", { className: "map-field" });
+      chField.appendChild(el("span", { className: "map-field-lbl", textContent: "Ch" }));
+      const chInp = el("input", {
+        type: isStereoCapable ? "text" : "number",
+        value: display,
+        className: isStereoCapable ? "ri" : "ri map-num",
+        "aria-label": `${ROUTING_LABELS[key] || key} channel`
+      });
+      chInp.dataset.dir = dir;
+      chInp.dataset.key = key;
+      if (isStereoCapable) {
+        chInp.placeholder = "0 or 0,1";
+        chInp.spellcheck = false;
+      } else {
+        chInp.min = String(ROUTING_CH_MIN);
+        chInp.max = String(ROUTING_CH_MAX);
+        chInp.step = "1";
+      }
+      chField.appendChild(chInp);
+      fields.appendChild(chField);
+      const gField = el("label", { className: "map-field" });
+      gField.appendChild(el("span", { className: "map-field-lbl", textContent: "dB" }));
+      const gInp = el("input", {
+        type: "number",
+        className: "ri-gain map-num",
+        value: String(gainVal),
+        min: String(gainMin),
+        max: String(gainMax),
+        step: "1",
+        title: isIn ? `Boot ADC gain (${gainMin}..${gainMax} dB)` : `Boot DAC gain (${gainMin}..${gainMax} dB)`,
+        "aria-label": `${ROUTING_LABELS[key] || key} gain dB`
+      });
+      gInp.dataset.dir = dir;
+      gInp.dataset.key = key;
+      gField.appendChild(gInp);
+      fields.appendChild(gField);
+      if (isIn && isAux) {
+        const micLbl = el("label", { className: "map-io-check", title: "Bypass master ParamEQ / filters / kills" });
+        const micCb = el("input", {
+          type: "checkbox",
+          className: "ri-mic",
+          checked: routingInMic(raw)
+        });
+        micCb.dataset.dir = dir;
+        micCb.dataset.key = key;
+        micLbl.appendChild(micCb);
+        micLbl.appendChild(el("span", { textContent: "Mic" }));
+        fields.appendChild(micLbl);
+        const hpfField = el("label", { className: "map-field", title: "Mic dry HPF Hz (0 = off)" });
+        hpfField.appendChild(el("span", { className: "map-field-lbl", textContent: "HPF" }));
+        const hpfInp = el("input", {
+          type: "number",
+          className: "ri-hpf map-num",
+          value: String(routingInHpf(raw)),
+          min: String(MIC_HPF_HZ_MIN),
+          max: String(MIC_HPF_HZ_MAX),
+          step: "1",
+          "aria-label": `${ROUTING_LABELS[key] || key} HPF Hz`
+        });
+        hpfInp.dataset.dir = dir;
+        hpfInp.dataset.key = key;
+        hpfField.appendChild(hpfInp);
+        fields.appendChild(hpfField);
+      } else if (!isIn && isMaster) {
+        const stLbl = el("label", { className: "map-io-check", title: "Stereo (checked) or Mono L+R" });
+        const stCb = el("input", {
+          type: "checkbox",
+          className: "ri-stereo",
+          checked: routingOutStereo(raw)
+        });
+        stCb.dataset.dir = dir;
+        stCb.dataset.key = key;
+        stLbl.appendChild(stCb);
+        stLbl.appendChild(el("span", { textContent: "Stereo" }));
+        fields.appendChild(stLbl);
+      }
+      row.appendChild(fields);
+      list.appendChild(row);
+    });
+    card.appendChild(list);
+    return card;
+  }
+  function syncClipLedRowDisabled(key) {
+    const refs = _clipLedInputs[key];
+    if (!refs) return;
+    const on = !!refs.enCb.checked;
+    refs.portSel.disabled = !on;
+    refs.pinInp.disabled = !on;
+    refs.activeLowCb.disabled = !on;
+    if (refs.row) refs.row.classList.toggle("is-disabled", !on);
+  }
+  function renderClipLedsFromContext() {
+    const ctx = getContext();
+    const map = ctx.clipLedsConfig || {};
+    CLIP_LED_KEYS.forEach((key) => {
+      const refs = _clipLedInputs[key];
+      const cfg = map[key] || { enabled: false, port: "A", pin: 0, activeLow: false };
+      if (!refs) return;
+      refs.enCb.checked = !!cfg.enabled;
+      refs.portSel.value = cfg.port === "B" ? "B" : "A";
+      refs.pinInp.value = String(Math.max(0, Math.min(7, Math.round(cfg.pin || 0))));
+      refs.activeLowCb.checked = !!cfg.activeLow;
+      syncClipLedRowDisabled(key);
+    });
+  }
+  function buildAdvancedView() {
+    const view = el("div", { className: "map-subview", id: "ignored-pots-section" });
+    view.dataset.subview = "advanced";
+    const ignCard = el("div", { className: "card" });
+    const hdr = el("div", { className: "card-header-row" });
+    hdr.appendChild(el("div", { className: "card-title", textContent: "Excluded MUX Pins" }));
+    hdr.appendChild(el("span", { id: "ign-count-label", className: "card-meta", textContent: "0 / 32" }));
+    ignCard.appendChild(hdr);
+    const tb = el("div", { className: "map-ign-toolbar" });
+    const btnAdd = el("button", { id: "btn-add-ignored", className: "dev-small-btn", type: "button", textContent: "+ Add Pin" });
+    btnAdd.addEventListener("click", () => addIgnoredPotRow());
+    const btnAuto = el("button", {
+      id: "btn-auto-ignored",
+      className: "dev-small-btn",
+      type: "button",
+      textContent: "Auto-ignore unmapped",
+      title: "Detect all MUX channels not assigned to any pot"
+    });
+    btnAuto.addEventListener("click", autoIgnoreUnmappedPins);
+    tb.appendChild(btnAdd);
+    tb.appendChild(btnAuto);
+    ignCard.appendChild(tb);
+    const list = el("div", { id: "ign-tbody", className: "map-ign-list" });
+    ignCard.appendChild(list);
+    view.appendChild(ignCard);
+    const clipCard = el("div", { className: "card" });
+    const clipHdr = el("div", { className: "card-header-row" });
+    clipHdr.appendChild(el("div", { className: "card-title", textContent: "Clip LEDs (MCP23017)" }));
+    clipHdr.appendChild(el("span", { className: "card-meta", textContent: "Output GPIO pins" }));
+    clipCard.appendChild(clipHdr);
+    const clipList = el("div", { id: "map-clip-leds-list", className: "map-clip-list" });
+    CLIP_LED_KEYS.forEach((key) => {
+      const row = el("div", { className: "map-clip-row" });
+      row.dataset.clipKey = key;
+      const enLbl = el("label", { className: "map-io-check map-clip-name" });
+      const enCb = el("input", { type: "checkbox", className: "clip-en" });
+      enLbl.appendChild(enCb);
+      enLbl.appendChild(el("span", { textContent: CLIP_LED_LABELS[key] || key }));
+      row.appendChild(enLbl);
+      const fields = el("div", { className: "map-io-fields" });
+      const portF = el("label", { className: "map-field" });
+      portF.appendChild(el("span", { className: "map-field-lbl", textContent: "Port" }));
+      const portSel = el("select", { className: "clip-port map-select", "aria-label": `${CLIP_LED_LABELS[key]} LED port` });
+      portSel.innerHTML = '<option value="A">A</option><option value="B">B</option>';
+      portF.appendChild(portSel);
+      fields.appendChild(portF);
+      const pinF = el("label", { className: "map-field" });
+      pinF.appendChild(el("span", { className: "map-field-lbl", textContent: "Pin" }));
+      const pinInp = el("input", {
+        type: "number",
+        min: "0",
+        max: "7",
+        value: "0",
+        className: "clip-pin map-num",
+        "aria-label": `${CLIP_LED_LABELS[key]} LED pin`
+      });
+      pinF.appendChild(pinInp);
+      fields.appendChild(pinF);
+      const alLbl = el("label", { className: "map-io-check", title: "LOW turns LED on instead of HIGH" });
+      const alCb = el("input", { type: "checkbox", className: "clip-activelow" });
+      alLbl.appendChild(alCb);
+      alLbl.appendChild(el("span", { textContent: "Active Low" }));
+      fields.appendChild(alLbl);
+      row.appendChild(fields);
+      clipList.appendChild(row);
+      _clipLedInputs[key] = { row, enCb, portSel, pinInp, activeLowCb: alCb };
+      const onClipEdit = () => {
+        const ctx = getContext();
+        if (!ctx.clipLedsConfig) ctx.clipLedsConfig = {};
+        let pin = parseInt(pinInp.value, 10);
+        if (isNaN(pin)) pin = 0;
+        pin = Math.max(0, Math.min(7, pin));
+        pinInp.value = String(pin);
+        ctx.clipLedsConfig[key] = {
+          enabled: !!enCb.checked,
+          port: portSel.value === "B" ? "B" : "A",
+          pin,
+          activeLow: !!alCb.checked
+        };
+        syncClipLedRowDisabled(key);
+        ctx.mappingUserEdited = true;
+        markMappingDirty();
+        updateMappingConflicts();
+      };
+      enCb.addEventListener("change", onClipEdit);
+      portSel.addEventListener("change", onClipEdit);
+      pinInp.addEventListener("input", onClipEdit);
+      pinInp.addEventListener("change", onClipEdit);
+      alCb.addEventListener("change", onClipEdit);
+    });
+    clipCard.appendChild(clipList);
+    renderClipLedsFromContext();
+    view.appendChild(clipCard);
+    const bootCard = el("div", { className: "card" });
+    bootCard.appendChild(el("div", { className: "card-title", textContent: "Boot & System" }));
+    const bootRow = el("div", { className: "map-boot-row" });
+    const devLbl = el("label", { className: "map-io-check map-boot-check" });
+    const devCb = el("input", {
+      type: "checkbox",
+      id: "map-dev-mode-boot",
+      checked: !!getContext().devModeBoot
+    });
+    devCb.addEventListener("change", () => {
+      getContext().devModeBoot = !!devCb.checked;
+      getContext().mappingUserEdited = true;
+      markMappingDirty();
+    });
+    _devModeBootCb = devCb;
+    devLbl.appendChild(devCb);
+    devLbl.appendChild(el("span", { textContent: "Boot in Virtual Controls mode (developerMode)" }));
+    bootRow.appendChild(devLbl);
+    bootCard.appendChild(bootRow);
+    const sysRow = el("div", { className: "map-system-row" });
+    const sysHint = el("span", {
+      className: "map-system-hint",
+      textContent: "Full Linux OS reboot (~25\u201330 s). Temporarily disconnects Wi-Fi / hotspot."
+    });
+    const rebootBtn = el("button", {
+      type: "button",
+      id: "btn-reboot-bela",
+      className: "btn-danger-outline",
+      textContent: "Reboot Bela"
+    });
+    rebootBtn.addEventListener("click", confirmAndRebootBoard);
+    sysRow.appendChild(sysHint);
+    sysRow.appendChild(rebootBtn);
+    bootCard.appendChild(sysRow);
+    view.appendChild(bootCard);
+    const hwCard = el("div", { className: "card" });
+    hwCard.appendChild(el("div", { className: "card-title", textContent: "Hardware Info" }));
+    const hwGrid = el("div", { className: "map-hw-grid" });
+    [
+      { id: "hw-mux", label: "Active MUX", def: "\u2014" },
+      { id: "hw-mcp", label: "MCP23017", def: "\u2014" },
+      { id: "hw-i2c", label: "I2C Bus", def: I2C_BUS },
+      { id: "hw-min", label: "Pot Min", def: "\u2014" },
+      { id: "hw-max", label: "Pot Max", def: "\u2014" },
+      { id: "hw-scale", label: "Scale", def: "\u2014" }
+    ].forEach((item) => {
+      const box = el("div", { className: "map-hw-item" });
+      box.appendChild(el("div", { className: "map-hw-k", textContent: item.label }));
+      const valEl = el("div", { className: "map-hw-v", textContent: item.def });
+      _hwValues[item.id] = valEl;
+      box.appendChild(valEl);
+      hwGrid.appendChild(box);
+    });
+    hwCard.appendChild(hwGrid);
+    view.appendChild(hwCard);
+    return view;
+  }
+  function getEffectiveHwInfo() {
+    const ctx = getContext();
+    const base = ctx.loadedConfigBase || ctx.boardConfigJson || {};
+    const meta = ctx.configMeta;
+    const M = CONFIG_META;
+    const activeMux = base.mux && typeof base.mux.activeMux === "number" ? Math.round(base.mux.activeMux) : meta ? Math.round(meta[M.ACTIVE_MUX]) : 8;
+    const mcpAddr = base.i2c && typeof base.i2c.mcpAddress === "number" ? Math.round(base.i2c.mcpAddress) : meta ? Math.round(meta[M.MCP_ADDR]) : 32;
+    const i2cBus = base.i2c && typeof base.i2c.bus === "string" && base.i2c.bus ? base.i2c.bus : I2C_BUS;
+    const potMin = base.calibration && typeof base.calibration.potMin === "number" ? base.calibration.potMin : meta ? +meta[M.POT_MIN].toFixed(3) : 5e-3;
+    const potMax = base.calibration && typeof base.calibration.potMax === "number" ? base.calibration.potMax : meta ? +meta[M.POT_MAX].toFixed(3) : 0.997;
+    const potScaleRecovery = base.calibration && typeof base.calibration.potScaleRecovery === "number" ? base.calibration.potScaleRecovery : meta ? +meta[M.SCALE].toFixed(4) : 1.2412;
+    return { activeMux, mcpAddress: mcpAddr, bus: i2cBus, potMin, potMax, potScaleRecovery };
+  }
+  function updateHardwareSummaryFromMeta() {
+    const ctx = getContext();
+    if (!ctx.configMeta && !ctx.loadedConfigBase && !ctx.boardConfigJson) return;
+    const hw = getEffectiveHwInfo();
+    if (_hwValues["hw-mux"]) _hwValues["hw-mux"].textContent = String(hw.activeMux);
+    if (_hwValues["hw-mcp"]) _hwValues["hw-mcp"].textContent = "0x" + hw.mcpAddress.toString(16).toUpperCase();
+    if (_hwValues["hw-i2c"]) _hwValues["hw-i2c"].textContent = hw.bus;
+    if (_hwValues["hw-min"]) _hwValues["hw-min"].textContent = Number(hw.potMin).toFixed(3);
+    if (_hwValues["hw-max"]) _hwValues["hw-max"].textContent = Number(hw.potMax).toFixed(3);
+    if (_hwValues["hw-scale"]) _hwValues["hw-scale"].textContent = Number(hw.potScaleRecovery).toFixed(4);
+  }
+  function autoIgnoreUnmappedPins() {
+    const activeMux = getActiveMuxCount();
+    const next = [];
+    for (let m = 0; m < activeMux; m++) {
+      for (let p = 0; p < MUX_POTS_PER_MUX; p++) {
+        if (!isPotMapped(m, p) && next.length < 32) {
+          next.push({ mux: m, pot: p });
         }
       }
-      tr.innerHTML = cells;
-      tbody.appendChild(tr);
-    });
-    if (isOut) {
-      tbody.querySelectorAll(".ri-stereo").forEach((cb) => {
-        cb.addEventListener("change", () => {
-          if (typeof window.Bela !== "undefined" && window.Bela.control) {
-            window.Bela.control.send({ event: "custom", masterStereo: !!cb.checked });
-          }
-        });
-      });
     }
-    return wrap;
+    getContext().ignoredPotsList = next;
+    getContext().ignoredPotsUserEdited = true;
+    markMappingDirty();
+    cleanConsoleOfIgnored();
+    renderIgnoredPotsTable();
+    updateMappingConflicts();
   }
   function formatRoutingValue(raw, asArray) {
     if (asArray || Array.isArray(raw)) {
@@ -3463,11 +3584,60 @@ border-radius:6px;background:transparent;
     const n = parseInt(text, 10);
     return isNaN(n) ? null : n;
   }
+  function applyRoutingObjectToForm(routing) {
+    if (!routing || typeof routing !== "object") return;
+    const inObj = routing.in || {};
+    const outObj = routing.out || {};
+    document.querySelectorAll(".ri").forEach((inp) => {
+      const dir = inp.dataset.dir;
+      const key = inp.dataset.key;
+      const src = dir === "in" ? inObj[key] : outObj[key];
+      if (src === void 0) return;
+      const ch = dir === "in" ? routingInChannel(src) : routingOutChannel(src);
+      inp.value = formatRoutingValue(ch, key === "master" || key.startsWith("aux"));
+    });
+    document.querySelectorAll(".ri-gain").forEach((inp) => {
+      const dir = inp.dataset.dir;
+      const key = inp.dataset.key;
+      const src = dir === "in" ? inObj[key] : outObj[key];
+      if (src === void 0) return;
+      inp.value = String(routingGain(src));
+    });
+    document.querySelectorAll(".ri-mic").forEach((cb) => {
+      const src = inObj[cb.dataset.key];
+      if (src !== void 0) cb.checked = routingInMic(src);
+    });
+    document.querySelectorAll(".ri-hpf").forEach((inp) => {
+      const src = inObj[inp.dataset.key];
+      if (src !== void 0) inp.value = String(Math.round(routingInHpf(src)));
+    });
+    document.querySelectorAll(".ri-stereo").forEach((cb) => {
+      const src = outObj[cb.dataset.key];
+      if (src !== void 0) cb.checked = routingOutStereo(src);
+    });
+    updateMappingConflicts();
+  }
   function fillRoutingFromConfigMeta() {
-    if (getContext().routingFilledFromMeta || !getContext().configMeta) return;
-    getContext().routingFilledFromMeta = true;
+    const ctx = getContext();
+    if (!ctx.configMeta) return;
+    updateHardwareSummaryFromMeta();
     const M = CONFIG_META;
-    const meta = getContext().configMeta;
+    const meta = ctx.configMeta;
+    if (!ctx.mappingUserEdited && !ctx.boardConfigJson) {
+      if (meta.length > M.DEV_MODE_BOOT) {
+        ctx.devModeBoot = meta[M.DEV_MODE_BOOT] > 0.5;
+        if (_devModeBootCb) _devModeBootCb.checked = ctx.devModeBoot;
+      }
+      if (meta.length >= M.CLIP_LED_BASE + CLIP_LED_KEYS.length) {
+        if (!ctx.clipLedsConfig) ctx.clipLedsConfig = {};
+        CLIP_LED_KEYS.forEach((key, idx) => {
+          ctx.clipLedsConfig[key] = decodeClipLedMeta(meta[M.CLIP_LED_BASE + idx]);
+        });
+        renderClipLedsFromContext();
+      }
+    }
+    if (ctx.routingFilledFromConfigJson || ctx.routingFilledFromMeta) return;
+    ctx.routingFilledFromMeta = true;
     const masterCount = Math.round(meta[M.MASTER_COUNT]);
     const masterOuts = [];
     if (masterCount > 0) masterOuts.push(Math.round(meta[M.MASTER_0]));
@@ -3516,16 +3686,14 @@ border-radius:6px;background:transparent;
       inp.value = formatRoutingValue(raw, key === "master" || key.startsWith("aux"));
     });
     document.querySelectorAll(".ri-mic").forEach((cb) => {
-      const key = cb.dataset.key;
-      cb.checked = !!micFlags[key];
+      cb.checked = !!micFlags[cb.dataset.key];
     });
     const isMasterStereo = meta.length > M.MASTER_STEREO ? meta[M.MASTER_STEREO] > 0.5 : true;
     document.querySelectorAll(".ri-stereo").forEach((cb) => {
       cb.checked = isMasterStereo;
     });
     document.querySelectorAll(".ri-hpf").forEach((inp) => {
-      const key = inp.dataset.key;
-      const hz = hpfHz[key];
+      const hz = hpfHz[inp.dataset.key];
       inp.value = hz != null ? String(Math.round(hz)) : "0";
     });
     updateMappingConflicts();
@@ -3544,7 +3712,7 @@ border-radius:6px;background:transparent;
       return cb ? !!cb.checked : false;
     };
     const readMasterStereo = () => {
-      const cb = document.querySelector(`.ri-stereo[data-key="master"]`);
+      const cb = document.querySelector('.ri-stereo[data-key="master"]');
       return cb ? !!cb.checked : true;
     };
     const readHpf = (key) => {
@@ -3559,8 +3727,7 @@ border-radius:6px;background:transparent;
       if (!inp) return 0;
       const n = parseFloat(inp.value);
       if (isNaN(n)) return 0;
-      if (dir === "in")
-        return Math.min(INPUT_GAIN_MAX2, Math.max(INPUT_GAIN_MIN2, Math.round(n)));
+      if (dir === "in") return Math.min(INPUT_GAIN_MAX2, Math.max(INPUT_GAIN_MIN2, Math.round(n)));
       return Math.min(OUTPUT_GAIN_MAX2, Math.max(OUTPUT_GAIN_MIN2, Math.round(n)));
     };
     const out = {};
@@ -3579,88 +3746,256 @@ border-radius:6px;background:transparent;
     ROUTING_IN_KEYS.forEach((key) => {
       const ch = readChannel("in", key);
       if (ch === void 0) return;
+      const isAux = key.startsWith("aux");
       inn[key] = {
         channels: Array.isArray(ch) ? ch : [ch],
-        mic: readMic(key),
-        hpf: readHpf(key),
+        mic: isAux ? readMic(key) : false,
+        hpf: isAux ? readHpf(key) : 0,
         gain: readGain("in", key)
       };
     });
     return { out, in: inn };
   }
   function tryBuildMappingTable() {
-    if (getContext().mappingBuilt || !getContext().potMapping || !getContext().switchMapping) return;
-    getContext().mappingBuilt = true;
-    const ptbody = document.getElementById("pot-tbody");
-    if (ptbody) {
-      ptbody.innerHTML = "";
-      POT_NAMES.forEach((name, i) => {
-        const mux = Math.round(getContext().potMapping[i * 4 + 0]);
-        const pot = Math.round(getContext().potMapping[i * 4 + 1]);
-        const rev = getContext().potMapping[i * 4 + 2] > 0.5;
-        const cen = isPotCentered(name);
-        getContext().potMapping[i * 4 + 3] = cen ? 1 : 0;
-        const tr = document.createElement("tr");
-        tr.dataset.mapTable = "pot";
-        tr.dataset.mapIndex = String(i);
-        tr.innerHTML = `<td class="pname" title="${name}">${name}</td><td><input type="number" min="0" max="7"  value="${mux}" data-i="${i}" data-f="mux" class="pi"></td><td><input type="number" min="0" max="9"  value="${pot}" data-i="${i}" data-f="pot" class="pi"></td><td class="col-check"><input type="checkbox" ${rev ? "checked" : ""} data-i="${i}" data-f="rev" class="pi"></td><td class="col-check"><input type="checkbox" ${cen ? "checked" : ""} data-i="${i}" data-f="cen" class="pi" disabled title="Fixed by DSP: ${cen ? "Centered (bipolar 0 dB at 12 o'clock)" : "Linear / Unipolar"}"></td><td class="detect-cell"></td>`;
-        tr.querySelector(".detect-cell").appendChild(createDetectButton("pot", i));
-        ptbody.appendChild(tr);
+    const ctx = getContext();
+    if (ctx.mappingBuilt || !ctx.potMapping || !ctx.switchMapping) return;
+    ctx.mappingBuilt = true;
+    const host = document.getElementById("map-groups-host");
+    if (host) {
+      host.innerHTML = "";
+      CONTROL_GROUPS.forEach((grpDef) => {
+        const grp = el("div", { className: "map-group" });
+        grp.dataset.groupId = grpDef.id;
+        grp.dataset.collapsed = grpDef.defaultOpen ? "false" : "true";
+        const hdr = el("button", {
+          type: "button",
+          className: "map-group-hdr",
+          "aria-expanded": grpDef.defaultOpen ? "true" : "false"
+        });
+        hdr.appendChild(el("span", { className: "map-group-title", textContent: grpDef.title }));
+        hdr.appendChild(el("span", { className: "map-group-count", textContent: String(grpDef.items.length) }));
+        hdr.addEventListener("click", () => {
+          const nextClosed = grp.dataset.collapsed !== "true";
+          grp.dataset.collapsed = nextClosed ? "true" : "false";
+          hdr.setAttribute("aria-expanded", nextClosed ? "false" : "true");
+        });
+        grp.appendChild(hdr);
+        const body = el("div", { className: "map-group-body" });
+        grpDef.items.forEach((item) => {
+          if (item.table === "pot") {
+            const i = POT_INDEX[item.name];
+            if (i === void 0) return;
+            const mux = Math.round(ctx.potMapping[i * 4 + 0]);
+            const pot = Math.round(ctx.potMapping[i * 4 + 1]);
+            const rev = ctx.potMapping[i * 4 + 2] > 0.5;
+            ctx.potMapping[i * 4 + 3] = isPotCentered(item.name) ? 1 : 0;
+            const row = el("div", { className: "map-row" });
+            row.dataset.mapTable = "pot";
+            row.dataset.mapIndex = String(i);
+            row.dataset.search = `${grpDef.title} ${item.label} ${item.name}`;
+            const main = el("div", { className: "map-row-main" });
+            main.appendChild(el("div", { className: "map-row-name", textContent: item.label, title: item.name }));
+            row.appendChild(main);
+            const meter = el("div", { className: "map-live-meter", title: "Live pot position" });
+            const fill = el("div", { className: "map-live-fill" });
+            meter.appendChild(fill);
+            _potLiveFills[i] = fill;
+            row.appendChild(meter);
+            const fields = el("div", { className: "map-row-fields" });
+            const muxF = el("label", { className: "map-field" });
+            muxF.appendChild(el("span", { className: "map-field-lbl", textContent: "MUX" }));
+            const muxInp = el("input", {
+              type: "number",
+              min: "0",
+              max: "7",
+              value: String(mux),
+              className: "pi map-num",
+              "aria-label": `${item.label} MUX`
+            });
+            muxInp.dataset.i = String(i);
+            muxInp.dataset.f = "mux";
+            muxF.appendChild(muxInp);
+            const chF = el("label", { className: "map-field" });
+            chF.appendChild(el("span", { className: "map-field-lbl", textContent: "Ch" }));
+            const potInp = el("input", {
+              type: "number",
+              min: "0",
+              max: "9",
+              value: String(pot),
+              className: "pi map-num",
+              "aria-label": `${item.label} channel`
+            });
+            potInp.dataset.i = String(i);
+            potInp.dataset.f = "pot";
+            chF.appendChild(potInp);
+            fields.appendChild(muxF);
+            fields.appendChild(chF);
+            row.appendChild(fields);
+            const actions = el("div", { className: "map-row-actions" });
+            const revBtn = el("button", {
+              type: "button",
+              className: "btn-rev-toggle" + (rev ? " active" : ""),
+              textContent: "Rev",
+              title: "Reverse rotation direction",
+              "aria-label": `Reverse ${item.label}`,
+              "aria-pressed": rev ? "true" : "false"
+            });
+            revBtn.dataset.i = String(i);
+            revBtn.dataset.f = "rev";
+            revBtn.addEventListener("click", () => {
+              const nextRev = !revBtn.classList.contains("active");
+              setPotRevState(i, nextRev);
+              ctx.mappingUserEdited = true;
+              markMappingDirty();
+              updateMappingConflicts();
+            });
+            _potRevButtons[i] = revBtn;
+            actions.appendChild(revBtn);
+            actions.appendChild(createDetectButton("pot", i));
+            row.appendChild(actions);
+            const handlePotField = () => {
+              ctx.mappingUserEdited = true;
+              markMappingDirty();
+              ctx.potMapping[i * 4 + 0] = parseFloat(muxInp.value) || 0;
+              ctx.potMapping[i * 4 + 1] = parseFloat(potInp.value) || 0;
+              cleanConsoleOfIgnored();
+              updateMappingConflicts();
+            };
+            muxInp.addEventListener("input", handlePotField);
+            muxInp.addEventListener("change", handlePotField);
+            potInp.addEventListener("input", handlePotField);
+            potInp.addEventListener("change", handlePotField);
+            body.appendChild(row);
+          } else {
+            const i = SW_INDEX[item.name];
+            if (i === void 0) return;
+            const pin = Math.round(ctx.switchMapping[i * 3 + 0]);
+            const portB = ctx.switchMapping[i * 3 + 1] > 0.5;
+            const rev = ctx.switchMapping[i * 3 + 2] > 0.5;
+            const row = el("div", { className: "map-row" });
+            row.dataset.mapTable = "sw";
+            row.dataset.mapIndex = String(i);
+            row.dataset.search = `${grpDef.title} ${item.label} ${item.name} switch`;
+            const main = el("div", { className: "map-row-main" });
+            main.appendChild(el("div", { className: "map-row-name", textContent: item.label, title: item.name }));
+            row.appendChild(main);
+            const meter = el("div", { className: "map-live-meter", title: "Live switch state" });
+            const fill = el("div", { className: "map-live-fill sw" });
+            meter.appendChild(fill);
+            _swLiveFills[i] = fill;
+            row.appendChild(meter);
+            const fields = el("div", { className: "map-row-fields" });
+            const portF = el("label", { className: "map-field" });
+            portF.appendChild(el("span", { className: "map-field-lbl", textContent: "Port" }));
+            const portSel = el("select", { className: "si map-select", "aria-label": `${item.label} port` });
+            portSel.dataset.i = String(i);
+            portSel.dataset.f = "port";
+            portSel.innerHTML = `<option value="0"${!portB ? " selected" : ""}>A</option><option value="1"${portB ? " selected" : ""}>B</option>`;
+            portF.appendChild(portSel);
+            const pinF = el("label", { className: "map-field" });
+            pinF.appendChild(el("span", { className: "map-field-lbl", textContent: "Pin" }));
+            const pinInp = el("input", {
+              type: "number",
+              min: "0",
+              max: "7",
+              value: String(pin),
+              className: "si map-num",
+              "aria-label": `${item.label} pin`
+            });
+            pinInp.dataset.i = String(i);
+            pinInp.dataset.f = "pin";
+            pinF.appendChild(pinInp);
+            fields.appendChild(portF);
+            fields.appendChild(pinF);
+            row.appendChild(fields);
+            const actions = el("div", { className: "map-row-actions" });
+            const revBtn = el("button", {
+              type: "button",
+              className: "btn-rev-toggle" + (rev ? " active" : ""),
+              textContent: "Rev",
+              title: "Invert active polarity",
+              "aria-label": `Invert ${item.label}`,
+              "aria-pressed": rev ? "true" : "false"
+            });
+            revBtn.dataset.i = String(i);
+            revBtn.dataset.f = "rev";
+            revBtn.addEventListener("click", () => {
+              const nextRev = !revBtn.classList.contains("active");
+              setSwitchRevState(i, nextRev);
+              ctx.mappingUserEdited = true;
+              markMappingDirty();
+              updateMappingConflicts();
+            });
+            _swRevButtons[i] = revBtn;
+            actions.appendChild(revBtn);
+            actions.appendChild(createDetectButton("sw", i));
+            row.appendChild(actions);
+            const handleSwField = () => {
+              ctx.mappingUserEdited = true;
+              markMappingDirty();
+              ctx.switchMapping[i * 3 + 0] = parseFloat(pinInp.value) || 0;
+              ctx.switchMapping[i * 3 + 1] = parseFloat(portSel.value) || 0;
+              updateMappingConflicts();
+            };
+            pinInp.addEventListener("input", handleSwField);
+            pinInp.addEventListener("change", handleSwField);
+            portSel.addEventListener("input", handleSwField);
+            portSel.addEventListener("change", handleSwField);
+            body.appendChild(row);
+          }
+        });
+        grp.appendChild(body);
+        host.appendChild(grp);
       });
     }
-    const stbody = document.getElementById("sw-tbody");
-    if (stbody) {
-      stbody.innerHTML = "";
-      SWITCH_NAMES.forEach((name, i) => {
-        const pin = Math.round(getContext().switchMapping[i * 3 + 0]);
-        const portB = getContext().switchMapping[i * 3 + 1] > 0.5;
-        const rev = getContext().switchMapping[i * 3 + 2] > 0.5;
-        const tr = document.createElement("tr");
-        tr.dataset.mapTable = "sw";
-        tr.dataset.mapIndex = String(i);
-        tr.innerHTML = `<td class="pname" title="${name}">${name}</td><td><input type="number" min="0" max="7" value="${pin}" data-i="${i}" data-f="pin" class="si"></td><td><select data-i="${i}" data-f="port" class="si"><option value="0"${!portB ? " selected" : ""}>A</option><option value="1"${portB ? " selected" : ""}>B</option></select></td><td class="col-check"><input type="checkbox" ${rev ? "checked" : ""} data-i="${i}" data-f="rev" class="si"></td><td class="detect-cell"></td>`;
-        tr.querySelector(".detect-cell").appendChild(createDetectButton("sw", i));
-        stbody.appendChild(tr);
-      });
-    }
-    document.querySelectorAll(".pi").forEach((inp) => {
-      const handler = () => {
-        getContext().mappingUserEdited = true;
-        if (getContext().potMapping) {
-          const i = parseInt(inp.dataset.i, 10);
-          const f = inp.dataset.f;
-          if (f === "mux") getContext().potMapping[i * 4 + 0] = parseFloat(inp.value) || 0;
-          if (f === "pot") getContext().potMapping[i * 4 + 1] = parseFloat(inp.value) || 0;
-          if (f === "rev") getContext().potMapping[i * 4 + 2] = inp.checked ? 1 : 0;
-          if (f === "cen") getContext().potMapping[i * 4 + 3] = inp.checked ? 1 : 0;
-        }
-        cleanConsoleOfIgnored();
-        updateMappingConflicts();
-      };
-      inp.addEventListener("input", handler);
-      inp.addEventListener("change", handler);
-    });
-    document.querySelectorAll(".si").forEach((inp) => {
-      const handler = () => {
-        getContext().mappingUserEdited = true;
-        if (getContext().switchMapping) {
-          const i = parseInt(inp.dataset.i, 10);
-          const f = inp.dataset.f;
-          if (f === "pin") getContext().switchMapping[i * 3 + 0] = parseFloat(inp.value) || 0;
-          if (f === "port") getContext().switchMapping[i * 3 + 1] = parseFloat(inp.value);
-          if (f === "rev") getContext().switchMapping[i * 3 + 2] = inp.checked ? 1 : 0;
-        }
-        updateMappingConflicts();
-      };
-      inp.addEventListener("input", handler);
-      inp.addEventListener("change", handler);
-    });
     renderIgnoredPotsTable();
     updateMappingConflicts();
+    applyControlFilters();
+  }
+  function setPotRevState(i, rev) {
+    const btn = _potRevButtons[i];
+    if (btn) {
+      btn.classList.toggle("active", !!rev);
+      btn.setAttribute("aria-pressed", rev ? "true" : "false");
+    }
+    if (getContext().potMapping) {
+      getContext().potMapping[i * 4 + 2] = rev ? 1 : 0;
+    }
+  }
+  function setSwitchRevState(i, rev) {
+    const btn = _swRevButtons[i];
+    if (btn) {
+      btn.classList.toggle("active", !!rev);
+      btn.setAttribute("aria-pressed", rev ? "true" : "false");
+    }
+    if (getContext().switchMapping) {
+      getContext().switchMapping[i * 3 + 2] = rev ? 1 : 0;
+    }
+  }
+  function updateMappingLive() {
+    const ctx = getContext();
+    if (!ctx.mappingBuilt || ctx.mappingSubTab !== "controls") return;
+    if (ctx.potValues) {
+      for (let i = 0; i < POT_NAMES.length; i++) {
+        const fill = _potLiveFills[i];
+        if (!fill) continue;
+        const pct = Math.max(0, Math.min(100, (ctx.potValues[i] || 0) * 100)).toFixed(0) + "%";
+        if (fill.style.width !== pct) fill.style.width = pct;
+      }
+    }
+    if (ctx.switchStates) {
+      for (let i = 0; i < SWITCH_NAMES.length; i++) {
+        const fill = _swLiveFills[i];
+        if (!fill) continue;
+        const on = (ctx.switchStates[i] || 0) > 0.5;
+        const pct = on ? "100%" : "0%";
+        if (fill.style.width !== pct) fill.style.width = pct;
+      }
+    }
   }
   function updateMappingConflicts() {
     const messages = [];
-    document.querySelectorAll("#pot-tbody tr, #sw-tbody tr, #ign-tbody tr, #routing-in-tbody tr, #routing-out-tbody tr").forEach((tr) => tr.classList.remove("dup-conflict"));
+    document.querySelectorAll(".map-row, .map-ign-row, .map-io-row, .map-clip-row").forEach((row) => row.classList.remove("dup-conflict"));
     if (getContext().mappingBuilt) {
       const potGroups = /* @__PURE__ */ new Map();
       for (let i = 0; i < POT_NAMES.length; i++) {
@@ -3678,14 +4013,13 @@ border-radius:6px;background:transparent;
         if (indices.length < 2) return;
         const parts = key.split(":");
         const names = indices.map((i) => POT_NAMES[i]).join(", ");
-        messages.push("Pot MUX " + parts[0] + " / channel " + parts[1] + " : " + names);
+        messages.push(`Pot MUX ${parts[0]} / Ch ${parts[1]}: ${names}`);
         indices.forEach((i) => {
-          const inp = document.querySelector(`.pi[data-i="${i}"][data-f="mux"]`);
-          const tr = inp && inp.closest("tr");
-          if (tr) tr.classList.add("dup-conflict");
+          const row = document.querySelector(`.map-row[data-map-table="pot"][data-map-index="${i}"]`);
+          if (row) row.classList.add("dup-conflict");
         });
       });
-      const swGroups = /* @__PURE__ */ new Map();
+      const mcpGroups = /* @__PURE__ */ new Map();
       for (let i = 0; i < SWITCH_NAMES.length; i++) {
         const pinInp = document.querySelector(`.si[data-i="${i}"][data-f="pin"]`);
         const portInp = document.querySelector(`.si[data-i="${i}"][data-f="port"]`);
@@ -3694,19 +4028,34 @@ border-radius:6px;background:transparent;
         const port = parseInt(portInp.value, 10);
         if (isNaN(pin) || isNaN(port)) continue;
         const key = port + ":" + pin;
-        if (!swGroups.has(key)) swGroups.set(key, []);
-        swGroups.get(key).push(i);
+        if (!mcpGroups.has(key)) mcpGroups.set(key, []);
+        mcpGroups.get(key).push({ kind: "sw", idx: i, label: SWITCH_NAMES[i] });
       }
-      swGroups.forEach((indices, key) => {
-        if (indices.length < 2) return;
+      const clipCfg = getContext().clipLedsConfig || {};
+      CLIP_LED_KEYS.forEach((clipKey) => {
+        const c = clipCfg[clipKey];
+        if (!c || !c.enabled) return;
+        const portNum = c.port === "B" ? 1 : 0;
+        const pin = Math.round(Number(c.pin));
+        if (isNaN(pin)) return;
+        const key = portNum + ":" + pin;
+        if (!mcpGroups.has(key)) mcpGroups.set(key, []);
+        mcpGroups.get(key).push({ kind: "clip", key: clipKey, label: `Clip ${CLIP_LED_LABELS[clipKey] || clipKey}` });
+      });
+      mcpGroups.forEach((entries, key) => {
+        if (entries.length < 2) return;
         const parts = key.split(":");
         const portLabel = parts[0] === "1" ? "B" : "A";
-        const names = indices.map((i) => SWITCH_NAMES[i]).join(", ");
-        messages.push("Switch port " + portLabel + " / pin " + parts[1] + " : " + names);
-        indices.forEach((i) => {
-          const inp = document.querySelector(`.si[data-i="${i}"][data-f="pin"]`);
-          const tr = inp && inp.closest("tr");
-          if (tr) tr.classList.add("dup-conflict");
+        const names = entries.map((e) => e.label).join(", ");
+        messages.push(`MCP23017 Port ${portLabel} / Pin ${parts[1]}: ${names}`);
+        entries.forEach((e) => {
+          if (e.kind === "sw") {
+            const row = document.querySelector(`.map-row[data-map-table="sw"][data-map-index="${e.idx}"]`);
+            if (row) row.classList.add("dup-conflict");
+          } else {
+            const row = document.querySelector(`.map-clip-row[data-clip-key="${e.key}"]`);
+            if (row) row.classList.add("dup-conflict");
+          }
         });
       });
     }
@@ -3720,9 +4069,9 @@ border-radius:6px;background:transparent;
         chans.forEach((ch) => {
           if (typeof ch !== "number" || isNaN(ch) || ch < 0) return;
           if (seenInField.has(ch)) {
-            messages.push("Routing " + dir + " channel " + ch + " : " + inp.dataset.key + " lists it more than once");
-            const tr = inp.closest("tr");
-            if (tr) tr.classList.add("dup-conflict");
+            messages.push(`Audio ${dir} Ch ${ch}: ${ROUTING_LABELS[inp.dataset.key] || inp.dataset.key} duplicate`);
+            const row = inp.closest(".map-io-row");
+            if (row) row.classList.add("dup-conflict");
             return;
           }
           seenInField.add(ch);
@@ -3733,10 +4082,10 @@ border-radius:6px;background:transparent;
       groups.forEach((entries, ch) => {
         const keys = [...new Set(entries.map((e) => e.key))];
         if (keys.length < 2) return;
-        messages.push("Routing " + dir + " channel " + ch + " : " + keys.join(", "));
+        messages.push(`Audio ${dir} Ch ${ch}: ${keys.map((k) => ROUTING_LABELS[k] || k).join(", ")}`);
         entries.forEach((e) => {
-          const tr = e.inp.closest("tr");
-          if (tr) tr.classList.add("dup-conflict");
+          const row = e.inp.closest(".map-io-row");
+          if (row) row.classList.add("dup-conflict");
         });
       });
     });
@@ -3750,54 +4099,64 @@ border-radius:6px;background:transparent;
       ignGroups.forEach((indices, key) => {
         if (indices.length < 2) return;
         const parts = key.split(":");
-        messages.push("Ignored pots duplicate MUX " + parts[0] + " / channel " + parts[1]);
+        messages.push(`Excluded MUX ${parts[0]} / Ch ${parts[1]} duplicated`);
         indices.forEach((idx) => {
-          const tr = document.querySelector(`#ign-tbody tr[data-ign-index="${idx}"]`);
-          if (tr) tr.classList.add("dup-conflict");
+          const row = document.querySelector(`.map-ign-row[data-ign-index="${idx}"]`);
+          if (row) row.classList.add("dup-conflict");
         });
       });
     }
-    document.querySelectorAll("#ign-tbody tr[data-ign-index]").forEach((tr) => {
-      const idx = parseInt(tr.dataset.ignIndex, 10);
-      if (getContext().ignoredPotsList && getContext().ignoredPotsList[idx]) {
-        const item = getContext().ignoredPotsList[idx];
-        const name = getMappedPotName(item.mux, item.pot);
-        const statusCell = tr.querySelector(".ign-status");
-        if (statusCell) {
-          statusCell.innerHTML = name ? `<span class="pname" title="${name}">${name}</span> <span style="font-size:10px; color:#e67e22; font-weight:600;">(Mapped)</span>` : `<span style="color:#7f8c8d; font-size:11px; font-style:italic;">Unassigned / Floating</span>`;
+    document.querySelectorAll(".map-ign-row[data-ign-index]").forEach((row) => {
+      const idx = parseInt(row.dataset.ignIndex, 10);
+      const list2 = getContext().ignoredPotsList;
+      if (list2 && list2[idx]) {
+        const name = getMappedPotName(list2[idx].mux, list2[idx].pot);
+        const statusEl = row.querySelector(".map-ign-status");
+        if (statusEl) {
+          statusEl.className = "map-ign-status" + (name ? " mapped" : "");
+          statusEl.textContent = name ? `Mapped: ${name}` : "Floating / Unassigned";
         }
       }
     });
+    const pill = document.getElementById("map-conflict-pill");
+    if (pill) {
+      pill.classList.toggle("show", messages.length > 0);
+      pill.textContent = messages.length === 1 ? "1 Conflict" : `${messages.length} Conflicts`;
+    }
     const banner = document.getElementById("mapping-conflicts");
     const list = document.getElementById("mapping-conflicts-list");
     if (!banner || !list) return;
     if (messages.length === 0) {
       banner.classList.remove("show");
       list.innerHTML = "";
+      if (getContext().mappingFilter === "conflicts") applyControlFilters();
       return;
     }
     banner.classList.add("show");
     list.innerHTML = messages.map((m) => "<li>" + m + "</li>").join("");
+    if (getContext().mappingFilter === "conflicts") applyControlFilters();
   }
   function createDetectButton(table, index) {
-    const btn = el("button", { className: "btn-detect-row", type: "button" });
-    btn.textContent = "Map";
-    btn.title = "Detect control";
+    const btn = el("button", { className: "btn-detect-row", type: "button", textContent: "Learn" });
+    btn.title = "Auto-detect physical control";
     btn.dataset.table = table;
     btn.dataset.index = String(index);
     btn.addEventListener("click", (e) => {
       e.stopPropagation();
-      if (getContext().detectMode && getContext().detectMode.table === table && getContext().detectMode.targetIndex === index)
+      if (getContext().detectMode && getContext().detectMode.table === table && getContext().detectMode.targetIndex === index) {
         cancelDetect();
-      else
+      } else {
+        getContext().mappingGuided = null;
+        updateGuidedBar();
         startDetect(table, index);
+      }
     });
     return btn;
   }
   function showDetectStatus(msg, isError) {
     if (!getContext().detectStatusEl) return;
     getContext().detectStatusEl.textContent = msg;
-    getContext().detectStatusEl.className = isError ? "show err" : "show";
+    getContext().detectStatusEl.className = isError ? "map-conflicts-box show" : "map-guided-bar listening";
   }
   function hideDetectStatus() {
     if (!getContext().detectStatusEl) return;
@@ -3805,23 +4164,135 @@ border-radius:6px;background:transparent;
     getContext().detectStatusEl.className = "";
   }
   function setDetectUiActive(active) {
-    document.querySelectorAll(".btn-detect-row").forEach((btn) => {
+    document.querySelectorAll(".btn-detect-row[data-table]").forEach((btn) => {
       const t = btn.dataset.table;
       const i = parseInt(btn.dataset.index, 10);
       const isTarget = active && getContext().detectMode && getContext().detectMode.table === t && getContext().detectMode.targetIndex === i;
-      btn.textContent = isTarget ? "\xD7" : "Det";
-      btn.title = isTarget ? "Cancel detect" : "Detect control";
+      btn.textContent = isTarget ? "Cancel" : "Learn";
       btn.classList.toggle("detect-active", isTarget);
       btn.disabled = active && !isTarget;
     });
-    document.querySelectorAll("#pot-tbody tr, #sw-tbody tr").forEach((row) => row.classList.remove("row-detecting"));
+    document.querySelectorAll(".map-row").forEach((row) => row.classList.remove("row-detecting"));
     if (active && getContext().detectMode) {
-      const tbody = getContext().detectMode.table === "pot" ? "#pot-tbody" : "#sw-tbody";
-      const tr = document.querySelector(
-        `${tbody} tr[data-map-index="${getContext().detectMode.targetIndex}"]`
+      const row = document.querySelector(
+        `.map-row[data-map-table="${getContext().detectMode.table}"][data-map-index="${getContext().detectMode.targetIndex}"]`
       );
-      if (tr) tr.classList.add("row-detecting");
+      if (row) {
+        row.classList.add("row-detecting");
+        const grp = row.closest(".map-group");
+        if (grp && grp.dataset.collapsed === "true") {
+          grp.dataset.collapsed = "false";
+          const hdr = grp.querySelector(".map-group-hdr");
+          if (hdr) hdr.setAttribute("aria-expanded", "true");
+        }
+        if (getContext().mappingGuided) {
+          row.scrollIntoView({ behavior: "smooth", block: "nearest" });
+        }
+      }
     }
+  }
+  function buildGuidedQueue() {
+    const queue = [];
+    CONTROL_GROUPS.forEach((grp) => {
+      grp.items.forEach((item) => {
+        const index = item.table === "pot" ? POT_INDEX[item.name] : SW_INDEX[item.name];
+        if (index !== void 0) {
+          queue.push({
+            table: item.table,
+            index,
+            group: grp.title,
+            label: item.label
+          });
+        }
+      });
+    });
+    return queue;
+  }
+  function updateGuidedBar() {
+    const bar = document.getElementById("map-guided-bar");
+    const stepEl = document.getElementById("map-guided-step");
+    const promptEl = document.getElementById("map-guided-prompt");
+    const startBtn = document.getElementById("btn-guided-start");
+    const skipBtn = document.getElementById("btn-guided-skip");
+    const stopBtn = document.getElementById("btn-guided-stop");
+    if (!bar || !stepEl || !promptEl) return;
+    const guided = getContext().mappingGuided;
+    if (!guided) {
+      bar.classList.remove("listening");
+      stepEl.textContent = "Setup Assistant";
+      promptEl.textContent = "Map pots and switches step by step";
+      if (startBtn) startBtn.style.display = "";
+      if (skipBtn) skipBtn.style.display = "none";
+      if (stopBtn) stopBtn.style.display = "none";
+      return;
+    }
+    const cur = guided.queue[guided.cursor];
+    bar.classList.add("listening");
+    stepEl.textContent = `Step ${guided.cursor + 1} / ${guided.queue.length} \xB7 ${cur.group}`;
+    promptEl.textContent = cur.table === "pot" ? `${cur.label}: move physical pot (\u226525%)` : `${cur.label}: toggle physical switch`;
+    if (startBtn) startBtn.style.display = "none";
+    if (skipBtn) skipBtn.style.display = "";
+    if (stopBtn) stopBtn.style.display = "";
+  }
+  function startGuidedSetup() {
+    if (!getContext().mappingBuilt) {
+      showDetectStatus("Waiting for Bela mapping\u2026", true);
+      return;
+    }
+    if (typeof Bela === "undefined") {
+      showDetectStatus("Bela not connected", true);
+      return;
+    }
+    const queue = buildGuidedQueue();
+    if (!queue.length) return;
+    getContext().mappingGuided = { queue, cursor: 0 };
+    updateGuidedBar();
+    const cur = queue[0];
+    startDetect(cur.table, cur.index);
+  }
+  function skipGuidedStep() {
+    const guided = getContext().mappingGuided;
+    if (!guided) return;
+    if (_guidedTimer) {
+      clearTimeout(_guidedTimer);
+      _guidedTimer = null;
+    }
+    guided.cursor++;
+    if (guided.cursor >= guided.queue.length) {
+      showDownloadStatus("Guided setup complete \u2713", false);
+      cancelDetect();
+      return;
+    }
+    updateGuidedBar();
+    const next = guided.queue[guided.cursor];
+    startDetect(next.table, next.index);
+  }
+  function advanceGuidedAfterHit() {
+    const guided = getContext().mappingGuided;
+    if (!guided) {
+      cancelDetect();
+      return;
+    }
+    getContext().detectMode = null;
+    setDetectUiActive(false);
+    guided.cursor++;
+    if (guided.cursor >= guided.queue.length) {
+      showDownloadStatus("Guided setup complete \u2713", false);
+      getContext().mappingGuided = null;
+      updateGuidedBar();
+      hideDetectStatus();
+      return;
+    }
+    const promptEl = document.getElementById("map-guided-prompt");
+    if (promptEl) promptEl.textContent = "Detected \u2014 preparing next control\u2026";
+    if (_guidedTimer) clearTimeout(_guidedTimer);
+    _guidedTimer = setTimeout(() => {
+      _guidedTimer = null;
+      if (!getContext().mappingGuided) return;
+      updateGuidedBar();
+      const next = getContext().mappingGuided.queue[getContext().mappingGuided.cursor];
+      startDetect(next.table, next.index);
+    }, GUIDED_SETTLE_MS);
   }
   function muxRawIndex(mux, pot) {
     return mux * MUX_POTS_PER_MUX + pot;
@@ -3880,8 +4351,8 @@ border-radius:6px;background:transparent;
     if (!Array.isArray(getContext().ignoredPotsList)) {
       if (Array.isArray(IGNORED_POTS_DEFAULT) && IGNORED_POTS_DEFAULT.length > 0) {
         getContext().ignoredPotsList = IGNORED_POTS_DEFAULT.map((p) => ({
-          mux: Math.max(0, Math.min(3, Math.round(p.mux))),
-          pot: Math.max(0, Math.min(15, Math.round(p.pot)))
+          mux: Math.max(0, Math.min(7, Math.round(p.mux))),
+          pot: Math.max(0, Math.min(9, Math.round(p.pot)))
         }));
       } else {
         getContext().ignoredPotsList = [];
@@ -3889,91 +4360,90 @@ border-radius:6px;background:transparent;
     }
     return getContext().ignoredPotsList;
   }
-  function buildIgnoredPotsSection() {
-    const sec = el("div", { id: "ignored-pots-section" });
-    const title = el("div", { className: "msec-title" });
-    title.textContent = "Ignored Potentiometers (Exclusion List)";
-    sec.appendChild(title);
-    const hint = el("div", { className: "routing-hint" });
-    hint.textContent = "Physical MUX channels to exclude from debug console logging and auto-detection (e.g. unassigned or floating pins). Max 16.";
-    sec.appendChild(hint);
-    const wrap = el("div", { className: "mtable-wrap" });
-    const tbl = el("table", { className: "mtable", id: "ign-table" });
-    tbl.innerHTML = `
-        <colgroup>
-            <col class="col-num" style="width:80px">
-            <col class="col-num" style="width:80px">
-            <col class="col-name">
-            <col class="col-detect" style="width:70px">
-        </colgroup>
-        <thead><tr>
-            <th>MUX</th><th>Channel</th>
-            <th>Target / Status</th>
-            <th class="detect-col">Action</th>
-        </tr></thead>
-        <tbody id="ign-tbody">
-            <tr><td colspan="4" class="loading-cell">No ignored pots.</td></tr>
-        </tbody>`;
-    wrap.appendChild(tbl);
-    sec.appendChild(wrap);
-    const tb = el("div", { style: "margin:8px 0 16px; display:flex; gap:10px; align-items:center;" });
-    const btnAdd = el("button", { id: "btn-add-ignored", className: "btn-add-ign", type: "button" });
-    btnAdd.textContent = "+ Add Ignored Pot";
-    btnAdd.addEventListener("click", () => addIgnoredPotRow());
-    tb.appendChild(btnAdd);
-    const countLabel = el("span", { id: "ign-count-label", style: "font-size:11px; color:#888;" });
-    tb.appendChild(countLabel);
-    sec.appendChild(tb);
-    return sec;
-  }
   function renderIgnoredPotsTable() {
     const tbody = document.getElementById("ign-tbody");
     if (!tbody) return;
     const list = ensureIgnoredPotsList();
     const countLabel = document.getElementById("ign-count-label");
-    if (countLabel) countLabel.textContent = `${list.length} / 32 ignored`;
+    if (countLabel) countLabel.textContent = `${list.length} / 32`;
     const btnAdd = document.getElementById("btn-add-ignored");
     if (btnAdd) btnAdd.disabled = list.length >= 32;
     if (list.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="4" class="loading-cell">No ignored pots configured. Click "+ Add Ignored Pot" to exclude a channel.</td></tr>';
+      tbody.innerHTML = '<div class="map-empty">No excluded MUX pins.</div>';
       return;
     }
     tbody.innerHTML = "";
     list.forEach((item, idx) => {
-      const tr = document.createElement("tr");
-      tr.dataset.ignIndex = String(idx);
-      const mappedName = getMappedPotName(item.mux, item.pot);
-      const statusHtml = mappedName ? `<span class="pname" title="${mappedName}">${mappedName}</span> <span style="font-size:10px; color:#e67e22; font-weight:600;">(Mapped)</span>` : `<span style="color:#7f8c8d; font-size:11px; font-style:italic;">Unassigned / Floating</span>`;
-      tr.innerHTML = `<td><input type="number" min="0" max="7" value="${item.mux}" data-idx="${idx}" data-f="mux" class="ii" style="width:100%; padding:3px 4px; border:1px solid #ddd; border-radius:4px; font-size:12px;"></td><td><input type="number" min="0" max="9" value="${item.pot}" data-idx="${idx}" data-f="pot" class="ii" style="width:100%; padding:3px 4px; border:1px solid #ddd; border-radius:4px; font-size:12px;"></td><td class="ign-status">${statusHtml}</td><td style="text-align:center;"><button type="button" class="btn-del-ign" data-idx="${idx}" title="Remove ignored pot">\u2715</button></td>`;
-      tr.querySelector(".btn-del-ign").addEventListener("click", () => {
-        removeIgnoredPotRow(idx);
+      const row = el("div", { className: "map-ign-row" });
+      row.dataset.ignIndex = String(idx);
+      const muxF = el("label", { className: "map-field" });
+      muxF.appendChild(el("span", { className: "map-field-lbl", textContent: "MUX" }));
+      const muxInp = el("input", {
+        type: "number",
+        min: "0",
+        max: "7",
+        value: String(item.mux),
+        className: "ii map-num",
+        "aria-label": `Ignored pin ${idx + 1} MUX`
       });
-      tr.querySelectorAll(".ii").forEach((input) => {
+      muxInp.dataset.idx = String(idx);
+      muxInp.dataset.f = "mux";
+      muxF.appendChild(muxInp);
+      const chF = el("label", { className: "map-field" });
+      chF.appendChild(el("span", { className: "map-field-lbl", textContent: "Ch" }));
+      const chInp = el("input", {
+        type: "number",
+        min: "0",
+        max: "9",
+        value: String(item.pot),
+        className: "ii map-num",
+        "aria-label": `Ignored pin ${idx + 1} channel`
+      });
+      chInp.dataset.idx = String(idx);
+      chInp.dataset.f = "pot";
+      chF.appendChild(chInp);
+      const mappedName = getMappedPotName(item.mux, item.pot);
+      const statusEl = el("span", {
+        className: "map-ign-status" + (mappedName ? " mapped" : ""),
+        textContent: mappedName ? `Mapped: ${mappedName}` : "Floating / Unassigned"
+      });
+      const delBtn = el("button", {
+        type: "button",
+        className: "btn-del-ign",
+        textContent: "\xD7",
+        title: "Remove excluded pin",
+        "aria-label": `Remove excluded MUX ${item.mux} Ch ${item.pot}`
+      });
+      delBtn.addEventListener("click", () => removeIgnoredPotRow(idx));
+      [muxInp, chInp].forEach((input) => {
         input.addEventListener("change", (e) => {
           const field = e.target.dataset.f;
-          const i = parseInt(e.target.dataset.idx, 10);
           let val = parseInt(e.target.value, 10);
           if (isNaN(val)) val = 0;
-          if (field === "mux") val = Math.max(0, Math.min(7, val));
-          if (field === "pot") val = Math.max(0, Math.min(9, val));
-          e.target.value = val;
-          list[i][field] = val;
+          val = field === "mux" ? Math.max(0, Math.min(7, val)) : Math.max(0, Math.min(9, val));
+          e.target.value = String(val);
+          list[idx][field] = val;
           getContext().ignoredPotsUserEdited = true;
+          markMappingDirty();
           cleanConsoleOfIgnored();
           renderIgnoredPotsTable();
           updateMappingConflicts();
         });
       });
-      tbody.appendChild(tr);
+      row.appendChild(muxF);
+      row.appendChild(chF);
+      row.appendChild(statusEl);
+      row.appendChild(delBtn);
+      tbody.appendChild(row);
     });
   }
   function addIgnoredPotRow(mux, pot) {
     const list = ensureIgnoredPotsList();
     if (list.length >= 32) return;
-    let m = mux !== void 0 ? mux : 3;
+    const m = mux !== void 0 ? mux : 7;
     let p = pot !== void 0 ? pot : 0;
     if (mux === void 0 && pot === void 0) {
-      for (let tryP = 0; tryP < 16; tryP++) {
+      for (let tryP = 0; tryP < 10; tryP++) {
         if (!list.some((item) => item.mux === m && item.pot === tryP)) {
           p = tryP;
           break;
@@ -3982,6 +4452,7 @@ border-radius:6px;background:transparent;
     }
     list.push({ mux: m, pot: p });
     getContext().ignoredPotsUserEdited = true;
+    markMappingDirty();
     cleanConsoleOfIgnored();
     renderIgnoredPotsTable();
     updateMappingConflicts();
@@ -3991,6 +4462,7 @@ border-radius:6px;background:transparent;
     if (idx >= 0 && idx < list.length) {
       list.splice(idx, 1);
       getContext().ignoredPotsUserEdited = true;
+      markMappingDirty();
       cleanConsoleOfIgnored();
       renderIgnoredPotsTable();
       updateMappingConflicts();
@@ -4017,6 +4489,7 @@ border-radius:6px;background:transparent;
   function fillIgnoredPotsFromConfigMeta() {
     if (getContext().ignoredPotsFilledFromMeta || !getContext().configMeta) return;
     getContext().ignoredPotsFilledFromMeta = true;
+    updateHardwareSummaryFromMeta();
     if (getContext().ignoredPotsUserEdited) return;
     const M = CONFIG_META;
     const meta = getContext().configMeta;
@@ -4055,7 +4528,10 @@ border-radius:6px;background:transparent;
     return { snapPot, snapSw, snapMuxRaw };
   }
   function startDetect(table, index) {
-    if (getContext().detectMode) cancelDetect();
+    if (getContext().detectMode) {
+      getContext().detectMode = null;
+      setDetectUiActive(false);
+    }
     if (!getContext().mappingBuilt) {
       showDetectStatus("Waiting for Bela mapping\u2026", true);
       return;
@@ -4067,18 +4543,21 @@ border-radius:6px;background:transparent;
     const { snapPot, snapSw, snapMuxRaw } = snapshotControlValues();
     getContext().detectMode = { table, targetIndex: index, snapPot, snapSw, snapMuxRaw };
     setDetectUiActive(true);
-    const targetName = table === "pot" ? POT_NAMES[index] : SWITCH_NAMES[index];
-    if (table === "pot") {
-      showDetectStatus(
-        "Move any pot at least 25% for " + targetName + " \u2014 MUX/channel will be detected automatically."
-      );
+    if (!getContext().mappingGuided) {
+      const targetName = table === "pot" ? POT_NAMES[index] : SWITCH_NAMES[index];
+      showDetectStatus(table === "pot" ? `Move pot \u226525% for ${targetName}` : `Toggle switch for ${targetName}`, false);
     } else {
-      showDetectStatus(
-        "Toggle a switch for " + targetName + " \u2014 pin/port will be copied from the switch you flip."
-      );
+      hideDetectStatus();
     }
   }
   function cancelDetect() {
+    if (_guidedTimer) {
+      clearTimeout(_guidedTimer);
+      _guidedTimer = null;
+    }
+    const hadGuided = !!getContext().mappingGuided;
+    getContext().mappingGuided = null;
+    if (hadGuided) updateGuidedBar();
     if (!getContext().detectMode) return;
     getContext().detectMode = null;
     setDetectUiActive(false);
@@ -4088,10 +4567,7 @@ border-radius:6px;background:transparent;
     const cls = table === "pot" ? "pi" : "si";
     const inp = document.querySelector(`.${cls}[data-i="${rowIndex}"][data-f="${field}"]`);
     if (!inp) return;
-    if (inp.type === "checkbox")
-      inp.checked = !!value;
-    else
-      inp.value = value;
+    inp.value = value;
     inp.dispatchEvent(new Event("input", { bubbles: true }));
   }
   function findMovedMuxPot(snapMuxRaw) {
@@ -4126,24 +4602,24 @@ border-radius:6px;background:transparent;
   function readPotMappingRow(i) {
     const muxInp = document.querySelector(`.pi[data-i="${i}"][data-f="mux"]`);
     const potInp = document.querySelector(`.pi[data-i="${i}"][data-f="pot"]`);
-    const revInp = document.querySelector(`.pi[data-i="${i}"][data-f="rev"]`);
     if (!muxInp || !potInp) return null;
+    const rev = getContext().potMapping ? getContext().potMapping[i * 4 + 2] > 0.5 : false;
     return {
       mux: parseInt(muxInp.value, 10) || 0,
       pot: parseInt(potInp.value, 10) || 0,
-      rev: revInp ? revInp.checked : false,
+      rev,
       cen: isPotCentered(POT_NAMES[i])
     };
   }
   function readSwitchMappingRow(i) {
     const pinInp = document.querySelector(`.si[data-i="${i}"][data-f="pin"]`);
     const portInp = document.querySelector(`.si[data-i="${i}"][data-f="port"]`);
-    const revInp = document.querySelector(`.si[data-i="${i}"][data-f="rev"]`);
     if (!pinInp || !portInp) return null;
+    const rev = getContext().switchMapping ? getContext().switchMapping[i * 3 + 2] > 0.5 : false;
     return {
       pin: parseInt(pinInp.value, 10) || 0,
       port: parseInt(portInp.value, 10) || 0,
-      rev: revInp ? revInp.checked : false
+      rev
     };
   }
   function finishDetectPotFromPhysical(mux, pot, label) {
@@ -4154,20 +4630,17 @@ border-radius:6px;background:transparent;
       for (let i = 0; i < POT_NAMES.length; i++) {
         if (Math.round(getContext().potMapping[i * 4]) === mux && Math.round(getContext().potMapping[i * 4 + 1]) === pot) {
           const src = readPotMappingRow(i);
-          if (src) {
-            setMappingField("pot", dst, "rev", src.rev);
-          }
+          if (src) setPotRevState(dst, src.rev);
           break;
         }
       }
     }
-    showDownloadStatus(
-      "Detected " + label + " \u2192 MUX " + mux + " / ch " + pot,
-      false
-    );
-    cancelDetect();
+    getContext().mappingUserEdited = true;
+    markMappingDirty();
+    showDownloadStatus(`${POT_NAMES[dst]} \u2192 MUX ${mux} / Ch ${pot}`, false);
+    advanceGuidedAfterHit();
   }
-  function finishDetect(sourceIndex, sourceName) {
+  function finishDetect(sourceIndex) {
     const dst = getContext().detectMode.targetIndex;
     const table = getContext().detectMode.table;
     if (table === "pot") {
@@ -4178,11 +4651,8 @@ border-radius:6px;background:transparent;
       }
       setMappingField("pot", dst, "mux", src.mux);
       setMappingField("pot", dst, "pot", src.pot);
-      setMappingField("pot", dst, "rev", src.rev);
-      showDownloadStatus(
-        "Detected " + sourceName + " \u2192 MUX " + src.mux + " / ch " + src.pot,
-        false
-      );
+      setPotRevState(dst, src.rev);
+      showDownloadStatus(`${POT_NAMES[dst]} \u2192 MUX ${src.mux} / Ch ${src.pot}`, false);
     } else {
       const src = readSwitchMappingRow(sourceIndex);
       if (!src) {
@@ -4191,144 +4661,585 @@ border-radius:6px;background:transparent;
       }
       setMappingField("sw", dst, "pin", src.pin);
       setMappingField("sw", dst, "port", src.port);
-      setMappingField("sw", dst, "rev", src.rev);
+      setSwitchRevState(dst, src.rev);
       const portLabel = src.port > 0.5 ? "B" : "A";
-      showDownloadStatus(
-        "Detected " + sourceName + " \u2192 port " + portLabel + " / pin " + src.pin,
-        false
-      );
+      showDownloadStatus(`${SWITCH_NAMES[dst]} \u2192 Port ${portLabel} / Pin ${src.pin}`, false);
     }
+    getContext().mappingUserEdited = true;
+    markMappingDirty();
     updateMappingConflicts();
-    cancelDetect();
+    advanceGuidedAfterHit();
   }
   function updateDetectMode() {
     if (!getContext().detectMode) return;
     if (getContext().detectMode.table === "pot") {
       const hit = findMovedMuxPot(getContext().detectMode.snapMuxRaw);
-      if (hit)
-        finishDetectPotFromPhysical(hit.mux, hit.pot, hit.label);
+      if (hit) finishDetectPotFromPhysical(hit.mux, hit.pot, hit.label);
     } else {
       const srcIdx = findToggledSwitchIndex(getContext().detectMode.snapSw);
-      if (srcIdx >= 0)
-        finishDetect(srcIdx, SWITCH_NAMES[srcIdx]);
+      if (srcIdx >= 0) finishDetect(srcIdx);
     }
   }
   function collectMappingFromForm() {
+    const ctx = getContext();
     const pm = new Float32Array(POT_NAMES.length * 4);
+    for (let i = 0; i < POT_NAMES.length; i++) {
+      pm[i * 4 + 2] = ctx.potMapping && ctx.potMapping[i * 4 + 2] > 0.5 ? 1 : 0;
+      pm[i * 4 + 3] = isPotCentered(POT_NAMES[i]) ? 1 : 0;
+    }
     document.querySelectorAll(".pi").forEach((inp) => {
       const i = parseInt(inp.dataset.i, 10);
       const f = inp.dataset.f;
       if (f === "mux") pm[i * 4 + 0] = parseFloat(inp.value) || 0;
       if (f === "pot") pm[i * 4 + 1] = parseFloat(inp.value) || 0;
-      if (f === "rev") pm[i * 4 + 2] = inp.checked ? 1 : 0;
-      if (f === "cen") pm[i * 4 + 3] = inp.checked ? 1 : 0;
     });
     const sm = new Float32Array(SWITCH_NAMES.length * 3);
+    for (let i = 0; i < SWITCH_NAMES.length; i++) {
+      sm[i * 3 + 2] = ctx.switchMapping && ctx.switchMapping[i * 3 + 2] > 0.5 ? 1 : 0;
+    }
     document.querySelectorAll(".si").forEach((inp) => {
       const i = parseInt(inp.dataset.i, 10);
       const f = inp.dataset.f;
       if (f === "pin") sm[i * 3 + 0] = parseFloat(inp.value) || 0;
-      if (f === "port") sm[i * 3 + 1] = parseFloat(inp.value);
-      if (f === "rev") sm[i * 3 + 2] = inp.checked ? 1 : 0;
+      if (f === "port") sm[i * 3 + 1] = parseFloat(inp.value) || 0;
     });
     return { pm, sm };
   }
   function buildConfigJsonText(pm, sm) {
-    if (!getContext().configMeta) return null;
+    const ctx = getContext();
+    if (!ctx.configMeta && !ctx.loadedConfigBase && !ctx.boardConfigJson) return null;
     const M = CONFIG_META;
     let ignoredPots = [];
-    if (Array.isArray(getContext().ignoredPotsList)) {
-      ignoredPots = getContext().ignoredPotsList.map((item) => ({
+    if (Array.isArray(ctx.ignoredPotsList)) {
+      ignoredPots = ctx.ignoredPotsList.map((item) => ({
         mux: Math.max(0, Math.min(7, Math.round(item.mux))),
         pot: Math.max(0, Math.min(9, Math.round(item.pot)))
       }));
-    } else {
-      const ignoredCount = Math.round(getContext().configMeta[M.IGNORED_COUNT]);
+    } else if (ctx.configMeta) {
+      const ignoredCount = Math.round(ctx.configMeta[M.IGNORED_COUNT]);
       for (let i = 0; i < ignoredCount; i++) {
         ignoredPots.push({
-          mux: Math.round(getContext().configMeta[M.IGNORED_BASE + i * 2 + 0]),
-          pot: Math.round(getContext().configMeta[M.IGNORED_BASE + i * 2 + 1])
+          mux: Math.round(ctx.configMeta[M.IGNORED_BASE + i * 2 + 0]),
+          pot: Math.round(ctx.configMeta[M.IGNORED_BASE + i * 2 + 1])
         });
       }
     }
     const pots = POT_NAMES.map((name, i) => ({
       name,
-      mux: Math.round(pm[i * 4 + 0]),
-      pot: Math.round(pm[i * 4 + 1]),
+      mux: Math.max(0, Math.min(7, Math.round(pm[i * 4 + 0]))),
+      pot: Math.max(0, Math.min(9, Math.round(pm[i * 4 + 1]))),
       reversed: pm[i * 4 + 2] > 0.5,
       centered: isPotCentered(name)
     }));
     const switches = SWITCH_NAMES.map((name, i) => ({
       name,
-      pin: Math.round(sm[i * 3 + 0]),
+      pin: Math.max(0, Math.min(7, Math.round(sm[i * 3 + 0]))),
       reversed: sm[i * 3 + 2] > 0.5,
       port: sm[i * 3 + 1] > 0.5 ? "B" : "A"
     }));
     const routing = collectRoutingFromForm();
+    const hw = getEffectiveHwInfo();
+    const base = ctx.loadedConfigBase || ctx.boardConfigJson || {};
+    const clipLeds = {};
+    CLIP_LED_KEYS.forEach((key) => {
+      const serialized = serializeClipLedEntry(ctx.clipLedsConfig && ctx.clipLedsConfig[key]);
+      if (serialized !== null) clipLeds[key] = serialized;
+    });
     const config = {
-      _comment: "Dub Preamp BELA GEM MULTI -- hardware mapping config. Edit this file to remap pots/switches without recompiling. Restart the Bela project to apply changes.",
-      mux: { activeMux: Math.round(getContext().configMeta[M.ACTIVE_MUX]) },
+      _comment: typeof base._comment === "string" && base._comment ? base._comment : DEFAULT_CONFIG_COMMENT,
+      developerMode: !!ctx.devModeBoot,
+      mux: { activeMux: hw.activeMux },
       calibration: {
-        potScaleRecovery: +getContext().configMeta[M.SCALE].toFixed(4),
-        potMax: +getContext().configMeta[M.POT_MAX].toFixed(3),
-        potMin: +getContext().configMeta[M.POT_MIN].toFixed(3)
+        potScaleRecovery: +Number(hw.potScaleRecovery).toFixed(4),
+        potMax: +Number(hw.potMax).toFixed(3),
+        potMin: +Number(hw.potMin).toFixed(3)
       },
       i2c: {
-        bus: I2C_BUS,
-        mcpAddress: Math.round(getContext().configMeta[M.MCP_ADDR])
+        bus: hw.bus,
+        mcpAddress: hw.mcpAddress
       },
       routing,
       pots,
       switches,
+      clipLeds,
       ignoredPots
     };
+    Object.keys(base).forEach((k) => {
+      if (!(k in config) && k !== "devMode" && k !== "uiDevMode") {
+        config[k] = base[k];
+      }
+    });
     return JSON.stringify(config, null, 2);
   }
-  function downloadConfigJson() {
-    if (!getContext().mappingBuilt) {
-      showDownloadStatus("Waiting for Bela mapping\u2026", true);
-      return;
+  function syncControlsDomFromState() {
+    const ctx = getContext();
+    if (!ctx.mappingBuilt) return;
+    if (ctx.potMapping) {
+      for (let i = 0; i < POT_NAMES.length; i++) {
+        const muxInp = document.querySelector(`.pi[data-i="${i}"][data-f="mux"]`);
+        const potInp = document.querySelector(`.pi[data-i="${i}"][data-f="pot"]`);
+        if (muxInp) muxInp.value = String(Math.round(ctx.potMapping[i * 4 + 0]));
+        if (potInp) potInp.value = String(Math.round(ctx.potMapping[i * 4 + 1]));
+        setPotRevState(i, ctx.potMapping[i * 4 + 2] > 0.5);
+      }
     }
-    if (!getContext().configMeta) {
+    if (ctx.switchMapping) {
+      for (let i = 0; i < SWITCH_NAMES.length; i++) {
+        const pinInp = document.querySelector(`.si[data-i="${i}"][data-f="pin"]`);
+        const portSel = document.querySelector(`.si[data-i="${i}"][data-f="port"]`);
+        if (pinInp) pinInp.value = String(Math.round(ctx.switchMapping[i * 3 + 0]));
+        if (portSel) portSel.value = ctx.switchMapping[i * 3 + 1] > 0.5 ? "1" : "0";
+        setSwitchRevState(i, ctx.switchMapping[i * 3 + 2] > 0.5);
+      }
+    }
+  }
+  function applyBoardConfigToMapping(cfg, opts = {}) {
+    if (!cfg || typeof cfg !== "object" || Array.isArray(cfg)) return false;
+    const markDirty = !!opts.markDirty;
+    const applyControls = opts.applyControls !== void 0 ? !!opts.applyControls : true;
+    const ctx = getContext();
+    try {
+      ctx.loadedConfigBase = JSON.parse(JSON.stringify(cfg));
+    } catch (_) {
+      ctx.loadedConfigBase = cfg;
+    }
+    if (cfg.developerMode !== void 0) ctx.devModeBoot = !!cfg.developerMode;
+    else if (cfg.devMode !== void 0) ctx.devModeBoot = !!cfg.devMode;
+    else if (cfg.uiDevMode !== void 0) ctx.devModeBoot = !!cfg.uiDevMode;
+    if (_devModeBootCb) _devModeBootCb.checked = !!ctx.devModeBoot;
+    if (cfg.routing && typeof cfg.routing === "object") {
+      applyRoutingObjectToForm(cfg.routing);
+      ctx.routingFilledFromConfigJson = true;
+    }
+    if (cfg.clipLeds !== void 0) {
+      const nextClips = {};
+      CLIP_LED_KEYS.forEach((k) => {
+        nextClips[k] = { enabled: false, port: "A", pin: 0, activeLow: false };
+      });
+      if (cfg.clipLeds && typeof cfg.clipLeds === "object" && !Array.isArray(cfg.clipLeds)) {
+        CLIP_LED_KEYS.forEach((k) => {
+          if (cfg.clipLeds[k] !== void 0) {
+            nextClips[k] = parseClipLedConfigEntry(cfg.clipLeds[k]);
+          }
+        });
+      } else if (Array.isArray(cfg.clipLeds)) {
+        cfg.clipLeds.forEach((entry) => {
+          if (!entry || typeof entry !== "object" || !entry.name) return;
+          const lower = String(entry.name).toLowerCase().replace(/^clip_/, "");
+          if (CLIP_LED_KEYS.includes(lower)) {
+            nextClips[lower] = parseClipLedConfigEntry(entry);
+          }
+        });
+      }
+      ctx.clipLedsConfig = nextClips;
+      renderClipLedsFromContext();
+    }
+    if (applyControls && Array.isArray(cfg.pots)) {
+      if (!ctx.potMapping) ctx.potMapping = new Float32Array(POT_NAMES.length * 4);
+      cfg.pots.forEach((p) => {
+        if (!p || typeof p !== "object" || !p.name) return;
+        const idx = POT_INDEX[p.name];
+        if (idx === void 0) return;
+        const mux = parseInt(p.mux, 10);
+        const pot = parseInt(p.pot, 10);
+        if (!isNaN(mux) && mux >= 0 && mux <= 7) ctx.potMapping[idx * 4 + 0] = mux;
+        if (!isNaN(pot) && pot >= 0 && pot <= 9) ctx.potMapping[idx * 4 + 1] = pot;
+        if (p.reversed !== void 0) ctx.potMapping[idx * 4 + 2] = p.reversed ? 1 : 0;
+        ctx.potMapping[idx * 4 + 3] = isPotCentered(p.name) ? 1 : 0;
+      });
+    }
+    if (applyControls && Array.isArray(cfg.switches)) {
+      if (!ctx.switchMapping) ctx.switchMapping = new Float32Array(SWITCH_NAMES.length * 3);
+      cfg.switches.forEach((sw) => {
+        if (!sw || typeof sw !== "object" || !sw.name) return;
+        const idx = SW_INDEX[sw.name];
+        if (idx === void 0) return;
+        const pin = parseInt(sw.pin, 10);
+        if (!isNaN(pin) && pin >= 0 && pin <= 7) ctx.switchMapping[idx * 3 + 0] = pin;
+        if (sw.port !== void 0) ctx.switchMapping[idx * 3 + 1] = String(sw.port).toUpperCase() === "B" ? 1 : 0;
+        else if (sw.portB !== void 0) ctx.switchMapping[idx * 3 + 1] = sw.portB ? 1 : 0;
+        if (sw.reversed !== void 0) ctx.switchMapping[idx * 3 + 2] = sw.reversed ? 1 : 0;
+      });
+    }
+    if (applyControls && !ctx.mappingBuilt && ctx.potMapping && ctx.switchMapping) {
+      tryBuildMappingTable();
+    } else if (applyControls) {
+      syncControlsDomFromState();
+    }
+    if (Array.isArray(cfg.ignoredPots)) {
+      const list = [];
+      cfg.ignoredPots.forEach((item) => {
+        if (list.length >= 32) return;
+        if (typeof item === "string") {
+          const idx = POT_INDEX[item];
+          if (idx !== void 0) {
+            const coords = getPotMuxChannel(idx);
+            if (coords) list.push({ mux: coords.mux, pot: coords.pot });
+          }
+        } else if (item && typeof item === "object") {
+          if (item.mux !== void 0 && item.pot !== void 0) {
+            const m = Math.max(0, Math.min(7, Math.round(Number(item.mux) || 0)));
+            const p = Math.max(0, Math.min(9, Math.round(Number(item.pot) || 0)));
+            list.push({ mux: m, pot: p });
+          } else if (item.name) {
+            const idx = POT_INDEX[item.name];
+            if (idx !== void 0) {
+              const coords = getPotMuxChannel(idx);
+              if (coords) list.push({ mux: coords.mux, pot: coords.pot });
+            }
+          }
+        }
+      });
+      ctx.ignoredPotsList = list;
+      ctx.ignoredPotsFilledFromMeta = true;
+      renderIgnoredPotsTable();
+    }
+    updateHardwareSummaryFromMeta();
+    cleanConsoleOfIgnored();
+    updateMappingConflicts();
+    if (markDirty) {
+      ctx.mappingUserEdited = true;
+      ctx.ignoredPotsUserEdited = true;
+      setMappingDirty(true);
+    }
+    return true;
+  }
+  function resetMappingStateForRestart() {
+    const ctx = getContext();
+    cancelDetect();
+    ctx.mappingBuilt = false;
+    ctx.potMapping = null;
+    ctx.switchMapping = null;
+    ctx.configMeta = null;
+    ctx.routingFilledFromMeta = false;
+    ctx.routingFilledFromConfigJson = false;
+    ctx.ignoredPotsFilledFromMeta = false;
+    ctx.mappingUserEdited = false;
+    ctx.ignoredPotsUserEdited = false;
+    setMappingDirty(false);
+    const host = document.getElementById("map-groups-host");
+    if (host) {
+      host.innerHTML = '<div class="map-empty">Reloading mapping from Bela\u2026</div>';
+    }
+  }
+  function buildValidatedConfigText() {
+    const ctx = getContext();
+    if (!ctx.mappingBuilt) {
+      showDownloadStatus("Waiting for Bela mapping\u2026", true);
+      return null;
+    }
+    if (!ctx.configMeta && !ctx.loadedConfigBase && !ctx.boardConfigJson) {
       showDownloadStatus("Config metadata not received", true);
-      return;
+      return null;
     }
     const routing = collectRoutingFromForm();
-    const expectedIn = ROUTING_IN_KEYS.length;
-    const expectedOut = ROUTING_OUT_KEYS.length;
-    if (Object.keys(routing.in).length !== expectedIn || Object.keys(routing.out).length !== expectedOut) {
-      showDownloadStatus("Invalid routing channels \u2014 check the form", true);
-      return;
+    if (Object.keys(routing.in).length !== ROUTING_IN_KEYS.length || Object.keys(routing.out).length !== ROUTING_OUT_KEYS.length) {
+      showDownloadStatus("Invalid routing channels", true);
+      return null;
+    }
+    for (const key of ROUTING_IN_KEYS) {
+      const chs = routing.in[key].channels;
+      if (!chs || !chs.length || chs.some((c) => c < ROUTING_CH_MIN || c > ROUTING_CH_MAX)) {
+        showDownloadStatus(`Invalid input channel for ${ROUTING_LABELS[key] || key}`, true);
+        return null;
+      }
+    }
+    for (const key of ROUTING_OUT_KEYS) {
+      const entry = routing.out[key];
+      const chs = entry.channels ? entry.channels : [entry.channel];
+      if (!chs.length || chs.some((c) => c < ROUTING_CH_MIN || c > ROUTING_CH_MAX)) {
+        showDownloadStatus(`Invalid output channel for ${ROUTING_LABELS[key] || key}`, true);
+        return null;
+      }
     }
     const masterChans = routing.out.master && routing.out.master.channels;
     if (!Array.isArray(masterChans) || masterChans.length < 1) {
-      showDownloadStatus("Master needs at least one output channel", true);
-      return;
+      showDownloadStatus("Master needs \u22651 output channel", true);
+      return null;
     }
     const { pm, sm } = collectMappingFromForm();
+    for (let i = 0; i < POT_NAMES.length; i++) {
+      const mux = Math.round(pm[i * 4 + 0]);
+      const pot = Math.round(pm[i * 4 + 1]);
+      if (mux < 0 || mux > 7 || pot < 0 || pot > 9) {
+        showDownloadStatus(`Invalid MUX/Ch on ${POT_NAMES[i]}`, true);
+        return null;
+      }
+    }
+    for (let i = 0; i < SWITCH_NAMES.length; i++) {
+      const pin = Math.round(sm[i * 3 + 0]);
+      if (pin < 0 || pin > 7) {
+        showDownloadStatus(`Invalid pin on ${SWITCH_NAMES[i]}`, true);
+        return null;
+      }
+    }
     const text = buildConfigJsonText(pm, sm);
     if (!text) {
       showDownloadStatus("JSON generation error", true);
-      return;
+      return null;
     }
+    return text;
+  }
+  function triggerJsonDownload(text, filename = "config.json") {
     const blob = new Blob([text], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = "config.json";
+    a.download = filename;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
-    showDownloadStatus("Downloaded \u2713", false);
   }
-  function showDownloadStatus(msg, isError) {
-    if (!getContext().downloadStatusEl) return;
-    getContext().downloadStatusEl.textContent = msg;
-    getContext().downloadStatusEl.className = isError ? "err" : "";
-    setTimeout(() => {
-      if (getContext().downloadStatusEl) getContext().downloadStatusEl.textContent = "";
-    }, 4e3);
+  function handleLoadFileChange(e) {
+    const file = e.target && e.target.files && e.target.files[0];
+    if (e.target) e.target.value = "";
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const parsed = JSON.parse(String(reader.result || ""));
+        if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+          showDownloadStatus("Invalid config.json file (root must be an object)", true);
+          return;
+        }
+        applyBoardConfigToMapping(parsed, { markDirty: true, applyControls: true });
+        showDownloadStatus(`Loaded ${file.name} \u2014 click Save to write to Bela`, false);
+      } catch (err) {
+        showDownloadStatus("Failed to parse JSON: " + (err && err.message ? err.message : "invalid syntax"), true);
+      }
+    };
+    reader.onerror = () => showDownloadStatus("Failed to read selected file", true);
+    reader.readAsText(file);
+  }
+  async function exportBoardConfigJson() {
+    if (getContext().mappingActionBusy) return;
+    setActionButtonsDisabled(true);
+    try {
+      let res = await fetchBoardConfigJson();
+      if (!res.ok && res.status !== 404 && belaControlReady()) {
+        const wsRes = await readConfigViaControl();
+        if (wsRes.ok && wsRes.content) {
+          res = { ok: true, text: wsRes.content };
+        }
+      }
+      if (!res.ok || !res.text) {
+        showDownloadStatus(res.error || "No config.json on Bela yet \u2014 click Save first", true);
+        return;
+      }
+      triggerJsonDownload(res.text, "config.json");
+      showDownloadStatus(
+        getContext().mappingDirty ? "Exported Bela saved config.json (unsaved form edits not included)" : "Exported config.json from Bela",
+        false
+      );
+    } finally {
+      setActionButtonsDisabled(false);
+    }
+  }
+  async function saveConfigAction() {
+    if (getContext().mappingActionBusy) return false;
+    if (!belaControlReady()) {
+      showDownloadStatus("Bela not connected \u2014 cannot save", true);
+      return false;
+    }
+    const text = buildValidatedConfigText();
+    if (!text) return false;
+    setActionButtonsDisabled(true);
+    let savingNoticeShown = false;
+    const savingTimer = setTimeout(() => {
+      savingNoticeShown = true;
+      showDownloadStatus("Saving config.json to Bela\u2026", false, 0);
+    }, 150);
+    try {
+      const res = await saveConfigToBela(text);
+      clearTimeout(savingTimer);
+      if (!res.ok) {
+        showDownloadStatus(res.error || "Failed to save config.json on Bela", true);
+        return false;
+      }
+      const parsed = JSON.parse(text);
+      const ctx = getContext();
+      ctx.boardConfigRawText = text;
+      ctx.boardConfigJson = parsed;
+      ctx.loadedConfigBase = JSON.parse(text);
+      setMappingDirty(false);
+      showDownloadStatus("Saved config.json to Bela \u2014 click Restart to apply", false);
+      return true;
+    } finally {
+      clearTimeout(savingTimer);
+      if (savingNoticeShown && getContext().downloadStatusEl && getContext().downloadStatusEl.textContent === "Saving config.json to Bela\u2026") {
+        showDownloadStatus("", false, 0);
+      }
+      setActionButtonsDisabled(false);
+    }
+  }
+  function closeConfirmModal() {
+    if (_modalEscBound) {
+      document.removeEventListener("keydown", _modalEscBound);
+      _modalEscBound = null;
+    }
+    if (_modalOverlay && _modalOverlay.parentNode) {
+      _modalOverlay.parentNode.removeChild(_modalOverlay);
+    }
+    _modalOverlay = null;
+  }
+  function openConfirmModal({ title, body, actions }) {
+    closeConfirmModal();
+    const overlay = el("div", { className: "map-modal-backdrop" });
+    const panel = el("div", {
+      className: "map-modal-panel",
+      role: "dialog",
+      "aria-modal": "true",
+      "aria-label": title
+    });
+    panel.appendChild(el("div", { className: "map-modal-title", textContent: title }));
+    panel.appendChild(el("p", { className: "map-modal-body", textContent: body }));
+    const row = el("div", { className: "map-modal-actions" });
+    let focusBtn = null;
+    actions.forEach((act) => {
+      const btn = el("button", {
+        type: "button",
+        className: act.className || "btn-map-secondary",
+        textContent: act.label
+      });
+      btn.addEventListener("click", async () => {
+        closeConfirmModal();
+        if (typeof act.onClick === "function") await act.onClick();
+      });
+      if (act.autoFocus) focusBtn = btn;
+      row.appendChild(btn);
+    });
+    panel.appendChild(row);
+    overlay.appendChild(panel);
+    overlay.addEventListener("click", (e) => {
+      if (e.target === overlay) closeConfirmModal();
+    });
+    _modalEscBound = (e) => {
+      if (e.key === "Escape") closeConfirmModal();
+    };
+    document.addEventListener("keydown", _modalEscBound);
+    document.body.appendChild(overlay);
+    _modalOverlay = overlay;
+    if (focusBtn) focusBtn.focus();
+  }
+  async function executeAudioRestart() {
+    if (!belaControlReady()) {
+      showDownloadStatus("Bela not connected \u2014 cannot restart", true);
+      return;
+    }
+    const ctx = getContext();
+    setActionButtonsDisabled(true);
+    ctx.awaitingRestartReconnect = true;
+    ctx.sawOfflineDuringRestart = false;
+    showDownloadStatus("Restarting Bela audio engine\u2026", false, 0);
+    const res = await restartBelaAudio();
+    setActionButtonsDisabled(false);
+    if (!res.ok) {
+      ctx.awaitingRestartReconnect = false;
+      ctx.sawOfflineDuringRestart = false;
+      showDownloadStatus(res.error || "Failed to restart Bela audio", true);
+    }
+  }
+  function confirmAndRestartAudio() {
+    if (getContext().mappingActionBusy) return;
+    if (!belaControlReady()) {
+      showDownloadStatus("Bela not connected \u2014 cannot restart", true);
+      return;
+    }
+    if (getContext().mappingDirty) {
+      openConfirmModal({
+        title: "Unsaved Configuration Changes",
+        body: "You have unsaved Mapping changes. Save them to Bela before restarting the audio engine (~2\u20133 s, Wi-Fi preserved)?",
+        actions: [
+          { label: "Cancel", className: "btn-map-secondary", autoFocus: true },
+          {
+            label: "Restart Without Saving",
+            className: "btn-restart",
+            onClick: () => executeAudioRestart()
+          },
+          {
+            label: "Save & Restart",
+            className: "btn-save",
+            onClick: async () => {
+              const saved = await saveConfigAction();
+              if (saved) await executeAudioRestart();
+            }
+          }
+        ]
+      });
+    } else {
+      openConfirmModal({
+        title: "Restart Bela Audio Engine?",
+        body: "Cleanly fades out audio and restarts the Bela preamp program (~2\u20133 s) to reload config.json. Wi-Fi and hotspot remain connected.",
+        actions: [
+          { label: "Cancel", className: "btn-map-secondary", autoFocus: true },
+          {
+            label: "Restart Audio",
+            className: "btn-restart",
+            onClick: () => executeAudioRestart()
+          }
+        ]
+      });
+    }
+  }
+  function confirmAndRebootBoard() {
+    if (getContext().mappingActionBusy) return;
+    if (!belaControlReady()) {
+      showDownloadStatus("Bela not connected \u2014 cannot reboot", true);
+      return;
+    }
+    openConfirmModal({
+      title: "Reboot Entire Bela Board?",
+      body: "Performs a full Linux OS reboot (~25\u201330 s). Audio stops and Wi-Fi / hotspot will temporarily disconnect until boot finishes.",
+      actions: [
+        { label: "Cancel", className: "btn-map-secondary", autoFocus: true },
+        {
+          label: "Reboot Bela",
+          className: "btn-danger-solid",
+          onClick: async () => {
+            const ctx = getContext();
+            setActionButtonsDisabled(true);
+            ctx.awaitingRestartReconnect = true;
+            ctx.sawOfflineDuringRestart = false;
+            showDownloadStatus("Rebooting Bela board (~30 s)\u2026", false, 0);
+            const res = await rebootBelaBoard();
+            setActionButtonsDisabled(false);
+            if (!res.ok) {
+              ctx.awaitingRestartReconnect = false;
+              ctx.sawOfflineDuringRestart = false;
+              showDownloadStatus(res.error || "Failed to reboot Bela", true);
+            }
+          }
+        }
+      ]
+    });
+  }
+  function setMappingStatus(msg, isError = false) {
+    showDownloadStatus(msg, isError);
+  }
+  function showDownloadStatus(msg, isError, durationMs = 5e3) {
+    const elNode = getContext().downloadStatusEl;
+    if (!elNode) return;
+    if (_statusClearTimer) {
+      clearTimeout(_statusClearTimer);
+      _statusClearTimer = null;
+    }
+    if (!msg) {
+      elNode.classList.remove("show", "err");
+      elNode.textContent = "";
+      return;
+    }
+    elNode.textContent = msg;
+    elNode.classList.toggle("err", !!isError);
+    elNode.classList.add("show");
+    if (durationMs > 0) {
+      _statusClearTimer = setTimeout(() => {
+        _statusClearTimer = null;
+        if (getContext().downloadStatusEl === elNode && elNode.textContent === msg) {
+          elNode.classList.remove("show", "err");
+        }
+      }, durationMs);
+    }
   }
 
   // gui/dom/console.js
@@ -4350,7 +5261,7 @@ border-radius:6px;background:transparent;
     const card = el("div", { className: "card live-tile" });
     card.dataset.tile = "console";
     const consoleHdr = el("div", { className: "console-header" });
-    consoleHdr.appendChild(cardTitle("Console \u2014 last change"));
+    consoleHdr.appendChild(cardTitle("Activity"));
     const filterBar = el("div", { className: "console-filter" });
     [
       { mode: "normal", label: "Normal" },
@@ -4589,6 +5500,15 @@ border-radius:6px;background:transparent;
       removeExcessBottomSlot(list);
     }
     updateRowContent(targetRow, entry, true, direction);
+    const reduceMotion = typeof window !== "undefined" && window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (reduceMotion) {
+      for (const child of list.children) {
+        child.style.transform = "";
+        child.style.transition = "";
+        child.style.opacity = "";
+      }
+      return;
+    }
     for (const child of list.children) {
       const first = firstTops.get(child);
       const last = child.getBoundingClientRect().top;
@@ -5287,13 +6207,10 @@ border-radius:6px;background:transparent;
       className: "card live-tile"
     });
     card.dataset.tile = "masterEq";
-    card.appendChild(cardTitle("Master EQ \u2014 frequency response"));
-    const notice = el("div", { className: "master-eq-notice" });
-    notice.textContent = "Theoretical representation \u2014 the curve is recalculated from pot values, not a measurement of the actual audio signal.";
-    card.appendChild(notice);
-    const caption = el("div", { className: "master-eq-caption" });
-    caption.textContent = "Dry master chain: Parametric EQ \u2192 Graphic EQ \u2192 HPF/LPF \u2192 Band Trim \u2192 Kill switches. Excludes master gain and FX returns.";
-    card.appendChild(caption);
+    const hdr = el("div", { className: "card-header-row" });
+    hdr.appendChild(cardTitle("Master EQ"));
+    hdr.appendChild(el("span", { className: "card-meta", textContent: "Theoretical dry curve" }));
+    card.appendChild(hdr);
     const wrap = el("div", { className: "master-eq-wrap" });
     const canvas = el("canvas", { id: canvasId, className: "master-eq-canvas" });
     canvas.width = 800;
@@ -5308,9 +6225,9 @@ border-radius:6px;background:transparent;
   }
 
   // gui/dom/sampler.js
-  var EMPTY_MSG = "Create a samples folder in the project and add WAV or MP3 files.";
-  var WAIT_MSG = "Waiting for sampler data from Bela\u2026";
-  var NONE_MSG = "No WAV/MP3 files found in samples/.";
+  var EMPTY_MSG = "No samples folder found (src/samples/).";
+  var WAIT_MSG = "Waiting for Bela\u2026";
+  var NONE_MSG = "No WAV/MP3 files in src/samples/.";
   function decodeSampleNames(namesBuf, count) {
     const names = [];
     if (!namesBuf || count <= 0) return names;
@@ -5363,11 +6280,11 @@ border-radius:6px;background:transparent;
   function buildSamplerCard() {
     const card = el("div", { className: "card live-tile" });
     card.dataset.tile = "sampler";
-    card.appendChild(cardTitle("Sampler"));
+    const hdr = el("div", { className: "card-header-row" });
+    hdr.appendChild(cardTitle("Sampler"));
+    hdr.appendChild(el("span", { className: "card-meta", textContent: "Siren bus" }));
+    card.appendChild(hdr);
     const body = el("div", { id: "sampler-body" });
-    const hint = el("div", { className: "sampler-hint" });
-    hint.textContent = "Uses Siren gain & FX send";
-    body.appendChild(hint);
     const empty = el("div", { id: "sampler-empty", className: "sampler-empty" });
     empty.textContent = EMPTY_MSG;
     body.appendChild(empty);
@@ -5509,9 +6426,6 @@ border-radius:6px;background:transparent;
     });
     card.dataset.tile = "mic";
     card.appendChild(cardTitle("Mic inputs"));
-    const note = el("div", { className: "mic-live-note" });
-    note.textContent = "Mic bypasses ParamEQ / filters / kills. HPF Hz cuts subs (0 = off).";
-    card.appendChild(note);
     const list = el("div", { className: "mic-live-list" });
     for (let i = 0; i < 4; ++i) {
       const auxN = i + 1;
@@ -5520,7 +6434,7 @@ border-radius:6px;background:transparent;
       label.textContent = "AUX" + auxN;
       const micWrap = el("label", { className: "mic-toggle" });
       const micCb = el("input", { type: "checkbox", className: "mic-toggle-input" });
-      micCb.title = "Mic mode";
+      micCb.title = "Bypass ParamEQ / filters / kills";
       const track = el("span", { className: "mic-toggle-track", "aria-hidden": "true" });
       track.appendChild(el("span", { className: "mic-toggle-thumb" }));
       const micLbl = el("span", { className: "mic-toggle-text" });
@@ -5536,9 +6450,10 @@ border-radius:6px;background:transparent;
         min: String(MIC_HPF_HZ_MIN),
         max: String(MIC_HPF_HZ_MAX),
         step: "1",
-        value: "0"
+        value: "0",
+        "aria-label": `AUX${auxN} Mic HPF Hz`
       });
-      hpfInp.title = "Mic HPF Hz (0 = off)";
+      hpfInp.title = "Mic dry HPF Hz (0 = off)";
       const hpfUnit = el("span", { className: "mic-live-hpf-unit" });
       hpfUnit.textContent = "Hz";
       hpfWrap.appendChild(hpfLbl);
@@ -5673,13 +6588,15 @@ border-radius:6px;background:transparent;
     const panel = el("div", {
       className: "live-layout-panel",
       role: "dialog",
-      "aria-label": "Live layout"
+      "aria-modal": "true",
+      "aria-label": "Live layout",
+      tabIndex: -1
     });
     const title = el("div", { className: "live-layout-title" });
     title.textContent = "Live layout";
     panel.appendChild(title);
     const hint = el("p", { className: "live-layout-hint" });
-    hint.textContent = "Show/hide and reorder tiles. Saved in this browser.";
+    hint.textContent = "Visible tiles";
     panel.appendChild(hint);
     _layoutList = el("div", { className: "live-layout-list" });
     panel.appendChild(_layoutList);
@@ -5691,17 +6608,36 @@ border-radius:6px;background:transparent;
   }
   function setLiveLayoutPanelOpen(open) {
     if (!_layoutPopup) return;
+    const wasOpen = !_layoutPopup.hasAttribute("hidden");
     if (open) {
       rebuildLayoutPanelRows();
       _layoutPopup.removeAttribute("hidden");
       _positionLayoutPopup();
       if (!_layoutEscBound) {
         _layoutEscBound = (e) => {
-          if (e.key === "Escape") setLiveLayoutPanelOpen(false);
+          if (e.key === "Escape") {
+            setLiveLayoutPanelOpen(false);
+          } else if (e.key === "Tab" && _layoutPanel) {
+            const focusables = _layoutPanel.querySelectorAll(
+              "input:not(:disabled), button:not(:disabled)"
+            );
+            if (!focusables.length) return;
+            const first = focusables[0];
+            const last = focusables[focusables.length - 1];
+            if (e.shiftKey && document.activeElement === first) {
+              e.preventDefault();
+              last.focus();
+            } else if (!e.shiftKey && document.activeElement === last) {
+              e.preventDefault();
+              first.focus();
+            }
+          }
         };
         document.addEventListener("keydown", _layoutEscBound);
       }
       window.addEventListener("resize", _positionLayoutPopup);
+      const firstFocus = _layoutPanel && _layoutPanel.querySelector("input, button");
+      if (firstFocus) firstFocus.focus();
     } else {
       _layoutPopup.setAttribute("hidden", "");
       if (_layoutEscBound) {
@@ -5709,9 +6645,12 @@ border-radius:6px;background:transparent;
         _layoutEscBound = null;
       }
       window.removeEventListener("resize", _positionLayoutPopup);
+      if (wasOpen && _layoutGearBtn) _layoutGearBtn.focus();
     }
-    if (_layoutGearBtn)
+    if (_layoutGearBtn) {
       _layoutGearBtn.classList.toggle("active", open);
+      _layoutGearBtn.setAttribute("aria-expanded", open ? "true" : "false");
+    }
   }
   function toggleLiveLayoutPanel() {
     if (!_layoutPopup) return false;
@@ -5886,6 +6825,7 @@ border-radius:6px;background:transparent;
   var _potValueLabels = new Array(POT_NAMES.length);
   var _switchButtons = new Array(SWITCH_NAMES.length);
   var _devModeToggleBtn = null;
+  var _devModePillEl = null;
   var _devModeBannerEl = null;
   var _devControlsContainerEl = null;
   function sendCustomControl(payload) {
@@ -5941,7 +6881,10 @@ border-radius:6px;background:transparent;
         if (_potValueLabels[i]) _potValueLabels[i].textContent = formatPotValue(POT_NAMES[i], defVal);
       }
       for (let i = 0; i < SWITCH_NAMES.length; i++) {
-        if (_switchButtons[i]) _switchButtons[i].classList.remove("active", "firing");
+        if (_switchButtons[i]) {
+          _switchButtons[i].classList.remove("active", "firing");
+          _switchButtons[i].setAttribute("aria-pressed", "false");
+        }
       }
     }
     sendCustomControl({
@@ -5960,14 +6903,14 @@ border-radius:6px;background:transparent;
     ctx.uiDevMode = active;
     if (_devModeToggleBtn) {
       _devModeToggleBtn.classList.toggle("active", active);
-      _devModeToggleBtn.textContent = active ? "VIRTUAL MODE ACTIVE" : "PHYSICAL MODE ACTIVE";
+      _devModeToggleBtn.textContent = active ? "Virtual Active" : "Enable Virtual";
+      _devModeToggleBtn.setAttribute("aria-pressed", active ? "true" : "false");
+    }
+    if (_devModePillEl) {
+      _devModePillEl.textContent = active ? "Virtual \xB7 ADC paused" : "Hardware";
     }
     if (_devModeBannerEl) {
       _devModeBannerEl.classList.toggle("dev-active", active);
-      const descEl = _devModeBannerEl.querySelector(".dev-mode-desc");
-      if (descEl) {
-        descEl.innerHTML = active ? "<strong>UI Control Mode Active:</strong> Sliders and switches below directly control Bela. Hardware ADC scanning is suspended (zero floating noise, CPU saved)." : "<strong>Physical Mode Active:</strong> Bela is controlled by its physical potentiometers and switches. Click above to enable virtual UI control.";
-      }
     }
     if (_devControlsContainerEl) {
       _devControlsContainerEl.classList.toggle("disabled-controls", !active);
@@ -5982,9 +6925,7 @@ border-radius:6px;background:transparent;
     const isDev = metaBuf[CONFIG_META.UI_DEV_MODE] > 0.5;
     const ctx = getContext();
     if (Date.now() < _devModeHoldUntil) {
-      if (ctx.uiDevMode === isDev) {
-        _devModeHoldUntil = 0;
-      }
+      if (ctx.uiDevMode === isDev) _devModeHoldUntil = 0;
       return;
     }
     if (ctx.uiDevMode !== isDev) {
@@ -6003,25 +6944,19 @@ border-radius:6px;background:transparent;
     }
     if (name === "MASTER_HPF_FREQ") {
       const hz = 20 + val * 1980;
-      return val < 0.015 ? "Bypass" : Math.round(hz) + " Hz";
+      return val < 0.015 ? "Off" : Math.round(hz) + " Hz";
     }
     if (name === "MASTER_LPF_FREQ") {
       const hz = 200 + val * 19800;
-      return val > 0.985 ? "Bypass" : hz >= 1e3 ? (hz / 1e3).toFixed(1) + " kHz" : Math.round(hz) + " Hz";
+      return val > 0.985 ? "Off" : hz >= 1e3 ? (hz / 1e3).toFixed(1) + " kHz" : Math.round(hz) + " Hz";
     }
     if (name === "MASTER_HPF_RES" || name === "MASTER_LPF_RES") {
       const q = 0.7 + val * (4.5 - 0.7);
       return "Q " + q.toFixed(2);
     }
-    if (name === "MASTER_EQ_SUB_FREQ") {
-      return Math.round(20 + val * 60) + " Hz";
-    }
-    if (name === "MASTER_EQ_KICK_FREQ") {
-      return Math.round(80 + val * 120) + " Hz";
-    }
-    if (name === "MASTER_EQ_MID_FREQ") {
-      return Math.round(200 + val * 1e3) + " Hz";
-    }
+    if (name === "MASTER_EQ_SUB_FREQ") return Math.round(20 + val * 60) + " Hz";
+    if (name === "MASTER_EQ_KICK_FREQ") return Math.round(80 + val * 120) + " Hz";
+    if (name === "MASTER_EQ_MID_FREQ") return Math.round(200 + val * 1e3) + " Hz";
     if (name === "MASTER_EQ_TOP_FREQ") {
       const hz = 1200 + val * 14800;
       return hz >= 1e3 ? (hz / 1e3).toFixed(1) + " kHz" : Math.round(hz) + " Hz";
@@ -6032,7 +6967,7 @@ border-radius:6px;background:transparent;
     }
     return Math.round(val * 100) + "%";
   }
-  function createPotControl(potIdx, label) {
+  function createPotControl(potIdx, label, ariaPrefix) {
     const name = POT_NAMES[potIdx];
     const isCentered = isPotCentered(name);
     const defVal = getPotDevDefault(name);
@@ -6051,15 +6986,20 @@ border-radius:6px;background:transparent;
       max: "1",
       step: "0.005",
       value: defVal.toString(),
-      className: "dev-pot-slider" + (isCentered ? " centered" : "")
+      className: "dev-pot-slider" + (isCentered ? " centered" : ""),
+      "aria-label": ariaPrefix ? `${ariaPrefix} ${label}` : label || name
     });
     slider.addEventListener("pointerdown", () => {
       _activeInteractingPot = potIdx;
     });
-    slider.addEventListener("pointerup", () => {
-      _activeInteractingPot = -1;
-      sendVirtualPot(potIdx, parseFloat(slider.value), true);
-    });
+    const endDrag = () => {
+      if (_activeInteractingPot === potIdx) {
+        _activeInteractingPot = -1;
+        sendVirtualPot(potIdx, parseFloat(slider.value), true);
+      }
+    };
+    slider.addEventListener("pointerup", endDrag);
+    slider.addEventListener("pointercancel", endDrag);
     slider.addEventListener("input", () => {
       const v = parseFloat(slider.value);
       valLbl.textContent = formatPotValue(name, v);
@@ -6078,29 +7018,30 @@ border-radius:6px;background:transparent;
   }
   function buildMasterSection() {
     const card = el("div", { className: "card dev-section" });
-    card.appendChild(cardTitle("Master & Band Kills"));
+    card.appendChild(cardTitle("Master"));
     const killSection = el("div", { className: "dev-kill-section" });
-    const killTitle = el("div", { className: "dev-sub-heading" });
-    killTitle.textContent = "4-Band Crossover Kills (24 dB/oct)";
-    killSection.appendChild(killTitle);
+    killSection.appendChild(el("div", { className: "dev-sub-heading", textContent: "Kills" }));
     const killGrid = el("div", { className: "dev-kill-grid" });
     const killDef = [
-      { idx: 0, label: "SUB (<80Hz)", color: "sub" },
-      { idx: 1, label: "KICK (80-200Hz)", color: "kick" },
-      { idx: 2, label: "MID (200-1.2k)", color: "mid" },
-      { idx: 3, label: "TOP (>1.2kHz)", color: "top" }
+      { idx: 0, label: "SUB", sub: "<80Hz", color: "sub" },
+      { idx: 1, label: "KICK", sub: "80\u2013200", color: "kick" },
+      { idx: 2, label: "MID", sub: "200\u20131.2k", color: "mid" },
+      { idx: 3, label: "TOP", sub: ">1.2k", color: "top" }
     ];
-    killDef.forEach(({ idx, label, color }) => {
+    killDef.forEach(({ idx, label, sub, color }) => {
       const btn = el("button", {
         type: "button",
-        className: "dev-kill-btn " + color
+        className: "dev-kill-btn " + color,
+        "aria-pressed": "false"
       });
-      btn.textContent = label;
+      btn.appendChild(el("span", { textContent: label }));
+      btn.appendChild(el("span", { className: "dev-kill-sub", textContent: sub }));
       btn.addEventListener("click", () => {
         const ctx = getContext();
         const curState = ctx.switchStates && ctx.switchStates[idx] > 0.5;
         const newState = !curState;
         btn.classList.toggle("active", newState);
+        btn.setAttribute("aria-pressed", newState ? "true" : "false");
         sendVirtualSwitch(idx, newState);
       });
       _switchButtons[idx] = btn;
@@ -6110,33 +7051,34 @@ border-radius:6px;background:transparent;
     card.appendChild(killSection);
     const masterGrid = el("div", { className: "dev-grid-2col" });
     const masterCol = el("div", { className: "dev-sub-panel" });
-    masterCol.appendChild(el("div", { className: "dev-sub-heading", textContent: "Master Volume" }));
-    masterCol.appendChild(createPotControl(24, "Master Gain (OUT 2/3)"));
+    masterCol.appendChild(el("div", { className: "dev-sub-heading", textContent: "Output" }));
+    masterCol.appendChild(createPotControl(24, "Master Gain", "Master"));
     masterGrid.appendChild(masterCol);
     const trimCol = el("div", { className: "dev-sub-panel" });
-    trimCol.appendChild(el("div", { className: "dev-sub-heading", textContent: "Band Trim (\xB16 dB)" }));
+    trimCol.appendChild(el("div", { className: "dev-sub-heading", textContent: "Band Trim" }));
     const trimPots = el("div", { className: "dev-pot-grid-2" });
-    trimPots.appendChild(createPotControl(37, "Trim Sub", true));
-    trimPots.appendChild(createPotControl(38, "Trim Kick", true));
-    trimPots.appendChild(createPotControl(39, "Trim Mid", true));
-    trimPots.appendChild(createPotControl(40, "Trim Top", true));
+    trimPots.appendChild(createPotControl(37, "Sub", "Band Trim"));
+    trimPots.appendChild(createPotControl(38, "Kick", "Band Trim"));
+    trimPots.appendChild(createPotControl(39, "Mid", "Band Trim"));
+    trimPots.appendChild(createPotControl(40, "Top", "Band Trim"));
     trimCol.appendChild(trimPots);
     masterGrid.appendChild(trimCol);
     card.appendChild(masterGrid);
     const filterSection = el("div", { className: "dev-sub-panel" });
-    filterSection.appendChild(el("div", { className: "dev-sub-heading", textContent: "Master Resonant Filters (Soft-Bypass)" }));
+    filterSection.style.marginTop = "12px";
+    filterSection.appendChild(el("div", { className: "dev-sub-heading", textContent: "Filters" }));
     const filterGrid = el("div", { className: "dev-pot-grid-2" });
-    filterGrid.appendChild(createPotControl(33, "HPF Cutoff (20Hz - 2kHz)"));
-    filterGrid.appendChild(createPotControl(34, "HPF Resonance (Q 0.7 - 4.5)"));
-    filterGrid.appendChild(createPotControl(35, "LPF Cutoff (200Hz - 20kHz)"));
-    filterGrid.appendChild(createPotControl(36, "LPF Resonance (Q 0.7 - 4.5)"));
+    filterGrid.appendChild(createPotControl(33, "HPF Freq", "Master"));
+    filterGrid.appendChild(createPotControl(34, "HPF Res", "Master"));
+    filterGrid.appendChild(createPotControl(35, "LPF Freq", "Master"));
+    filterGrid.appendChild(createPotControl(36, "LPF Res", "Master"));
     filterSection.appendChild(filterGrid);
     card.appendChild(filterSection);
     return card;
   }
   function buildChannelStripsSection() {
     const card = el("div", { className: "card dev-section" });
-    card.appendChild(cardTitle("AUX Channel Strips (1 to 4)"));
+    card.appendChild(cardTitle("Channels"));
     const grid = el("div", { className: "dev-channels-grid" });
     const auxConfigs = [
       { ch: 1, base: 0 },
@@ -6146,29 +7088,27 @@ border-radius:6px;background:transparent;
     ];
     auxConfigs.forEach(({ ch, base }) => {
       const col = el("div", { className: "dev-channel-col" });
-      const hdr = el("div", { className: "dev-channel-hdr" });
-      hdr.textContent = "AUX " + ch;
+      const hdr = el("div", { className: "dev-channel-hdr", textContent: "AUX " + ch });
       col.appendChild(hdr);
-      col.appendChild(createPotControl(base + 0, "Gain In"));
+      const prefix = "AUX " + ch;
+      col.appendChild(createPotControl(base + 0, "Gain", prefix));
       const eqBox = el("div", { className: "dev-eq-box" });
-      if (ch === 1 || ch === 2) {
-        if (ch === 1) {
-          eqBox.appendChild(createPotControl(base + 3, "EQ High", true));
-          eqBox.appendChild(createPotControl(base + 1, "EQ Mid", true));
-          eqBox.appendChild(createPotControl(base + 2, "EQ Low", true));
-        } else {
-          eqBox.appendChild(createPotControl(base + 2, "EQ High", true));
-          eqBox.appendChild(createPotControl(base + 1, "EQ Mid", true));
-          eqBox.appendChild(createPotControl(base + 3, "EQ Low", true));
-        }
+      if (ch === 1) {
+        eqBox.appendChild(createPotControl(base + 3, "High", prefix));
+        eqBox.appendChild(createPotControl(base + 1, "Mid", prefix));
+        eqBox.appendChild(createPotControl(base + 2, "Low", prefix));
+      } else if (ch === 2) {
+        eqBox.appendChild(createPotControl(base + 2, "High", prefix));
+        eqBox.appendChild(createPotControl(base + 1, "Mid", prefix));
+        eqBox.appendChild(createPotControl(base + 3, "Low", prefix));
       } else {
-        eqBox.appendChild(createPotControl(base + 3, "EQ High", true));
-        eqBox.appendChild(createPotControl(base + 2, "EQ Mid", true));
-        eqBox.appendChild(createPotControl(base + 1, "EQ Low", true));
+        eqBox.appendChild(createPotControl(base + 3, "High", prefix));
+        eqBox.appendChild(createPotControl(base + 2, "Mid", prefix));
+        eqBox.appendChild(createPotControl(base + 1, "Low", prefix));
       }
       col.appendChild(eqBox);
-      col.appendChild(createPotControl(base + 4, "FX 1 Send"));
-      col.appendChild(createPotControl(base + 5, "FX 2 Send"));
+      col.appendChild(createPotControl(base + 4, "FX1", prefix));
+      col.appendChild(createPotControl(base + 5, "FX2", prefix));
       grid.appendChild(col);
     });
     card.appendChild(grid);
@@ -6176,32 +7116,33 @@ border-radius:6px;background:transparent;
   }
   function buildMasterEqSection() {
     const card = el("div", { className: "card dev-section" });
-    card.appendChild(cardTitle("Master Equalizers (Parametric & 12-Band Graphic)"));
+    card.appendChild(cardTitle("Master EQ"));
     const peqBox = el("div", { className: "dev-sub-panel" });
-    peqBox.appendChild(el("div", { className: "dev-sub-heading", textContent: "4-Band Parametric Equalizer (Sweepable Freq \xB16 dB)" }));
+    peqBox.appendChild(el("div", { className: "dev-sub-heading", textContent: "Parametric" }));
     const peqGrid = el("div", { className: "dev-channels-grid" });
     const peqBands = [
-      { label: "SUB (20-80 Hz)", fIdx: 25, gIdx: 26 },
-      { label: "KICK (80-200 Hz)", fIdx: 27, gIdx: 28 },
-      { label: "MID (200-1.2k Hz)", fIdx: 29, gIdx: 30 },
-      { label: "TOP (1.2-16k Hz)", fIdx: 31, gIdx: 32 }
+      { label: "SUB", fIdx: 25, gIdx: 26 },
+      { label: "KICK", fIdx: 27, gIdx: 28 },
+      { label: "MID", fIdx: 29, gIdx: 30 },
+      { label: "TOP", fIdx: 31, gIdx: 32 }
     ];
     peqBands.forEach(({ label, fIdx, gIdx }) => {
       const bCol = el("div", { className: "dev-channel-col" });
       bCol.appendChild(el("div", { className: "dev-channel-hdr", textContent: label }));
-      bCol.appendChild(createPotControl(fIdx, "Frequency"));
-      bCol.appendChild(createPotControl(gIdx, "Gain (\xB16 dB)", true));
+      bCol.appendChild(createPotControl(fIdx, "Freq", label));
+      bCol.appendChild(createPotControl(gIdx, "Gain", label));
       peqGrid.appendChild(bCol);
     });
     peqBox.appendChild(peqGrid);
     card.appendChild(peqBox);
     const geqBox = el("div", { className: "dev-sub-panel" });
+    geqBox.style.marginTop = "12px";
     const geqHdrRow = el("div", { className: "dev-row-between" });
-    geqHdrRow.appendChild(el("div", { className: "dev-sub-heading", textContent: "12-Band Graphic Equalizer (\xB112 dB)" }));
+    geqHdrRow.appendChild(el("div", { className: "dev-sub-heading", textContent: "Graphic EQ" }));
     const flatBtn = el("button", {
       type: "button",
       className: "dev-small-btn",
-      textContent: "Reset to Flat (0 dB)"
+      textContent: "Flat"
     });
     flatBtn.addEventListener("click", () => {
       for (let i = 46; i <= 57; i++) {
@@ -6215,8 +7156,7 @@ border-radius:6px;background:transparent;
     const geqGrid = el("div", { className: "dev-geq-grid" });
     const geqLabels = ["40Hz", "60Hz", "80Hz", "100Hz", "125Hz", "250Hz", "500Hz", "1kHz", "2kHz", "4kHz", "8kHz", "16kHz"];
     for (let i = 0; i < 12; i++) {
-      const potIdx = 46 + i;
-      geqGrid.appendChild(createPotControl(potIdx, geqLabels[i], true));
+      geqGrid.appendChild(createPotControl(46 + i, geqLabels[i], "GEQ"));
     }
     geqBox.appendChild(geqGrid);
     card.appendChild(geqBox);
@@ -6224,23 +7164,23 @@ border-radius:6px;background:transparent;
   }
   function buildFxAndSirenSection() {
     const card = el("div", { className: "card dev-section" });
-    card.appendChild(cardTitle("Effects & Dub Siren"));
+    card.appendChild(cardTitle("FX & Siren"));
     const grid = el("div", { className: "dev-grid-2col" });
     const fxCol = el("div", { className: "dev-sub-panel" });
-    fxCol.appendChild(el("div", { className: "dev-sub-heading", textContent: "FX Sends & Returns" }));
+    fxCol.appendChild(el("div", { className: "dev-sub-heading", textContent: "FX Bus" }));
     const fx1Row = el("div", { className: "dev-fx-mode-row" });
-    fx1Row.appendChild(el("span", { className: "dev-pot-label", textContent: "FX1 Send Filter:" }));
-    const fx1Mids = el("button", { type: "button", className: "dev-mode-btn", textContent: "MIDS (250-4k)" });
-    const fx1Tops = el("button", { type: "button", className: "dev-mode-btn", textContent: "TOPS (>4k)" });
+    fx1Row.appendChild(el("span", { className: "dev-pot-label", textContent: "FX1 Filter" }));
+    const fx1Mids = el("button", { type: "button", className: "dev-mode-btn", textContent: "Mids", "aria-pressed": "false" });
+    const fx1Tops = el("button", { type: "button", className: "dev-mode-btn", textContent: "Tops", "aria-pressed": "false" });
     fx1Mids.addEventListener("click", () => {
-      const cur = fx1Mids.classList.contains("active");
-      fx1Mids.classList.toggle("active", !cur);
-      sendVirtualSwitch(4, !cur);
+      const next = fx1Mids.classList.toggle("active");
+      fx1Mids.setAttribute("aria-pressed", next ? "true" : "false");
+      sendVirtualSwitch(4, next);
     });
     fx1Tops.addEventListener("click", () => {
-      const cur = fx1Tops.classList.contains("active");
-      fx1Tops.classList.toggle("active", !cur);
-      sendVirtualSwitch(5, !cur);
+      const next = fx1Tops.classList.toggle("active");
+      fx1Tops.setAttribute("aria-pressed", next ? "true" : "false");
+      sendVirtualSwitch(5, next);
     });
     _switchButtons[4] = fx1Mids;
     _switchButtons[5] = fx1Tops;
@@ -6248,61 +7188,83 @@ border-radius:6px;background:transparent;
     fx1Row.appendChild(fx1Tops);
     fxCol.appendChild(fx1Row);
     const fx2Row = el("div", { className: "dev-fx-mode-row" });
-    fx2Row.appendChild(el("span", { className: "dev-pot-label", textContent: "FX2 Send Filter:" }));
-    const fx2Mids = el("button", { type: "button", className: "dev-mode-btn", textContent: "MIDS (250-4k)" });
-    const fx2Tops = el("button", { type: "button", className: "dev-mode-btn", textContent: "TOPS (>4k)" });
+    fx2Row.appendChild(el("span", { className: "dev-pot-label", textContent: "FX2 Filter" }));
+    const fx2Mids = el("button", { type: "button", className: "dev-mode-btn", textContent: "Mids", "aria-pressed": "false" });
+    const fx2Tops = el("button", { type: "button", className: "dev-mode-btn", textContent: "Tops", "aria-pressed": "false" });
     fx2Mids.addEventListener("click", () => {
-      const cur = fx2Mids.classList.contains("active");
-      fx2Mids.classList.toggle("active", !cur);
-      sendVirtualSwitch(7, !cur);
+      const next = fx2Mids.classList.toggle("active");
+      fx2Mids.setAttribute("aria-pressed", next ? "true" : "false");
+      sendVirtualSwitch(7, next);
     });
     fx2Tops.addEventListener("click", () => {
-      const cur = fx2Tops.classList.contains("active");
-      fx2Tops.classList.toggle("active", !cur);
-      sendVirtualSwitch(6, !cur);
+      const next = fx2Tops.classList.toggle("active");
+      fx2Tops.setAttribute("aria-pressed", next ? "true" : "false");
+      sendVirtualSwitch(6, next);
     });
     _switchButtons[7] = fx2Mids;
     _switchButtons[6] = fx2Tops;
     fx2Row.appendChild(fx2Mids);
     fx2Row.appendChild(fx2Tops);
     fxCol.appendChild(fx2Row);
-    fxCol.appendChild(createPotControl(58, "FX 1 Return Gain (IN 0)"));
-    fxCol.appendChild(createPotControl(59, "FX 2 Return Gain (IN 1)"));
+    fxCol.appendChild(createPotControl(58, "FX1 Return", "FX"));
+    fxCol.appendChild(createPotControl(59, "FX2 Return", "FX"));
     grid.appendChild(fxCol);
     const sirenCol = el("div", { className: "dev-sub-panel" });
-    sirenCol.appendChild(el("div", { className: "dev-sub-heading", textContent: "Monophonic Dub Siren" }));
-    sirenCol.appendChild(createPotControl(41, "Siren Type (Preset)"));
-    sirenCol.appendChild(createPotControl(42, "Modulation LFO"));
-    sirenCol.appendChild(createPotControl(43, "Siren Gain"));
-    sirenCol.appendChild(createPotControl(44, "Siren FX 1 Send"));
-    sirenCol.appendChild(createPotControl(45, "Siren FX 2 Send"));
+    sirenCol.appendChild(el("div", { className: "dev-sub-heading", textContent: "Dub Siren" }));
+    sirenCol.appendChild(createPotControl(41, "Preset", "Siren"));
+    sirenCol.appendChild(createPotControl(42, "Mod", "Siren"));
+    sirenCol.appendChild(createPotControl(43, "Gain", "Siren"));
+    sirenCol.appendChild(createPotControl(44, "FX1", "Siren"));
+    sirenCol.appendChild(createPotControl(45, "FX2", "Siren"));
     const triggerBox = el("div", { className: "dev-siren-trigger-box" });
     const trigBtn = el("button", {
       type: "button",
       className: "dev-siren-trig-btn",
-      textContent: "TRIGGER SIREN (Hold)"
+      textContent: "Trigger"
     });
-    const triggerOn = (e) => {
-      e.preventDefault();
-      trigBtn.classList.add("firing");
-      sendVirtualSwitch(8, true);
+    let trigActive = false;
+    const setTrigger = (on) => {
+      if (trigActive === on) return;
+      trigActive = on;
+      trigBtn.classList.toggle("firing", on);
+      sendVirtualSwitch(8, on);
     };
-    const triggerOff = (e) => {
+    trigBtn.addEventListener("pointerdown", (e) => {
       e.preventDefault();
-      trigBtn.classList.remove("firing");
-      sendVirtualSwitch(8, false);
-    };
-    trigBtn.addEventListener("mousedown", triggerOn);
-    window.addEventListener("mouseup", triggerOff);
-    trigBtn.addEventListener("touchstart", triggerOn, { passive: false });
-    window.addEventListener("touchend", triggerOff, { passive: false });
+      if (typeof trigBtn.setPointerCapture === "function") {
+        try {
+          trigBtn.setPointerCapture(e.pointerId);
+        } catch (_) {
+        }
+      }
+      setTrigger(true);
+    });
+    const endTrigger = () => setTrigger(false);
+    trigBtn.addEventListener("pointerup", endTrigger);
+    trigBtn.addEventListener("pointercancel", endTrigger);
+    trigBtn.addEventListener("lostpointercapture", endTrigger);
+    trigBtn.addEventListener("keydown", (e) => {
+      if ((e.key === " " || e.key === "Enter") && !e.repeat) {
+        e.preventDefault();
+        setTrigger(true);
+      }
+    });
+    trigBtn.addEventListener("keyup", (e) => {
+      if (e.key === " " || e.key === "Enter") {
+        e.preventDefault();
+        setTrigger(false);
+      }
+    });
+    trigBtn.addEventListener("blur", endTrigger);
     const latchBtn = el("button", {
       type: "button",
       className: "dev-siren-latch-btn",
-      textContent: "Continuous Latch"
+      textContent: "Latch",
+      "aria-pressed": "false"
     });
     latchBtn.addEventListener("click", () => {
       const isFiring = latchBtn.classList.toggle("active");
+      latchBtn.setAttribute("aria-pressed", isFiring ? "true" : "false");
       trigBtn.classList.toggle("firing", isFiring);
       sendVirtualSwitch(8, isFiring);
     });
@@ -6323,15 +7285,15 @@ border-radius:6px;background:transparent;
     _devModeBannerEl = banner;
     const bannerTop = el("div", { className: "dev-banner-top" });
     const titleDiv = el("div", { className: "dev-banner-title-box" });
-    const title = el("h2", { className: "dev-banner-title", textContent: "Virtual Control Mode (Development Mode)" });
-    const desc = el("p", { className: "dev-mode-desc" });
-    titleDiv.appendChild(title);
-    titleDiv.appendChild(desc);
+    titleDiv.appendChild(el("h2", { className: "dev-banner-title", textContent: "Virtual Controls" }));
+    _devModePillEl = el("span", { className: "dev-mode-pill", textContent: "Hardware" });
+    titleDiv.appendChild(_devModePillEl);
     bannerTop.appendChild(titleDiv);
     const toggleBtn = el("button", {
       type: "button",
       id: "dev-mode-toggle-btn",
-      className: "dev-toggle-btn"
+      className: "dev-toggle-btn",
+      "aria-pressed": "false"
     });
     toggleBtn.addEventListener("click", () => {
       const ctx = getContext();
@@ -6344,7 +7306,7 @@ border-radius:6px;background:transparent;
     const resetBtn = el("button", {
       type: "button",
       className: "dev-action-btn",
-      textContent: "Reset to Default Values"
+      textContent: "Reset"
     });
     resetBtn.addEventListener("click", () => {
       sendVirtualReset();
@@ -6355,14 +7317,17 @@ border-radius:6px;background:transparent;
         if (_potValueLabels[i]) _potValueLabels[i].textContent = formatPotValue(name, defVal);
       }
       for (let i = 0; i < SWITCH_NAMES.length; i++) {
-        if (_switchButtons[i]) _switchButtons[i].classList.remove("active", "firing");
+        if (_switchButtons[i]) {
+          _switchButtons[i].classList.remove("active", "firing");
+          _switchButtons[i].setAttribute("aria-pressed", "false");
+        }
       }
     });
     actionsRow.appendChild(resetBtn);
     const muteBtn = el("button", {
       type: "button",
       className: "dev-action-btn",
-      textContent: "Mute Master (0%)"
+      textContent: "Mute Master"
     });
     muteBtn.addEventListener("click", () => {
       if (_potSliders[24]) _potSliders[24].value = "0";
@@ -6373,11 +7338,14 @@ border-radius:6px;background:transparent;
     const unkillBtn = el("button", {
       type: "button",
       className: "dev-action-btn",
-      textContent: "Disable All Kills"
+      textContent: "Unkill All"
     });
     unkillBtn.addEventListener("click", () => {
       for (let i = 0; i < 4; i++) {
-        if (_switchButtons[i]) _switchButtons[i].classList.remove("active");
+        if (_switchButtons[i]) {
+          _switchButtons[i].classList.remove("active");
+          _switchButtons[i].setAttribute("aria-pressed", "false");
+        }
         sendVirtualSwitch(i, false);
       }
     });
@@ -6414,33 +7382,97 @@ border-radius:6px;background:transparent;
         const btn = _switchButtons[i];
         if (!btn) continue;
         const isOn = ctx.switchStates[i] > 0.5;
-        if (i === 8) {
-          btn.classList.toggle("active", isOn);
-        } else {
-          btn.classList.toggle("active", isOn);
-        }
+        btn.classList.toggle("active", isOn);
+        btn.setAttribute("aria-pressed", isOn ? "true" : "false");
       }
     }
   }
 
   // gui/dom/fx.js
+  var ICON_SEND = ["M22 2L11 13", "M22 2l-7 20-4-9-9-4 20-7Z"];
   function sendBelaControl(payload) {
     if (typeof Bela !== "undefined" && Bela.control && typeof Bela.control.send === "function") {
       Bela.control.send(payload);
     }
   }
+  function syncFxTriggerOutput(aux, send) {
+    const ctx = getContext();
+    if (!ctx.fxTriggers || !ctx.fxMomentaryTriggers || !ctx.fxLatchedTriggers) return;
+    const mom = !!ctx.fxMomentaryTriggers[aux][send];
+    const lat = !!ctx.fxLatchedTriggers[aux][send];
+    const effective = mom || lat;
+    (ctx.fxTriggerButtons || []).forEach((btn) => {
+      if (parseInt(btn.dataset.aux, 10) === aux && parseInt(btn.dataset.send, 10) === send) {
+        btn.classList.toggle("active", mom);
+        btn.setAttribute("aria-pressed", mom ? "true" : "false");
+      }
+    });
+    (ctx.fxLatchButtons || []).forEach((btn) => {
+      if (parseInt(btn.dataset.aux, 10) === aux && parseInt(btn.dataset.send, 10) === send) {
+        btn.classList.toggle("active", lat);
+        btn.setAttribute("aria-pressed", lat ? "true" : "false");
+      }
+    });
+    if (ctx.fxTriggers[aux][send] === effective) return;
+    ctx.fxTriggers[aux][send] = effective;
+    sendBelaControl({
+      event: "custom",
+      fxTrigger: { aux, send, active: effective, testTone: !!ctx.fxTestTone }
+    });
+  }
+  function setMomentaryFxTrigger(aux, send, active) {
+    const ctx = getContext();
+    if (!ctx.fxMomentaryTriggers || ctx.fxMomentaryTriggers[aux][send] === active) return;
+    ctx.fxMomentaryTriggers[aux][send] = active;
+    syncFxTriggerOutput(aux, send);
+  }
+  function toggleLatchedFxTrigger(aux, send) {
+    const ctx = getContext();
+    if (!ctx.fxLatchedTriggers) return;
+    ctx.fxLatchedTriggers[aux][send] = !ctx.fxLatchedTriggers[aux][send];
+    syncFxTriggerOutput(aux, send);
+  }
+  function clearMomentaryFxTriggers() {
+    const ctx = getContext();
+    if (!ctx || !ctx.fxMomentaryTriggers) return;
+    for (let a = 0; a < ctx.fxMomentaryTriggers.length; a++) {
+      for (let s = 0; s < 2; s++) {
+        if (ctx.fxMomentaryTriggers[a][s]) {
+          ctx.fxMomentaryTriggers[a][s] = false;
+          syncFxTriggerOutput(a, s);
+        }
+      }
+    }
+  }
+  function clearAllFxTriggers() {
+    const ctx = getContext();
+    if (ctx) {
+      [ctx.fxTriggers, ctx.fxMomentaryTriggers, ctx.fxLatchedTriggers].forEach((arr) => {
+        if (!arr) return;
+        for (let a = 0; a < arr.length; a++) {
+          arr[a][0] = false;
+          arr[a][1] = false;
+        }
+      });
+      (ctx.fxTriggerButtons || []).forEach((btn) => {
+        btn.classList.remove("active");
+        btn.setAttribute("aria-pressed", "false");
+      });
+      (ctx.fxLatchButtons || []).forEach((btn) => {
+        btn.classList.remove("active");
+        btn.setAttribute("aria-pressed", "false");
+      });
+    }
+    sendBelaControl({ event: "custom", fxTriggerClearAll: true });
+  }
+  var _windowBlurBound = false;
   function buildFxPane() {
     const pane = el("div", { className: "tab-pane", id: "tab-fx" });
     const container = el("div", { className: "fx-pane-container" });
-    const hdr = el("div", { className: "fx-header-banner" });
-    const titleBox = el("div", { className: "fx-title-box" });
-    titleBox.appendChild(el("h2", { textContent: "DIGITAL MULTI-FX ENGINE", className: "fx-main-title" }));
-    titleBox.appendChild(el("p", {
-      textContent: "Divert channel FX sends to internal real-time DSP effects (Echo, Spring, Saturation, Shimmer, Ducker)",
-      className: "fx-subtitle"
-    }));
-    hdr.appendChild(titleBox);
-    container.appendChild(hdr);
+    if (!_windowBlurBound && typeof window !== "undefined") {
+      _windowBlurBound = true;
+      window.addEventListener("blur", clearMomentaryFxTriggers);
+    }
     container.appendChild(buildRoutingMatrixCard());
     const fxGrid = el("div", { className: "fx-modules-grid" });
     fxGrid.appendChild(buildTapeDriveCard());
@@ -6455,114 +7487,189 @@ border-radius:6px;background:transparent;
     return pane;
   }
   function buildRoutingMatrixCard() {
+    const ctx = getContext();
     const card = el("div", { className: "fx-card fx-card-routing" });
     const cardHdr = el("div", { className: "fx-card-header" });
-    cardHdr.appendChild(el("div", { className: "fx-card-title", textContent: "\u{1F39B}\uFE0F CHANNEL SENDS ROUTING MATRIX" }));
-    cardHdr.appendChild(el("div", {
-      className: "fx-card-badge",
-      textContent: "Hardware Knobs \u2192 Internal DSP"
-    }));
-    card.appendChild(cardHdr);
-    const desc = el("p", {
-      className: "fx-routing-desc",
-      textContent: "Choose destination for each channel's FX Send. Selecting an internal digital effect diverts the signal from physical Jack Out directly into the DSP engine."
+    cardHdr.appendChild(el("div", { className: "fx-card-title", textContent: "Send Routing" }));
+    const tools = el("div", { className: "fx-routing-tools" });
+    const testToneBtn = el("button", {
+      type: "button",
+      className: "fx-tool-btn" + (ctx.fxTestTone ? " active" : ""),
+      textContent: "Test Tone",
+      title: "Inject 220/440 Hz test signal when triggering AUX sends",
+      "aria-pressed": ctx.fxTestTone ? "true" : "false"
     });
-    card.appendChild(desc);
+    testToneBtn.addEventListener("click", () => {
+      ctx.fxTestTone = !ctx.fxTestTone;
+      testToneBtn.classList.toggle("active", ctx.fxTestTone);
+      testToneBtn.setAttribute("aria-pressed", ctx.fxTestTone ? "true" : "false");
+      sendBelaControl({ event: "custom", fxTestTone: ctx.fxTestTone });
+    });
+    const allOffBtn = el("button", {
+      type: "button",
+      className: "fx-tool-btn",
+      textContent: "All Off",
+      title: "Turn off all active Send triggers"
+    });
+    allOffBtn.addEventListener("click", () => clearAllFxTriggers());
+    tools.appendChild(testToneBtn);
+    tools.appendChild(allOffBtn);
+    cardHdr.appendChild(tools);
+    card.appendChild(cardHdr);
     const table = el("div", { className: "fx-matrix-table" });
-    const ctx = getContext();
-    ctx.fxRouteButtons = [];
-    const auxNames = ["AUX 1", "AUX 2", "AUX 3", "AUX 4", "\u{1F6A8} SIREN"];
+    ctx.fxRouteSelects = [];
+    ctx.fxTriggerButtons = [];
+    ctx.fxLatchButtons = [];
+    const auxNames = ["AUX 1", "AUX 2", "AUX 3", "AUX 4", "SIREN"];
     const destinations = [
-      { id: FX_DEST_HARDWARE, label: "HW", cls: "dest-hw" },
-      { id: FX_DEST_SUB_ROAR, label: "SUB", cls: "dest-sub" },
-      { id: FX_DEST_ECHO_DUB, label: "ECHO", cls: "dest-dub" },
-      { id: FX_DEST_TUBBY_SPRING, label: "SPRING", cls: "dest-spring" },
-      { id: FX_DEST_BLACK_ARK, label: "PHASER", cls: "dest-phase" },
-      { id: FX_DEST_TAPE_DRIVE, label: "TAPE", cls: "dest-tape" },
-      { id: FX_DEST_SHIMMER_DELAY, label: "SHIM", cls: "dest-shimmer" },
-      { id: FX_DEST_MUTE, label: "OFF", cls: "dest-mute" }
+      { id: FX_DEST_HARDWARE, label: "HW \u2014 Physical" },
+      { id: FX_DEST_SUB_ROAR, label: "SUB \u2014 Sub Roar" },
+      { id: FX_DEST_ECHO_DUB, label: "ECHO \u2014 Echo Dub" },
+      { id: FX_DEST_TUBBY_SPRING, label: "SPRING \u2014 Tubby" },
+      { id: FX_DEST_BLACK_ARK, label: "PHASER \u2014 Black Ark" },
+      { id: FX_DEST_TAPE_DRIVE, label: "TAPE \u2014 Drive" },
+      { id: FX_DEST_SHIMMER_DELAY, label: "SHIM \u2014 Shimmer" },
+      { id: FX_DEST_MUTE, label: "OFF \u2014 Mute" }
     ];
     auxNames.forEach((name, auxIdx) => {
       const row = el("div", { className: "fx-matrix-row" });
       const chLabel = el("div", { className: "fx-matrix-ch-label" });
       chLabel.appendChild(el("span", { className: "fx-ch-badge", textContent: name }));
       row.appendChild(chLabel);
-      const send1Col = el("div", { className: "fx-matrix-send-col" });
-      send1Col.appendChild(el("span", {
-        className: "fx-send-title",
-        textContent: auxIdx === 4 ? "SIREN SEND 1" : "FX 1 SEND (OUT0)"
-      }));
-      const grp1 = el("div", { className: "fx-pill-group" });
-      const send2Col = el("div", { className: "fx-matrix-send-col" });
-      send2Col.appendChild(el("span", {
-        className: "fx-send-title",
-        textContent: auxIdx === 4 ? "SIREN SEND 2" : "FX 2 SEND (OUT1)"
-      }));
-      const grp2 = el("div", { className: "fx-pill-group" });
+      const sendsWrap = el("div", { className: "fx-matrix-sends" });
       [0, 1].forEach((sendIdx) => {
-        const grp = sendIdx === 0 ? grp1 : grp2;
+        const sendCol = el("div", { className: "fx-matrix-send-col" });
+        sendCol.appendChild(el("span", {
+          className: "fx-send-tag",
+          textContent: "S" + (sendIdx + 1),
+          title: "Send " + (sendIdx + 1)
+        }));
+        const currentDest = ctx.fxRouting[auxIdx][sendIdx];
+        const select = el("select", {
+          className: "fx-route-select",
+          "aria-label": `${name} Send ${sendIdx + 1} destination`
+        });
+        select.dataset.aux = String(auxIdx);
+        select.dataset.send = String(sendIdx);
+        select.dataset.dest = String(currentDest);
         destinations.forEach((dest) => {
-          const btn = el("button", {
-            type: "button",
-            className: `fx-pill-btn ${dest.cls}`,
+          const opt = el("option", {
+            value: String(dest.id),
             textContent: dest.label
           });
-          const isCurrent = ctx.fxRouting[auxIdx][sendIdx] === dest.id;
-          if (isCurrent) btn.classList.add("active");
-          btn.dataset.aux = auxIdx;
-          btn.dataset.send = sendIdx;
-          btn.dataset.dest = dest.id;
-          btn.addEventListener("click", () => {
-            ctx.fxRouting[auxIdx][sendIdx] = dest.id;
-            grp.querySelectorAll(".fx-pill-btn").forEach((b) => b.classList.remove("active"));
-            btn.classList.add("active");
-            sendBelaControl({
-              event: "custom",
-              fxRoute: { aux: auxIdx, send: sendIdx, dest: dest.id }
-            });
-          });
-          grp.appendChild(btn);
-          ctx.fxRouteButtons.push(btn);
+          select.appendChild(opt);
         });
+        select.value = String(currentDest);
+        select.addEventListener("change", () => {
+          const destId = parseInt(select.value, 10);
+          ctx.fxRouting[auxIdx][sendIdx] = destId;
+          select.dataset.dest = String(destId);
+          sendBelaControl({
+            event: "custom",
+            fxRoute: { aux: auxIdx, send: sendIdx, dest: destId }
+          });
+        });
+        ctx.fxRouteSelects.push(select);
+        sendCol.appendChild(select);
+        const trigWrap = el("div", { className: "fx-send-triggers" });
+        const trigBtn = el("button", {
+          type: "button",
+          className: "fx-trig-btn" + (ctx.fxMomentaryTriggers[auxIdx][sendIdx] ? " active" : ""),
+          title: auxIdx === 4 ? `Hold to trigger Siren on Send ${sendIdx + 1}` : `Hold to trigger ${name} Send ${sendIdx + 1}`,
+          "aria-label": `Momentary ${name} Send ${sendIdx + 1}`,
+          "aria-pressed": ctx.fxMomentaryTriggers[auxIdx][sendIdx] ? "true" : "false"
+        });
+        trigBtn.dataset.aux = String(auxIdx);
+        trigBtn.dataset.send = String(sendIdx);
+        trigBtn.appendChild(svgIcon(ICON_SEND, "0 0 24 24", 12));
+        trigBtn.appendChild(el("span", { textContent: "Send" }));
+        trigBtn.addEventListener("pointerdown", (e) => {
+          e.preventDefault();
+          if (typeof trigBtn.setPointerCapture === "function") {
+            try {
+              trigBtn.setPointerCapture(e.pointerId);
+            } catch (_) {
+            }
+          }
+          setMomentaryFxTrigger(auxIdx, sendIdx, true);
+        });
+        const releaseMomentary = () => setMomentaryFxTrigger(auxIdx, sendIdx, false);
+        trigBtn.addEventListener("pointerup", releaseMomentary);
+        trigBtn.addEventListener("pointercancel", releaseMomentary);
+        trigBtn.addEventListener("lostpointercapture", releaseMomentary);
+        trigBtn.addEventListener("blur", releaseMomentary);
+        trigBtn.addEventListener("keydown", (e) => {
+          if ((e.key === " " || e.key === "Enter") && !e.repeat) {
+            e.preventDefault();
+            setMomentaryFxTrigger(auxIdx, sendIdx, true);
+          }
+        });
+        trigBtn.addEventListener("keyup", (e) => {
+          if (e.key === " " || e.key === "Enter") {
+            e.preventDefault();
+            setMomentaryFxTrigger(auxIdx, sendIdx, false);
+          }
+        });
+        const latchBtn = el("button", {
+          type: "button",
+          className: "fx-trig-btn fx-trig-latch" + (ctx.fxLatchedTriggers[auxIdx][sendIdx] ? " active" : ""),
+          textContent: "On/Off",
+          title: auxIdx === 4 ? `Toggle Siren on Send ${sendIdx + 1} (On/Off)` : `Toggle ${name} Send ${sendIdx + 1} (On/Off)`,
+          "aria-label": `Toggle ${name} Send ${sendIdx + 1}`,
+          "aria-pressed": ctx.fxLatchedTriggers[auxIdx][sendIdx] ? "true" : "false"
+        });
+        latchBtn.dataset.aux = String(auxIdx);
+        latchBtn.dataset.send = String(sendIdx);
+        latchBtn.addEventListener("click", () => toggleLatchedFxTrigger(auxIdx, sendIdx));
+        ctx.fxTriggerButtons.push(trigBtn);
+        ctx.fxLatchButtons.push(latchBtn);
+        trigWrap.appendChild(trigBtn);
+        trigWrap.appendChild(latchBtn);
+        sendCol.appendChild(trigWrap);
+        sendsWrap.appendChild(sendCol);
       });
-      send1Col.appendChild(grp1);
-      send2Col.appendChild(grp2);
-      row.appendChild(send1Col);
-      row.appendChild(send2Col);
+      row.appendChild(sendsWrap);
       table.appendChild(row);
     });
     card.appendChild(table);
     return card;
   }
+  function buildFxCardHeader(title, enabled, onToggle) {
+    const cardHdr = el("div", { className: "fx-card-header" });
+    cardHdr.appendChild(el("div", { className: "fx-card-title", textContent: title }));
+    const pwrWrap = el("label", { className: "fx-toggle-wrap", title: `Enable ${title}` });
+    const pwrCheck = el("input", {
+      type: "checkbox",
+      checked: enabled,
+      "aria-label": `Enable ${title}`
+    });
+    pwrCheck.addEventListener("change", () => onToggle(pwrCheck.checked));
+    const track = el("span", { className: "fx-toggle-track", "aria-hidden": "true" });
+    track.appendChild(el("span", { className: "fx-toggle-thumb" }));
+    pwrWrap.appendChild(pwrCheck);
+    pwrWrap.appendChild(track);
+    cardHdr.appendChild(pwrWrap);
+    return cardHdr;
+  }
+  function buildFxMeter(fillCls) {
+    const track = el("div", { className: "fx-meter-track" });
+    const fill = el("div", { className: "fx-meter-fill " + fillCls });
+    track.appendChild(fill);
+    return { track, fill };
+  }
   function buildTapeDriveCard() {
     const ctx = getContext();
-    const card = el("div", { className: "fx-card fx-card-tapedrive" });
-    const cardHdr = el("div", { className: "fx-card-header" });
-    const titleGroup = el("div", { className: "fx-card-title-group" });
-    titleGroup.appendChild(el("div", { className: "fx-card-title tape-title", textContent: "\u{1F4FC} TAPE SATURATION & DRIVE" }));
-    titleGroup.appendChild(el("div", { className: "fx-card-desc", textContent: "Analog Desk Coloration, Even Harmonics & Warm Bandwidth" }));
-    cardHdr.appendChild(titleGroup);
-    const pwrWrap = el("label", { className: "fx-toggle-wrap" });
-    const pwrCheck = el("input", { type: "checkbox", checked: ctx.tapeDrive.enabled });
-    pwrCheck.addEventListener("change", () => {
-      ctx.tapeDrive.enabled = pwrCheck.checked;
-      sendBelaControl({ event: "custom", tapeDrive: { enabled: pwrCheck.checked } });
-    });
-    pwrWrap.appendChild(pwrCheck);
-    pwrWrap.appendChild(el("span", { className: "fx-toggle-label", textContent: "ACTIVE" }));
-    cardHdr.appendChild(pwrWrap);
-    card.appendChild(cardHdr);
-    const meterBox = el("div", { className: "fx-meter-box" });
-    meterBox.appendChild(el("span", { className: "fx-meter-lbl", textContent: "TAPE DRIVE LEVEL" }));
-    const meterTrack = el("div", { className: "fx-meter-track" });
-    const meterFill = el("div", { className: "fx-meter-fill tape-fill" });
-    meterTrack.appendChild(meterFill);
-    meterBox.appendChild(meterTrack);
-    card.appendChild(meterBox);
-    ctx.fxTapeMeterEl = meterFill;
+    const card = el("div", { className: "fx-card" });
+    card.appendChild(buildFxCardHeader("Tape Drive", ctx.tapeDrive.enabled, (en) => {
+      ctx.tapeDrive.enabled = en;
+      sendBelaControl({ event: "custom", tapeDrive: { enabled: en } });
+    }));
+    const meter = buildFxMeter("tape-fill");
+    card.appendChild(meter.track);
+    ctx.fxTapeMeterEl = meter.fill;
     const controls = el("div", { className: "fx-controls-list" });
     controls.appendChild(createFxSlider({
-      label: "DRIVE (Saturation)",
+      label: "Drive",
       unit: "%",
       min: 0,
       max: 100,
@@ -6575,7 +7682,7 @@ border-radius:6px;background:transparent;
       }
     }));
     controls.appendChild(createFxSlider({
-      label: "TAPE WARMTH (High-Cut LPF)",
+      label: "Warmth",
       unit: " Hz",
       min: 6e3,
       max: 16e3,
@@ -6587,7 +7694,7 @@ border-radius:6px;background:transparent;
       }
     }));
     controls.appendChild(createFxSlider({
-      label: "ASYMMETRY (Even Harmonics)",
+      label: "Asymmetry",
       unit: "%",
       min: 0,
       max: 100,
@@ -6600,7 +7707,7 @@ border-radius:6px;background:transparent;
       }
     }));
     controls.appendChild(createFxSlider({
-      label: "RETURN LEVEL",
+      label: "Return",
       unit: "%",
       min: 0,
       max: 150,
@@ -6617,55 +7724,45 @@ border-radius:6px;background:transparent;
   }
   function buildDubDuckerCard() {
     const ctx = getContext();
-    const card = el("div", { className: "fx-card fx-card-ducker" });
-    const cardHdr = el("div", { className: "fx-card-header" });
-    const titleGroup = el("div", { className: "fx-card-title-group" });
-    titleGroup.appendChild(el("div", { className: "fx-card-title ducker-title", textContent: "\u{1F986} DUCKING SIDECHAIN" }));
-    titleGroup.appendChild(el("div", { className: "fx-card-desc", textContent: "Automatic Echo & Reverb Attenuation for MC Vocals & Siren" }));
-    cardHdr.appendChild(titleGroup);
-    const pwrWrap = el("label", { className: "fx-toggle-wrap" });
-    const pwrCheck = el("input", { type: "checkbox", checked: ctx.dubDucker.enabled });
-    pwrCheck.addEventListener("change", () => {
-      ctx.dubDucker.enabled = pwrCheck.checked;
-      sendBelaControl({ event: "custom", dubDucker: { enabled: pwrCheck.checked } });
-    });
-    pwrWrap.appendChild(pwrCheck);
-    pwrWrap.appendChild(el("span", { className: "fx-toggle-label", textContent: "ACTIVE" }));
-    cardHdr.appendChild(pwrWrap);
-    card.appendChild(cardHdr);
-    const meterBox = el("div", { className: "fx-meter-box" });
-    meterBox.appendChild(el("span", { className: "fx-meter-lbl", textContent: "GAIN REDUCTION (COMPRESSION)" }));
-    const meterTrack = el("div", { className: "fx-meter-track ducker-track" });
-    const meterFill = el("div", { className: "fx-meter-fill ducker-fill" });
-    meterTrack.appendChild(meterFill);
-    meterBox.appendChild(meterTrack);
-    card.appendChild(meterBox);
-    ctx.fxDuckerMeterEl = meterFill;
+    const card = el("div", { className: "fx-card" });
+    card.appendChild(buildFxCardHeader("Ducker", ctx.dubDucker.enabled, (en) => {
+      ctx.dubDucker.enabled = en;
+      sendBelaControl({ event: "custom", dubDucker: { enabled: en } });
+    }));
+    const meter = buildFxMeter("ducker-fill");
+    card.appendChild(meter.track);
+    ctx.fxDuckerMeterEl = meter.fill;
     const controls = el("div", { className: "fx-controls-list" });
     const srcRow = el("div", { className: "fx-preset-row" });
     const sources = [
-      { id: 0, label: "\u{1F6A8} Siren & Sampler" },
-      { id: 1, label: "\u{1F3A4} Mic Inputs" },
-      { id: 2, label: "\u{1F39A}\uFE0F Master Bus" },
-      { id: 3, label: "\u{1F310} All Key Sources" }
+      { id: 0, label: "Siren" },
+      { id: 1, label: "Mic" },
+      { id: 2, label: "Master" },
+      { id: 3, label: "All" }
     ];
     sources.forEach((s) => {
+      const isAct = ctx.dubDucker.source === s.id;
       const btn = el("button", {
         type: "button",
-        className: "fx-mini-btn" + (ctx.dubDucker.source === s.id ? " active" : ""),
-        textContent: s.label
+        className: "fx-mini-btn" + (isAct ? " active" : ""),
+        textContent: s.label,
+        "aria-pressed": isAct ? "true" : "false"
       });
       btn.addEventListener("click", () => {
         ctx.dubDucker.source = s.id;
-        srcRow.querySelectorAll(".fx-mini-btn").forEach((b) => b.classList.remove("active"));
+        srcRow.querySelectorAll(".fx-mini-btn").forEach((b) => {
+          b.classList.remove("active");
+          b.setAttribute("aria-pressed", "false");
+        });
         btn.classList.add("active");
+        btn.setAttribute("aria-pressed", "true");
         sendBelaControl({ event: "custom", dubDucker: { source: s.id } });
       });
       srcRow.appendChild(btn);
     });
     controls.appendChild(srcRow);
     controls.appendChild(createFxSlider({
-      label: "THRESHOLD",
+      label: "Threshold",
       unit: "%",
       min: 1,
       max: 50,
@@ -6678,7 +7775,7 @@ border-radius:6px;background:transparent;
       }
     }));
     controls.appendChild(createFxSlider({
-      label: "RELEASE TIME",
+      label: "Release",
       unit: " ms",
       min: 50,
       max: 1500,
@@ -6690,7 +7787,7 @@ border-radius:6px;background:transparent;
       }
     }));
     controls.appendChild(createFxSlider({
-      label: "DUCK AMOUNT (Attenuation)",
+      label: "Duck",
       unit: "%",
       min: 0,
       max: 100,
@@ -6707,33 +7804,17 @@ border-radius:6px;background:transparent;
   }
   function buildSubRoarCard() {
     const ctx = getContext();
-    const card = el("div", { className: "fx-card fx-card-subroar" });
-    const cardHdr = el("div", { className: "fx-card-header" });
-    const titleGroup = el("div", { className: "fx-card-title-group" });
-    titleGroup.appendChild(el("div", { className: "fx-card-title sub-title", textContent: "\u26A1 SUB ROAR" }));
-    titleGroup.appendChild(el("div", { className: "fx-card-desc", textContent: "Sub-Harmonic Synthesizer & Roar Saturator (< 80 Hz)" }));
-    cardHdr.appendChild(titleGroup);
-    const pwrWrap = el("label", { className: "fx-toggle-wrap" });
-    const pwrCheck = el("input", { type: "checkbox", checked: ctx.subRoar.enabled });
-    pwrCheck.addEventListener("change", () => {
-      ctx.subRoar.enabled = pwrCheck.checked;
-      sendBelaControl({ event: "custom", subRoar: { enabled: pwrCheck.checked } });
-    });
-    pwrWrap.appendChild(pwrCheck);
-    pwrWrap.appendChild(el("span", { className: "fx-toggle-label", textContent: "ACTIVE" }));
-    cardHdr.appendChild(pwrWrap);
-    card.appendChild(cardHdr);
-    const meterBox = el("div", { className: "fx-meter-box" });
-    meterBox.appendChild(el("span", { className: "fx-meter-lbl", textContent: "SUB ACTIVITY" }));
-    const meterTrack = el("div", { className: "fx-meter-track" });
-    const meterFill = el("div", { className: "fx-meter-fill sub-fill" });
-    meterTrack.appendChild(meterFill);
-    meterBox.appendChild(meterTrack);
-    card.appendChild(meterBox);
-    ctx.fxSubMeterEl = meterFill;
+    const card = el("div", { className: "fx-card" });
+    card.appendChild(buildFxCardHeader("Sub Roar", ctx.subRoar.enabled, (en) => {
+      ctx.subRoar.enabled = en;
+      sendBelaControl({ event: "custom", subRoar: { enabled: en } });
+    }));
+    const meter = buildFxMeter("sub-fill");
+    card.appendChild(meter.track);
+    ctx.fxSubMeterEl = meter.fill;
     const controls = el("div", { className: "fx-controls-list" });
     controls.appendChild(createFxSlider({
-      label: "TUNE FREQUENCY",
+      label: "Tune",
       unit: " Hz",
       min: 30,
       max: 90,
@@ -6745,7 +7826,7 @@ border-radius:6px;background:transparent;
       }
     }));
     controls.appendChild(createFxSlider({
-      label: "ROAR DRIVE (Saturation)",
+      label: "Drive",
       unit: "%",
       min: 0,
       max: 100,
@@ -6758,7 +7839,7 @@ border-radius:6px;background:transparent;
       }
     }));
     controls.appendChild(createFxSlider({
-      label: "DROP DECAY TIME",
+      label: "Decay",
       unit: " ms",
       min: 100,
       max: 3e3,
@@ -6770,7 +7851,7 @@ border-radius:6px;background:transparent;
       }
     }));
     controls.appendChild(createFxSlider({
-      label: "STEEP LPF CUTOFF (24 dB/oct)",
+      label: "Cutoff",
       unit: " Hz",
       min: 40,
       max: 120,
@@ -6782,7 +7863,7 @@ border-radius:6px;background:transparent;
       }
     }));
     controls.appendChild(createFxSlider({
-      label: "RETURN LEVEL",
+      label: "Return",
       unit: "%",
       min: 0,
       max: 150,
@@ -6800,35 +7881,17 @@ border-radius:6px;background:transparent;
   function buildEchoDubCard() {
     const ctx = getContext();
     const dub = ctx.echoDub || ctx.echuDub;
-    const card = el("div", { className: "fx-card fx-card-echodub" });
-    const cardHdr = el("div", { className: "fx-card-header" });
-    const titleGroup = el("div", { className: "fx-card-title-group" });
-    titleGroup.appendChild(el("div", { className: "fx-card-title dub-title", textContent: "\u{1F4FC} ECHO DUB" }));
-    titleGroup.appendChild(el("div", { className: "fx-card-desc", textContent: "Space Tape Echo & Saturating Dub Delay" }));
-    cardHdr.appendChild(titleGroup);
-    const pwrWrap = el("label", { className: "fx-toggle-wrap" });
-    const pwrCheck = el("input", { type: "checkbox", checked: dub.enabled });
-    pwrCheck.addEventListener("change", () => {
-      dub.enabled = pwrCheck.checked;
-      sendBelaControl({ event: "custom", echoDub: { enabled: pwrCheck.checked }, echuDub: { enabled: pwrCheck.checked } });
-    });
-    pwrWrap.appendChild(pwrCheck);
-    pwrWrap.appendChild(el("span", { className: "fx-toggle-label", textContent: "ACTIVE" }));
-    cardHdr.appendChild(pwrWrap);
-    card.appendChild(cardHdr);
-    const meterBox = el("div", { className: "fx-meter-box" });
-    meterBox.appendChild(el("span", { className: "fx-meter-lbl", textContent: "ECHO ACTIVITY" }));
-    const meterTrack = el("div", { className: "fx-meter-track" });
-    const meterFill = el("div", { className: "fx-meter-fill dub-fill" });
-    meterTrack.appendChild(meterFill);
-    meterBox.appendChild(meterTrack);
-    card.appendChild(meterBox);
-    ctx.fxDubMeterEl = meterFill;
+    const card = el("div", { className: "fx-card" });
+    card.appendChild(buildFxCardHeader("Echo Dub", dub.enabled, (en) => {
+      dub.enabled = en;
+      sendBelaControl({ event: "custom", echoDub: { enabled: en }, echuDub: { enabled: en } });
+    }));
+    const meter = buildFxMeter("dub-fill");
+    card.appendChild(meter.track);
+    ctx.fxDubMeterEl = meter.fill;
     const controls = el("div", { className: "fx-controls-list" });
-    let timeSliderRef = null;
-    let timeBadgeRef = null;
     const timeCtrl = createFxSlider({
-      label: "DELAY TIME",
+      label: "Time",
       unit: " ms",
       min: 40,
       max: 1500,
@@ -6839,22 +7902,22 @@ border-radius:6px;background:transparent;
         sendBelaControl({ event: "custom", echoDub: { time: val }, echuDub: { time: val } });
       }
     });
-    timeSliderRef = timeCtrl.querySelector("input[type=range]");
-    timeBadgeRef = timeCtrl.querySelector(".fx-slider-val");
+    const timeSliderRef = timeCtrl.querySelector("input[type=range]");
+    const timeBadgeRef = timeCtrl.querySelector(".fx-slider-val");
     controls.appendChild(timeCtrl);
     const syncRow = el("div", { className: "fx-preset-row" });
-    const syncPresets = [
-      { label: "1/16 (125ms)", ms: 125 },
-      { label: "1/8 (250ms)", ms: 250 },
-      { label: "1/8d (375ms)", ms: 375 },
-      { label: "1/4 (500ms)", ms: 500 },
-      { label: "Dub Long (750ms)", ms: 750 }
-    ];
-    syncPresets.forEach((preset) => {
+    [
+      { label: "1/16", ms: 125 },
+      { label: "1/8", ms: 250 },
+      { label: "1/8d", ms: 375 },
+      { label: "1/4", ms: 500 },
+      { label: "Dub", ms: 750 }
+    ].forEach((preset) => {
       const pBtn = el("button", {
         type: "button",
         className: "fx-mini-btn",
-        textContent: preset.label
+        textContent: preset.label,
+        title: `${preset.ms} ms`
       });
       pBtn.addEventListener("click", () => {
         dub.time = preset.ms;
@@ -6866,7 +7929,7 @@ border-radius:6px;background:transparent;
     });
     controls.appendChild(syncRow);
     controls.appendChild(createFxSlider({
-      label: "FEEDBACK (>85% = Oscillation)",
+      label: "Feedback",
       unit: "%",
       min: 0,
       max: 115,
@@ -6880,7 +7943,7 @@ border-radius:6px;background:transparent;
       }
     }));
     controls.appendChild(createFxSlider({
-      label: "TAPE TONE (High-Cut)",
+      label: "Tone",
       unit: " Hz",
       min: 1e3,
       max: 5e3,
@@ -6892,7 +7955,7 @@ border-radius:6px;background:transparent;
       }
     }));
     controls.appendChild(createFxSlider({
-      label: "TAPE FLUTTER & WOW",
+      label: "Flutter",
       unit: "%",
       min: 0,
       max: 100,
@@ -6905,7 +7968,7 @@ border-radius:6px;background:transparent;
       }
     }));
     controls.appendChild(createFxSlider({
-      label: "RETURN LEVEL",
+      label: "Return",
       unit: "%",
       min: 0,
       max: 100,
@@ -6922,23 +7985,25 @@ border-radius:6px;background:transparent;
     const killBtn = el("button", {
       type: "button",
       className: "fx-big-btn btn-kill-send" + (dub.kill ? " active" : ""),
-      textContent: dub.kill ? "\u26A1 SEND KILLED (Echo Looping)" : "\u2702\uFE0F KILL SEND (Cut Input)"
+      textContent: dub.kill ? "Send Killed" : "Kill Send",
+      "aria-pressed": dub.kill ? "true" : "false"
     });
     killBtn.addEventListener("click", () => {
       dub.kill = !dub.kill;
       killBtn.classList.toggle("active", dub.kill);
-      killBtn.textContent = dub.kill ? "\u26A1 SEND KILLED (Echo Looping)" : "\u2702\uFE0F KILL SEND (Cut Input)";
+      killBtn.setAttribute("aria-pressed", dub.kill ? "true" : "false");
+      killBtn.textContent = dub.kill ? "Send Killed" : "Kill Send";
       sendBelaControl({ event: "custom", echoDub: { kill: dub.kill }, echuDub: { kill: dub.kill } });
     });
     const clearBtn = el("button", {
       type: "button",
       className: "fx-big-btn btn-clear-delay",
-      textContent: "\u{1F9F9} CLEAR ECHO"
+      textContent: "Clear"
     });
     clearBtn.addEventListener("click", () => {
       sendBelaControl({ event: "custom", echoDubClear: true, echuDubClear: true });
       clearBtn.classList.add("flash");
-      setTimeout(() => clearBtn.classList.remove("flash"), 300);
+      setTimeout(() => clearBtn.classList.remove("flash"), 240);
     });
     actionBox.appendChild(killBtn);
     actionBox.appendChild(clearBtn);
@@ -6947,33 +8012,17 @@ border-radius:6px;background:transparent;
   }
   function buildTubbySpringCard() {
     const ctx = getContext();
-    const card = el("div", { className: "fx-card fx-card-tubbyspring" });
-    const cardHdr = el("div", { className: "fx-card-header" });
-    const titleGroup = el("div", { className: "fx-card-title-group" });
-    titleGroup.appendChild(el("div", { className: "fx-card-title spring-title", textContent: "\u{1F30A} TUBBY SPRING" }));
-    titleGroup.appendChild(el("div", { className: "fx-card-desc", textContent: "King Tubby Space Reverb & Mechanical Spring Tank" }));
-    cardHdr.appendChild(titleGroup);
-    const pwrWrap = el("label", { className: "fx-toggle-wrap" });
-    const pwrCheck = el("input", { type: "checkbox", checked: ctx.tubbySpring.enabled });
-    pwrCheck.addEventListener("change", () => {
-      ctx.tubbySpring.enabled = pwrCheck.checked;
-      sendBelaControl({ event: "custom", tubbySpring: { enabled: pwrCheck.checked } });
-    });
-    pwrWrap.appendChild(pwrCheck);
-    pwrWrap.appendChild(el("span", { className: "fx-toggle-label", textContent: "ACTIVE" }));
-    cardHdr.appendChild(pwrWrap);
-    card.appendChild(cardHdr);
-    const meterBox = el("div", { className: "fx-meter-box" });
-    meterBox.appendChild(el("span", { className: "fx-meter-lbl", textContent: "SPRING ACTIVITY" }));
-    const meterTrack = el("div", { className: "fx-meter-track" });
-    const meterFill = el("div", { className: "fx-meter-fill spring-fill" });
-    meterTrack.appendChild(meterFill);
-    meterBox.appendChild(meterTrack);
-    card.appendChild(meterBox);
-    ctx.fxSpringMeterEl = meterFill;
+    const card = el("div", { className: "fx-card" });
+    card.appendChild(buildFxCardHeader("Tubby Spring", ctx.tubbySpring.enabled, (en) => {
+      ctx.tubbySpring.enabled = en;
+      sendBelaControl({ event: "custom", tubbySpring: { enabled: en } });
+    }));
+    const meter = buildFxMeter("spring-fill");
+    card.appendChild(meter.track);
+    ctx.fxSpringMeterEl = meter.fill;
     const controls = el("div", { className: "fx-controls-list" });
     controls.appendChild(createFxSlider({
-      label: "DWELL (Input Drive & Saturation)",
+      label: "Dwell",
       unit: "%",
       min: 0,
       max: 150,
@@ -6986,7 +8035,7 @@ border-radius:6px;background:transparent;
       }
     }));
     controls.appendChild(createFxSlider({
-      label: "SPRING DECAY / TENSION",
+      label: "Decay",
       unit: "%",
       min: 20,
       max: 95,
@@ -6999,7 +8048,7 @@ border-radius:6px;background:transparent;
       }
     }));
     controls.appendChild(createFxSlider({
-      label: "SPRING TONE (High Damping)",
+      label: "Tone",
       unit: " Hz",
       min: 1e3,
       max: 5e3,
@@ -7011,7 +8060,7 @@ border-radius:6px;background:transparent;
       }
     }));
     controls.appendChild(createFxSlider({
-      label: "RETURN LEVEL",
+      label: "Return",
       unit: "%",
       min: 0,
       max: 100,
@@ -7024,39 +8073,35 @@ border-radius:6px;background:transparent;
       }
     }));
     card.appendChild(controls);
+    const actionBox = el("div", { className: "fx-action-box" });
+    const splashBtn = el("button", {
+      type: "button",
+      className: "fx-big-btn btn-splash",
+      textContent: "Splash",
+      title: "Trigger mechanical spring impact"
+    });
+    splashBtn.addEventListener("click", () => {
+      sendBelaControl({ event: "custom", tubbySpringSplash: true });
+      splashBtn.classList.add("flash");
+      setTimeout(() => splashBtn.classList.remove("flash"), 240);
+    });
+    actionBox.appendChild(splashBtn);
+    card.appendChild(actionBox);
     return card;
   }
   function buildShimmerDelayCard() {
     const ctx = getContext();
-    const card = el("div", { className: "fx-card fx-card-shimmer" });
-    const cardHdr = el("div", { className: "fx-card-header" });
-    const titleGroup = el("div", { className: "fx-card-title-group" });
-    titleGroup.appendChild(el("div", { className: "fx-card-title shimmer-title", textContent: "\u2728 SHIMMER DUB DELAY" }));
-    titleGroup.appendChild(el("div", { className: "fx-card-desc", textContent: "Pitch-Shifted Delay & Granular Re-pitch (-12 to +12 Semitones)" }));
-    cardHdr.appendChild(titleGroup);
-    const pwrWrap = el("label", { className: "fx-toggle-wrap" });
-    const pwrCheck = el("input", { type: "checkbox", checked: ctx.shimmerDelay.enabled });
-    pwrCheck.addEventListener("change", () => {
-      ctx.shimmerDelay.enabled = pwrCheck.checked;
-      sendBelaControl({ event: "custom", shimmerDelay: { enabled: pwrCheck.checked } });
-    });
-    pwrWrap.appendChild(pwrCheck);
-    pwrWrap.appendChild(el("span", { className: "fx-toggle-label", textContent: "ACTIVE" }));
-    cardHdr.appendChild(pwrWrap);
-    card.appendChild(cardHdr);
-    const meterBox = el("div", { className: "fx-meter-box" });
-    meterBox.appendChild(el("span", { className: "fx-meter-lbl", textContent: "SHIMMER ACTIVITY" }));
-    const meterTrack = el("div", { className: "fx-meter-track" });
-    const meterFill = el("div", { className: "fx-meter-fill shimmer-fill" });
-    meterTrack.appendChild(meterFill);
-    meterBox.appendChild(meterTrack);
-    card.appendChild(meterBox);
-    ctx.fxShimmerMeterEl = meterFill;
+    const card = el("div", { className: "fx-card" });
+    card.appendChild(buildFxCardHeader("Shimmer Delay", ctx.shimmerDelay.enabled, (en) => {
+      ctx.shimmerDelay.enabled = en;
+      sendBelaControl({ event: "custom", shimmerDelay: { enabled: en } });
+    }));
+    const meter = buildFxMeter("shimmer-fill");
+    card.appendChild(meter.track);
+    ctx.fxShimmerMeterEl = meter.fill;
     const controls = el("div", { className: "fx-controls-list" });
-    let semiSliderRef = null;
-    let semiBadgeRef = null;
     const semiCtrl = createFxSlider({
-      label: "PITCH SHIFT",
+      label: "Pitch",
       unit: " st",
       min: -12,
       max: 12,
@@ -7067,18 +8112,17 @@ border-radius:6px;background:transparent;
         sendBelaControl({ event: "custom", shimmerDelay: { semitones: val } });
       }
     });
-    semiSliderRef = semiCtrl.querySelector("input[type=range]");
-    semiBadgeRef = semiCtrl.querySelector(".fx-slider-val");
+    const semiSliderRef = semiCtrl.querySelector("input[type=range]");
+    const semiBadgeRef = semiCtrl.querySelector(".fx-slider-val");
     controls.appendChild(semiCtrl);
     const semiRow = el("div", { className: "fx-preset-row" });
-    const semiPresets = [
-      { label: "-12 Oct Drop", st: -12 },
-      { label: "-7 Fifth Down", st: -7 },
-      { label: "0 Unison", st: 0 },
-      { label: "+7 Fifth Up", st: 7 },
-      { label: "+12 Shimmer Oct", st: 12 }
-    ];
-    semiPresets.forEach((preset) => {
+    [
+      { label: "-12", st: -12 },
+      { label: "-7", st: -7 },
+      { label: "0", st: 0 },
+      { label: "+7", st: 7 },
+      { label: "+12", st: 12 }
+    ].forEach((preset) => {
       const pBtn = el("button", {
         type: "button",
         className: "fx-mini-btn",
@@ -7094,7 +8138,7 @@ border-radius:6px;background:transparent;
     });
     controls.appendChild(semiRow);
     controls.appendChild(createFxSlider({
-      label: "DELAY TIME",
+      label: "Time",
       unit: " ms",
       min: 40,
       max: 1500,
@@ -7106,7 +8150,7 @@ border-radius:6px;background:transparent;
       }
     }));
     controls.appendChild(createFxSlider({
-      label: "FEEDBACK (Cascade)",
+      label: "Feedback",
       unit: "%",
       min: 0,
       max: 95,
@@ -7119,7 +8163,7 @@ border-radius:6px;background:transparent;
       }
     }));
     controls.appendChild(createFxSlider({
-      label: "GRAIN / CROSSFADE WINDOW",
+      label: "Grain",
       unit: " ms",
       min: 20,
       max: 100,
@@ -7131,7 +8175,7 @@ border-radius:6px;background:transparent;
       }
     }));
     controls.appendChild(createFxSlider({
-      label: "RETURN LEVEL",
+      label: "Return",
       unit: "%",
       min: 0,
       max: 150,
@@ -7148,12 +8192,12 @@ border-radius:6px;background:transparent;
     const clearBtn = el("button", {
       type: "button",
       className: "fx-big-btn btn-clear-delay",
-      textContent: "\u{1F9F9} CLEAR SHIMMER"
+      textContent: "Clear"
     });
     clearBtn.addEventListener("click", () => {
       sendBelaControl({ event: "custom", shimmerClear: true });
       clearBtn.classList.add("flash");
-      setTimeout(() => clearBtn.classList.remove("flash"), 300);
+      setTimeout(() => clearBtn.classList.remove("flash"), 240);
     });
     actionBox.appendChild(clearBtn);
     card.appendChild(actionBox);
@@ -7161,35 +8205,17 @@ border-radius:6px;background:transparent;
   }
   function buildBlackArkPhaserCard() {
     const ctx = getContext();
-    const card = el("div", { className: "fx-card fx-card-blackark" });
-    const cardHdr = el("div", { className: "fx-card-header" });
-    const titleGroup = el("div", { className: "fx-card-title-group" });
-    titleGroup.appendChild(el("div", { className: "fx-card-title phase-title", textContent: "\u{1F300} BLACK ARK PHASER" }));
-    titleGroup.appendChild(el("div", { className: "fx-card-desc", textContent: "Lee Scratch Perry Mu-Tron Style Bi-Phase & Deep Dub Swirl" }));
-    cardHdr.appendChild(titleGroup);
-    const pwrWrap = el("label", { className: "fx-toggle-wrap" });
-    const pwrCheck = el("input", { type: "checkbox", checked: ctx.blackArk.enabled });
-    pwrCheck.addEventListener("change", () => {
-      ctx.blackArk.enabled = pwrCheck.checked;
-      sendBelaControl({ event: "custom", blackArk: { enabled: pwrCheck.checked } });
-    });
-    pwrWrap.appendChild(pwrCheck);
-    pwrWrap.appendChild(el("span", { className: "fx-toggle-label", textContent: "ACTIVE" }));
-    cardHdr.appendChild(pwrWrap);
-    card.appendChild(cardHdr);
-    const meterBox = el("div", { className: "fx-meter-box" });
-    meterBox.appendChild(el("span", { className: "fx-meter-lbl", textContent: "PHASER ACTIVITY" }));
-    const meterTrack = el("div", { className: "fx-meter-track" });
-    const meterFill = el("div", { className: "fx-meter-fill phase-fill" });
-    meterTrack.appendChild(meterFill);
-    meterBox.appendChild(meterTrack);
-    card.appendChild(meterBox);
-    ctx.fxPhaserMeterEl = meterFill;
+    const card = el("div", { className: "fx-card" });
+    card.appendChild(buildFxCardHeader("Black Ark Phaser", ctx.blackArk.enabled, (en) => {
+      ctx.blackArk.enabled = en;
+      sendBelaControl({ event: "custom", blackArk: { enabled: en } });
+    }));
+    const meter = buildFxMeter("phase-fill");
+    card.appendChild(meter.track);
+    ctx.fxPhaserMeterEl = meter.fill;
     const controls = el("div", { className: "fx-controls-list" });
-    let rateSliderRef = null;
-    let rateBadgeRef = null;
     const rateCtrl = createFxSlider({
-      label: "SWEEP RATE",
+      label: "Rate",
       unit: " Hz",
       min: 0.05,
       max: 5,
@@ -7200,17 +8226,16 @@ border-radius:6px;background:transparent;
         sendBelaControl({ event: "custom", blackArk: { rate: val } });
       }
     });
-    rateSliderRef = rateCtrl.querySelector("input[type=range]");
-    rateBadgeRef = rateCtrl.querySelector(".fx-slider-val");
+    const rateSliderRef = rateCtrl.querySelector("input[type=range]");
+    const rateBadgeRef = rateCtrl.querySelector(".fx-slider-val");
     controls.appendChild(rateCtrl);
     const ratePresetRow = el("div", { className: "fx-preset-row" });
-    const ratePresets = [
-      { label: "Roots (0.1Hz)", hz: 0.1 },
-      { label: "Meditative (0.25Hz)", hz: 0.25 },
-      { label: "Skank (0.8Hz)", hz: 0.8 },
-      { label: "Fast Swirl (2.5Hz)", hz: 2.5 }
-    ];
-    ratePresets.forEach((preset) => {
+    [
+      { label: "0.1 Hz", hz: 0.1 },
+      { label: "0.25 Hz", hz: 0.25 },
+      { label: "0.8 Hz", hz: 0.8 },
+      { label: "2.5 Hz", hz: 2.5 }
+    ].forEach((preset) => {
       const pBtn = el("button", {
         type: "button",
         className: "fx-mini-btn",
@@ -7226,7 +8251,7 @@ border-radius:6px;background:transparent;
     });
     controls.appendChild(ratePresetRow);
     controls.appendChild(createFxSlider({
-      label: "SWEEP DEPTH",
+      label: "Depth",
       unit: "%",
       min: 0,
       max: 100,
@@ -7239,7 +8264,7 @@ border-radius:6px;background:transparent;
       }
     }));
     controls.appendChild(createFxSlider({
-      label: "FEEDBACK RESONANCE (\xB190%)",
+      label: "Feedback",
       unit: "%",
       min: -90,
       max: 90,
@@ -7252,7 +8277,7 @@ border-radius:6px;background:transparent;
       }
     }));
     controls.appendChild(createFxSlider({
-      label: "RETURN LEVEL",
+      label: "Return",
       unit: "%",
       min: 0,
       max: 100,
@@ -7266,15 +8291,19 @@ border-radius:6px;background:transparent;
     }));
     card.appendChild(controls);
     const actionBox = el("div", { className: "fx-action-box" });
+    const is12 = ctx.blackArk.stages === 12;
     const stagesBtn = el("button", {
       type: "button",
-      className: "fx-big-btn btn-stages" + (ctx.blackArk.stages === 12 ? " active" : ""),
-      textContent: ctx.blackArk.stages === 12 ? "\u2728 12-STAGE PHASER (Deep Cosmic Sweep)" : "\u{1F4FB} 6-STAGE PHASER (Vintage Swirl)"
+      className: "fx-big-btn btn-stages" + (is12 ? " active" : ""),
+      textContent: is12 ? "12 Stages" : "6 Stages",
+      "aria-pressed": is12 ? "true" : "false"
     });
     stagesBtn.addEventListener("click", () => {
       ctx.blackArk.stages = ctx.blackArk.stages === 12 ? 6 : 12;
-      stagesBtn.classList.toggle("active", ctx.blackArk.stages === 12);
-      stagesBtn.textContent = ctx.blackArk.stages === 12 ? "\u2728 12-STAGE PHASER (Deep Cosmic Sweep)" : "\u{1F4FB} 6-STAGE PHASER (Vintage Swirl)";
+      const active12 = ctx.blackArk.stages === 12;
+      stagesBtn.classList.toggle("active", active12);
+      stagesBtn.setAttribute("aria-pressed", active12 ? "true" : "false");
+      stagesBtn.textContent = active12 ? "12 Stages" : "6 Stages";
       sendBelaControl({ event: "custom", blackArk: { stages: ctx.blackArk.stages } });
     });
     actionBox.appendChild(stagesBtn);
@@ -7297,14 +8326,13 @@ border-radius:6px;background:transparent;
       min,
       max,
       step: step || 1,
-      value
+      value,
+      "aria-label": label
     });
     slider.addEventListener("input", () => {
       const v = parseFloat(slider.value);
       badge.textContent = v + unit;
-      if (warnOver != null) {
-        badge.classList.toggle("warn", v >= warnOver);
-      }
+      if (warnOver != null) badge.classList.toggle("warn", v >= warnOver);
       onChange(v);
     });
     wrap.appendChild(slider);
@@ -7313,54 +8341,65 @@ border-radius:6px;background:transparent;
   function updateFxLive() {
     const ctx = getContext();
     if (!ctx.fxState || ctx.fxState.length < 17) return;
-    const subPeak = ctx.fxState[0];
-    const echoPeak = ctx.fxState[1];
-    const springPeak = ctx.fxState[2];
-    const phaserPeak = ctx.fxState[3];
-    const tapePeak = ctx.fxState[4];
-    const shimmerPeak = ctx.fxState[5];
-    const duckGainRed = ctx.fxState[6];
-    autoMeter(ctx.fxSubMeterEl, subPeak, "#ffb300");
-    autoMeter(ctx.fxDubMeterEl, echoPeak, "#00e5ff");
-    autoMeter(ctx.fxSpringMeterEl, springPeak, "#f59e0b");
-    autoMeter(ctx.fxPhaserMeterEl, phaserPeak, "#a855f7");
-    autoMeter(ctx.fxTapeMeterEl, tapePeak, "#f97316");
-    autoMeter(ctx.fxShimmerMeterEl, shimmerPeak, "#eab308");
+    autoMeter(ctx.fxSubMeterEl, ctx.fxState[0]);
+    autoMeter(ctx.fxDubMeterEl, ctx.fxState[1]);
+    autoMeter(ctx.fxSpringMeterEl, ctx.fxState[2]);
+    autoMeter(ctx.fxPhaserMeterEl, ctx.fxState[3]);
+    autoMeter(ctx.fxTapeMeterEl, ctx.fxState[4]);
+    autoMeter(ctx.fxShimmerMeterEl, ctx.fxState[5]);
     if (ctx.fxDuckerMeterEl) {
-      const pct = Math.min(100, Math.round(duckGainRed * 100));
+      const pct = Math.min(100, Math.round((ctx.fxState[6] || 0) * 100));
       ctx.fxDuckerMeterEl.style.width = pct + "%";
-      if (pct > 25) ctx.fxDuckerMeterEl.style.boxShadow = "0 0 10px #ef4444";
-      else ctx.fxDuckerMeterEl.style.boxShadow = "none";
     }
-    if (ctx.fxRouteButtons && ctx.fxRouteButtons.length) {
+    if (ctx.fxRouteSelects && ctx.fxRouteSelects.length) {
       for (let aux = 0; aux < 5; ++aux) {
         for (let send = 0; send < 2; ++send) {
-          const sDest = Math.round(ctx.fxState[7 + aux * 2 + send]);
-          ctx.fxRouting[aux][send] = sDest;
+          ctx.fxRouting[aux][send] = Math.round(ctx.fxState[7 + aux * 2 + send]);
         }
       }
-      ctx.fxRouteButtons.forEach((btn) => {
-        const aux = parseInt(btn.dataset.aux, 10);
-        const send = parseInt(btn.dataset.send, 10);
-        const dest = parseInt(btn.dataset.dest, 10);
-        btn.classList.toggle("active", ctx.fxRouting[aux][send] === dest);
+      ctx.fxRouteSelects.forEach((sel) => {
+        const aux = parseInt(sel.dataset.aux, 10);
+        const send = parseInt(sel.dataset.send, 10);
+        const destStr = String(ctx.fxRouting[aux][send]);
+        if (sel.value !== destStr && document.activeElement !== sel) {
+          sel.value = destStr;
+          sel.dataset.dest = destStr;
+        }
       });
     }
   }
-  function autoMeter(el2, peakVal, glowColor) {
-    if (!el2) return;
+  function autoMeter(elNode, peakVal) {
+    if (!elNode) return;
     const pct = Math.min(100, Math.round((peakVal || 0) * 110));
-    el2.style.width = pct + "%";
-    if (pct > 80 && glowColor) {
-      el2.style.boxShadow = `0 0 10px ${glowColor}`;
-    } else {
-      el2.style.boxShadow = "none";
-    }
+    elNode.style.width = pct + "%";
   }
 
   // gui/dom/shell.js
   var _currentTheme = "dark";
   var _themeToggleBtn = null;
+  var ICON_MOON = "M21 12.79A9 9 0 1 1 11.21 3a7 7 0 0 0 9.79 9.79Z";
+  var ICON_SUN = [
+    "M12 3v2",
+    "M12 19v2",
+    "M4.93 4.93l1.41 1.41",
+    "M17.66 17.66l1.41 1.41",
+    "M3 12h2",
+    "M19 12h2",
+    "M4.93 19.07l1.41-1.41",
+    "M17.66 6.34l1.41-1.41",
+    "M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8Z"
+  ];
+  var ICON_SLIDERS = [
+    "M4 21v-7",
+    "M4 10V3",
+    "M12 21v-9",
+    "M12 8V3",
+    "M20 21v-5",
+    "M20 12V3",
+    "M2 14h4",
+    "M10 10h4",
+    "M18 16h4"
+  ];
   function getInitialTheme() {
     try {
       const stored = localStorage.getItem(THEME_STORAGE_KEY);
@@ -7375,9 +8414,13 @@ border-radius:6px;background:transparent;
   function updateThemeButton() {
     if (!_themeToggleBtn) return;
     const isDark = _currentTheme === "dark";
-    _themeToggleBtn.innerHTML = (isDark ? "\u{1F319}" : "\u2600\uFE0F") + '<span class="theme-btn-lbl"> ' + (isDark ? "Dark" : "Light") + "</span>";
-    _themeToggleBtn.title = isDark ? "Dark mode active (click for light mode)" : "Light mode active (click for dark mode)";
-    _themeToggleBtn.setAttribute("aria-label", isDark ? "Switch to light mode" : "Switch to dark mode");
+    _themeToggleBtn.innerHTML = "";
+    _themeToggleBtn.appendChild(svgIcon(isDark ? ICON_MOON : ICON_SUN, "0 0 24 24", 14));
+    const lbl = el("span", { className: "theme-btn-lbl" });
+    lbl.textContent = isDark ? "Dark" : "Light";
+    _themeToggleBtn.appendChild(lbl);
+    _themeToggleBtn.title = isDark ? "Switch to light theme" : "Switch to dark theme";
+    _themeToggleBtn.setAttribute("aria-label", isDark ? "Switch to light theme" : "Switch to dark theme");
   }
   function setTheme(theme) {
     _currentTheme = theme === "light" ? "light" : "dark";
@@ -7402,7 +8445,7 @@ border-radius:6px;background:transparent;
     setTheme(getInitialTheme());
     document.body.innerHTML = "";
     const root = el("div", { id: "bela-gui" });
-    const topChrome = el("div", { id: "top-chrome" });
+    const topChrome = el("header", { id: "top-chrome" });
     const hdr = el("div", { id: "gui-header" });
     const connBadge = el("span", { className: "badge", id: "conn-badge" });
     connBadge.textContent = "OFFLINE";
@@ -7417,9 +8460,9 @@ border-radius:6px;background:transparent;
     const devBadge = el("span", {
       className: "badge dev-badge",
       id: "dev-badge",
-      title: "UI Control Mode active"
+      title: "Virtual control mode active"
     });
-    devBadge.textContent = "DEV MODE";
+    devBadge.textContent = "VIRTUAL";
     hdr.appendChild(devBadge);
     const clipBadges = el("div", {
       id: "clip-badges",
@@ -7432,9 +8475,16 @@ border-radius:6px;background:transparent;
     logo.src = projectFileUrl("LOGO.png");
     hdr.appendChild(logo);
     topChrome.appendChild(hdr);
-    const tabBar = el("div", { id: "tab-bar" });
+    const tabBar = el("nav", { id: "tab-bar", role: "tablist", "aria-label": "Main navigation" });
+    const tabPaneIds = ["pane-live", "tab-fx", "pane-dev", "pane-mapping"];
     ["Live", "FX", "Controls", "Mapping"].forEach((lbl, i) => {
-      const btn = el("button", { className: "tab-btn" + (i === TAB_LIVE ? " active" : "") });
+      const btn = el("button", {
+        type: "button",
+        className: "tab-btn" + (i === TAB_LIVE ? " active" : ""),
+        role: "tab",
+        "aria-selected": i === TAB_LIVE ? "true" : "false",
+        "aria-controls": tabPaneIds[i]
+      });
       btn.textContent = lbl;
       btn.dataset.tab = i;
       btn.addEventListener("click", () => switchTab(i));
@@ -7455,9 +8505,14 @@ border-radius:6px;background:transparent;
       id: "live-layout-gear",
       className: "live-layout-gear",
       title: "Live layout",
-      "aria-label": "Settings"
+      "aria-label": "Live layout",
+      "aria-expanded": "false",
+      "aria-haspopup": "dialog"
     });
-    gear.textContent = "Settings";
+    gear.appendChild(svgIcon(ICON_SLIDERS, "0 0 24 24", 14));
+    const gearLbl = el("span", { className: "gear-btn-lbl" });
+    gearLbl.textContent = "Layout";
+    gear.appendChild(gearLbl);
     gear.addEventListener("click", () => {
       const ctx = getContext();
       if (ctx.currentTab !== TAB_LIVE) {
@@ -7471,7 +8526,7 @@ border-radius:6px;background:transparent;
     setLiveLayoutGearButton(gear);
     topChrome.appendChild(tabBar);
     root.appendChild(topChrome);
-    const content = el("div", { id: "tab-content" });
+    const content = el("main", { id: "tab-content" });
     content.appendChild(buildLivePane());
     content.appendChild(buildFxPane());
     content.appendChild(buildDevControlPane());
@@ -7482,8 +8537,13 @@ border-radius:6px;background:transparent;
   function switchTab(idx) {
     const ctx = getContext();
     if (idx !== TAB_MAPPING) cancelDetect();
+    if (idx !== TAB_FX) clearMomentaryFxTriggers();
     ctx.currentTab = idx;
-    document.querySelectorAll(".tab-btn").forEach((b, i) => b.classList.toggle("active", i === idx));
+    document.querySelectorAll(".tab-btn").forEach((b, i) => {
+      const active = i === idx;
+      b.classList.toggle("active", active);
+      b.setAttribute("aria-selected", active ? "true" : "false");
+    });
     document.querySelectorAll(".tab-pane").forEach((p, i) => p.classList.toggle("active", i === idx));
     if (idx === TAB_LIVE) {
       ctx.meterVu.forEach((vu) => {
@@ -7500,12 +8560,29 @@ border-radius:6px;background:transparent;
   }
 
   // gui/main.js
+  function syncBoardConfigFromBela(isAfterRestart = false) {
+    fetchBoardConfigJson().then((res) => {
+      if (!res.ok || !res.parsed) return;
+      const ctx = getContext();
+      ctx.boardConfigJson = res.parsed;
+      ctx.boardConfigRawText = res.text;
+      if (!ctx.mappingUserEdited) {
+        applyBoardConfigToMapping(res.parsed, {
+          markDirty: false,
+          applyControls: !!isAfterRestart
+        });
+      }
+      rebuildMetersSection();
+    });
+  }
   function sketch(p) {
     initContext(createState());
     p.setup = function() {
       injectCSS();
       buildUI();
       layoutTopChrome();
+      ensureConfigControlListener();
+      syncBoardConfigFromBela(false);
       if (typeof p.noCanvas === "function")
         p.noCanvas();
       else {
@@ -7530,13 +8607,30 @@ border-radius:6px;background:transparent;
         clearClipBadges();
         return;
       }
+      ensureConfigControlListener();
       const b = Bela.data.buffers;
       updateBelaRxWatchdog(b);
       if (!isBelaConnected()) {
+        if (ctx.awaitingRestartReconnect) {
+          if (!ctx.sawOfflineDuringRestart) {
+            ctx.sawOfflineDuringRestart = true;
+            ctx.restartOfflinePerfMs = performance.now();
+          }
+          ctx.potMapping = null;
+          ctx.switchMapping = null;
+          ctx.configMeta = null;
+        }
         updateBadge();
         updateTempBadge(void 0);
         clearClipBadges();
         return;
+      }
+      if (ctx.awaitingRestartReconnect && ctx.sawOfflineDuringRestart && b[4] && b[4].ts > (ctx.restartOfflinePerfMs || 0) && b[5] && b[5].ts > (ctx.restartOfflinePerfMs || 0) && b[6] && b[6].ts > (ctx.restartOfflinePerfMs || 0)) {
+        ctx.awaitingRestartReconnect = false;
+        ctx.sawOfflineDuringRestart = false;
+        resetMappingStateForRestart();
+        syncBoardConfigFromBela(true);
+        setMappingStatus("Bela restarted & config reloaded \u2713", false);
       }
       if (b[0]) {
         if (!ctx.consoleReady) {
@@ -7614,6 +8708,7 @@ border-radius:6px;background:transparent;
       updateSwitches();
       updateMasterEq();
       updateDevControlsLive();
+      updateMappingLive();
       if (ctx.meterAnimId == null) updateClipIndicators();
       updateBadge();
       if (ctx.currentTab === TAB_LIVE && isLiveTileOn(ctx.liveLayoutPrefs, "meters") && ctx.meterAnimId == null)

@@ -105,11 +105,6 @@ function buildMicInputsCard() {
     card.dataset.tile = 'mic';
     card.appendChild(cardTitle('Mic inputs'));
 
-    const note = el('div', {className: 'mic-live-note'});
-    note.textContent =
-        'Mic bypasses ParamEQ / filters / kills. HPF Hz cuts subs (0 = off).';
-    card.appendChild(note);
-
     const list = el('div', {className: 'mic-live-list'});
     for (let i = 0; i < 4; ++i) {
         const auxN = i + 1;
@@ -120,7 +115,7 @@ function buildMicInputsCard() {
 
         const micWrap = el('label', {className: 'mic-toggle'});
         const micCb = el('input', {type: 'checkbox', className: 'mic-toggle-input'});
-        micCb.title = 'Mic mode';
+        micCb.title = 'Bypass ParamEQ / filters / kills';
         const track = el('span', {className: 'mic-toggle-track', 'aria-hidden': 'true'});
         track.appendChild(el('span', {className: 'mic-toggle-thumb'}));
         const micLbl = el('span', {className: 'mic-toggle-text'});
@@ -137,9 +132,10 @@ function buildMicInputsCard() {
             min: String(MIC_HPF_HZ_MIN),
             max: String(MIC_HPF_HZ_MAX),
             step: '1',
-            value: '0'
+            value: '0',
+            'aria-label': `AUX${auxN} Mic HPF Hz`
         });
-        hpfInp.title = 'Mic HPF Hz (0 = off)';
+        hpfInp.title = 'Mic dry HPF Hz (0 = off)';
         const hpfUnit = el('span', {className: 'mic-live-hpf-unit'});
         hpfUnit.textContent = 'Hz';
         hpfWrap.appendChild(hpfLbl);
@@ -296,14 +292,16 @@ function buildLayoutPopup() {
     const panel = el('div', {
         className: 'live-layout-panel',
         role: 'dialog',
-        'aria-label': 'Live layout'
+        'aria-modal': 'true',
+        'aria-label': 'Live layout',
+        tabIndex: -1
     });
     const title = el('div', {className: 'live-layout-title'});
     title.textContent = 'Live layout';
     panel.appendChild(title);
 
     const hint = el('p', {className: 'live-layout-hint'});
-    hint.textContent = 'Show/hide and reorder tiles. Saved in this browser.';
+    hint.textContent = 'Visible tiles';
     panel.appendChild(hint);
 
     _layoutList = el('div', {className: 'live-layout-list'});
@@ -316,20 +314,39 @@ function buildLayoutPopup() {
     return popup;
 }
 
-/** Opens or closes the Live layout popup; syncs gear active state. */
+/** Opens or closes the Live layout popup; syncs gear active & aria-expanded state. */
 export function setLiveLayoutPanelOpen(open) {
     if (!_layoutPopup) return;
+    const wasOpen = !_layoutPopup.hasAttribute('hidden');
     if (open) {
         rebuildLayoutPanelRows();
         _layoutPopup.removeAttribute('hidden');
         _positionLayoutPopup();
         if (!_layoutEscBound) {
             _layoutEscBound = (e) => {
-                if (e.key === 'Escape') setLiveLayoutPanelOpen(false);
+                if (e.key === 'Escape') {
+                    setLiveLayoutPanelOpen(false);
+                } else if (e.key === 'Tab' && _layoutPanel) {
+                    const focusables = _layoutPanel.querySelectorAll(
+                        'input:not(:disabled), button:not(:disabled)'
+                    );
+                    if (!focusables.length) return;
+                    const first = focusables[0];
+                    const last = focusables[focusables.length - 1];
+                    if (e.shiftKey && document.activeElement === first) {
+                        e.preventDefault();
+                        last.focus();
+                    } else if (!e.shiftKey && document.activeElement === last) {
+                        e.preventDefault();
+                        first.focus();
+                    }
+                }
             };
             document.addEventListener('keydown', _layoutEscBound);
         }
         window.addEventListener('resize', _positionLayoutPopup);
+        const firstFocus = _layoutPanel && _layoutPanel.querySelector('input, button');
+        if (firstFocus) firstFocus.focus();
     } else {
         _layoutPopup.setAttribute('hidden', '');
         if (_layoutEscBound) {
@@ -337,9 +354,12 @@ export function setLiveLayoutPanelOpen(open) {
             _layoutEscBound = null;
         }
         window.removeEventListener('resize', _positionLayoutPopup);
+        if (wasOpen && _layoutGearBtn) _layoutGearBtn.focus();
     }
-    if (_layoutGearBtn)
+    if (_layoutGearBtn) {
         _layoutGearBtn.classList.toggle('active', open);
+        _layoutGearBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
+    }
 }
 
 /** Toggles the Live layout popup. Returns whether it is now open. */

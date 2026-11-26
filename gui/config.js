@@ -222,8 +222,63 @@ export const CONFIG_META = {
     AUX1_R: 28, AUX2_R: 29, AUX3_R: 30, AUX4_R: 31,
     MASTER_STEREO: 32,
     UI_DEV_MODE: 33,
-    IGNORED_COUNT: 34, IGNORED_BASE: 35
+    IGNORED_COUNT: 34, IGNORED_BASE: 35,
+    DEV_MODE_BOOT: 99,
+    CLIP_LED_BASE: 100
 };
+
+/** Clip LED keys in buffer 6 order (Master, AUX1..4). */
+export const CLIP_LED_KEYS = ['master', 'aux1', 'aux2', 'aux3', 'aux4'];
+export const CLIP_LED_LABELS = {
+    master: 'Master',
+    aux1: 'AUX 1',
+    aux2: 'AUX 2',
+    aux3: 'AUX 3',
+    aux4: 'AUX 4'
+};
+
+/** Decodes one packed clip LED float from buffer 6 into { enabled, port, pin, activeLow }. */
+export function decodeClipLedMeta(val) {
+    const v = Math.round(val);
+    if (isNaN(v) || v < 0) {
+        return { enabled: false, port: 'A', pin: 0, activeLow: false };
+    }
+    return {
+        enabled: true,
+        port: (v & 8) ? 'B' : 'A',
+        pin: v & 7,
+        activeLow: !!(v & 16)
+    };
+}
+
+/** Parses one clipLeds entry from config.json ("B5" string or { port, pin, activeLow }). */
+export function parseClipLedConfigEntry(val) {
+    if (typeof val === 'string' && val.length >= 2) {
+        const port = val[0].toUpperCase();
+        const pin = parseInt(val.slice(1), 10);
+        if ((port === 'A' || port === 'B') && !isNaN(pin) && pin >= 0 && pin <= 7) {
+            return { enabled: true, port, pin, activeLow: false };
+        }
+    } else if (val && typeof val === 'object') {
+        const pin = parseInt(val.pin, 10);
+        const port = String(val.port || (val.portB ? 'B' : 'A')).toUpperCase().startsWith('B') ? 'B' : 'A';
+        if (!isNaN(pin) && pin >= 0 && pin <= 7) {
+            return { enabled: true, port, pin, activeLow: !!val.activeLow };
+        }
+    }
+    return { enabled: false, port: 'A', pin: 0, activeLow: false };
+}
+
+/** Serializes one clip LED entry for config.json ("B5" shorthand or object if activeLow). */
+export function serializeClipLedEntry(entry) {
+    if (!entry || !entry.enabled) return null;
+    const port = entry.port === 'B' ? 'B' : 'A';
+    const pin = Math.max(0, Math.min(7, Math.round(Number(entry.pin) || 0)));
+    if (entry.activeLow) {
+        return { port, pin, activeLow: true };
+    }
+    return `${port}${pin}`;
+}
 
 /** Mic-mode HPF Hz range — must match kMicHpfFMin/FMax in SoftwareConfig.h. */
 export const MIC_HPF_HZ_MIN = 0;

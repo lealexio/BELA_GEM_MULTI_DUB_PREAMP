@@ -538,17 +538,10 @@ export function buildMasterEqCard(opts) {
         className: 'card live-tile'
     });
     card.dataset.tile = 'masterEq';
-    card.appendChild(cardTitle('Master EQ — frequency response'));
-
-    const notice = el('div', { className: 'master-eq-notice' });
-    notice.textContent =
-        'Theoretical representation — the curve is recalculated from pot values, not a measurement of the actual audio signal.';
-    card.appendChild(notice);
-
-    const caption = el('div', { className: 'master-eq-caption' });
-    caption.textContent =
-        'Dry master chain: Parametric EQ → Graphic EQ → HPF/LPF → Band Trim → Kill switches. Excludes master gain and FX returns.';
-    card.appendChild(caption);
+    const hdr = el('div', { className: 'card-header-row' });
+    hdr.appendChild(cardTitle('Master EQ'));
+    hdr.appendChild(el('span', { className: 'card-meta', textContent: 'Theoretical dry curve' }));
+    card.appendChild(hdr);
 
     const wrap = el('div', { className: 'master-eq-wrap' });
     const canvas = el('canvas', { id: canvasId, className: 'master-eq-canvas' });

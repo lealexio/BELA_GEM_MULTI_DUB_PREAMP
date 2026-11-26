@@ -49,7 +49,7 @@ export function buildConsoleCard(listId) {
     const card = el('div', { className: 'card live-tile' });
     card.dataset.tile = 'console';
     const consoleHdr = el('div', { className: 'console-header' });
-    consoleHdr.appendChild(cardTitle('Console — last change'));
+    consoleHdr.appendChild(cardTitle('Activity'));
     const filterBar = el('div', { className: 'console-filter' });
     [
         { mode: 'normal', label: 'Normal' },
@@ -347,6 +347,17 @@ function applyConsoleChangeToList(entry, list, direction) {
     }
 
     updateRowContent(targetRow, entry, true, direction);
+
+    const reduceMotion = typeof window !== 'undefined' && window.matchMedia &&
+        window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (reduceMotion) {
+        for (const child of list.children) {
+            child.style.transform = '';
+            child.style.transition = '';
+            child.style.opacity = '';
+        }
+        return;
+    }
 
     // Step 3: INVERT — compute deltas and apply transform without transition
     for (const child of list.children) {

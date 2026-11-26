@@ -1,4 +1,4 @@
-/** DOM helpers and layout utilities. */
+/** DOM helpers, inline SVG icons, and layout utilities. */
 export function projectFileUrl(filename) {
     const scripts = document.querySelectorAll('script[src*="/api/read/file/"]');
     for (const s of scripts) {
@@ -21,7 +21,9 @@ export function el(tag, props) {
     if (!props) return e;
     for (const key of Object.keys(props)) {
         const val = props[key];
-        if (key.indexOf('-') >= 0)
+        if (key === 'style' && typeof val === 'string')
+            e.style.cssText = val;
+        else if (key.indexOf('-') >= 0)
             e.setAttribute(key, val);
         else
             e[key] = val;
@@ -29,19 +31,40 @@ export function el(tag, props) {
     return e;
 }
 
+/** Creates a compact decorative inline SVG icon (15x15). */
+export function svgIcon(paths, viewBox = '0 0 24 24', size = 15) {
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('width', String(size));
+    svg.setAttribute('height', String(size));
+    svg.setAttribute('viewBox', viewBox);
+    svg.setAttribute('fill', 'none');
+    svg.setAttribute('stroke', 'currentColor');
+    svg.setAttribute('stroke-width', '2');
+    svg.setAttribute('stroke-linecap', 'round');
+    svg.setAttribute('stroke-linejoin', 'round');
+    svg.setAttribute('aria-hidden', 'true');
+    const list = Array.isArray(paths) ? paths : [paths];
+    list.forEach(d => {
+        const p = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        p.setAttribute('d', d);
+        svg.appendChild(p);
+    });
+    return svg;
+}
+
 export function cardTitle(text) {
-    const d = el('div', {className:'card-title'});
+    const d = el('div', { className: 'card-title' });
     d.textContent = text;
     return d;
 }
 
+/** Retained for compatibility — top chrome is now flex-flowed inside 100dvh. */
 export function layoutTopChrome() {
-    const chrome  = document.getElementById('top-chrome');
     const content = document.getElementById('tab-content');
-    if(chrome && content)
-        content.style.paddingTop = (chrome.offsetHeight + 14) + 'px';
+    if (content && content.style.paddingTop)
+        content.style.paddingTop = '';
 }
 
 export function hideP5Dom() {
-    document.querySelectorAll('body > main').forEach(el => el.remove());
+    document.querySelectorAll('body > main').forEach(node => node.remove());
 }

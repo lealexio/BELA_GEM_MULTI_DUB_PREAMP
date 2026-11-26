@@ -6,10 +6,13 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cerrno>
 #include <cstdio>
 #include <cstring>
+#include <fcntl.h>
 #include <fstream>
 #include <sstream>
+#include <unistd.h>
 
 
 // ---------------------------------------------------------------------------
@@ -735,5 +738,115 @@ bool ConfigLoader::load(const char *path) {
 
   delete root;
   fprintf(stderr, "[ConfigLoader] Loaded %s\n", path);
+  return true;
+}
+
+bool ConfigLoader::saveRawJson(const char *path, const std::string &jsonText,
+                               std::string &errorOut) {
+  if (!path || path[0] == '\0') {
+    errorOut = "Invalid config path";
+    return false;
+  }
+  if (jsonText.empty() || jsonText.size() > kConfigSaveMaxBytes) {
+    errorOut = "Config payload size out of range";
+    return false;
+  }
+
+  JSONValue *root = JSON::Parse(jsonText.c_str());
+  if (!root || !root->IsObject()) {
+    delete root;
+    errorOut = "Invalid JSON object";
+    return false;
+  }
+
+  // Validate structural types of core sections if present so corrupted configs
+  // cannot overwrite config.json.
+  JSONValue *routVal = child(root, L"routing");
+  if (routVal && !routVal->IsObject()) {
+    delete root;
+    errorOut = "routing must be an object";
+    return false;
+  }
+  JSONValue *potsVal = child(root, L"pots");
+  if (potsVal && !potsVal->IsArray()) {
+    delete root;
+    errorOut = "pots must be an array";
+    return false;
+  }
+  JSONValue *swVal = child(root, L"switches");
+  if (swVal && !swVal->IsArray()) {
+    delete root;
+    errorOut = "switches must be an array";
+    return false;
+  }
+  JSONValue *ignVal = child(root, L"ignoredPots");
+  if (ignVal && !ignVal->IsArray()) {
+    delete root;
+    errorOut = "ignoredPots must be an array";
+    return false;
+  }
+  JSONValue *clipVal = child(root, L"clipLeds");
+  if (clipVal && !clipVal->IsObject() && !clipVal->IsArray()) {
+    delete root;
+    errorOut = "clipLeds must be an object or array";
+    return false;
+  }
+  delete root;
+
+  std::string tmpPath = std::string(path) + ".tmp";
+  int fd = ::open(tmpPath.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
+  if (fd < 0) {
+    errorOut = std::string("Cannot open temp file: ") + strerror(errno);
+    return false;
+  }
+
+  size_t written = 0;
+  while (written < jsonText.size()) {
+    ssize_t n =
+        ::write(fd, jsonText.data() + written, jsonText.size() - written);
+    if (n < 0) {
+      if (errno == EINTR)
+        continue;
+      errorOut = std::string("Write failed: ") + strerror(errno);
+      ::close(fd);
+      ::unlink(tmpPath.c_str());
+      return false;
+    }
+    written += (size_t)n;
+  }
+
+  if (::fsync(fd) != 0) {
+    errorOut = std::string("fsync failed: ") + strerror(errno);
+    ::close(fd);
+    ::unlink(tmpPath.c_str());
+    return false;
+  }
+  ::close(fd);
+
+  if (std::rename(tmpPath.c_str(), path) != 0) {
+    errorOut = std::string("Rename failed: ") + strerror(errno);
+    ::unlink(tmpPath.c_str());
+    return false;
+  }
+
+  fprintf(stderr, "[ConfigLoader] Saved %s (%zu bytes)\n", path,
+          jsonText.size());
+  return true;
+}
+
+bool ConfigLoader::readRawJson(const char *path, std::string &outContent,
+                               std::string &errorOut) {
+  if (!path || path[0] == '\0') {
+    errorOut = "Invalid config path";
+    return false;
+  }
+  std::ifstream f(path, std::ios::binary);
+  if (!f.is_open()) {
+    errorOut = "config.json not found on Bela";
+    return false;
+  }
+  std::ostringstream ss;
+  ss << f.rdbuf();
+  outContent = ss.str();
   return true;
 }
