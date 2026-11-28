@@ -14,6 +14,10 @@ import { drawMasterEqCurve } from './masterEq.js';
 import { buildMappingPane, cancelDetect } from './mapping.js';
 import { buildDevControlPane } from './devControl.js';
 import { buildFxPane, clearMomentaryFxTriggers } from './fx.js';
+import { loadSavedBpm, tapTempo, nudgeBpm, registerBpmListener } from '../tempo.js';
+import {
+    initInputControls, openMidiModal, registerMidiBadgeButton, registerPerfToggleHook
+} from '../input-control.js';
 
 let _currentTheme = 'dark';
 let _themeToggleBtn = null;
@@ -80,9 +84,32 @@ export function toggleTheme() {
     setTheme(_currentTheme === 'dark' ? 'light' : 'dark');
 }
 
+/** Toggles Performance / Zen live mode. */
+export function togglePerfMode(forceState) {
+    const ctx = getContext();
+    const next = (typeof forceState === 'boolean') ? forceState : !ctx.perfMode;
+    ctx.perfMode = next;
+    const root = document.getElementById('bela-gui');
+    if (root) root.classList.toggle('perf-mode', next);
+    const btn = document.getElementById('perf-toggle-btn');
+    if (btn) {
+        btn.classList.toggle('active', next);
+        btn.setAttribute('aria-pressed', next ? 'true' : 'false');
+    }
+    if (next && ctx.currentTab !== TAB_LIVE) {
+        switchTab(TAB_LIVE);
+    } else if (ctx.currentTab === TAB_LIVE) {
+        ctx.meterVu.forEach(vu => { if (vu) vu.resize(); });
+        if (isLiveTileOn(ctx.liveLayoutPrefs, 'masterEq')) drawMasterEqCurve();
+    }
+}
+
 /** Builds the full DOM tree (header, tabs, all panes). */
 export function buildUI() {
     setTheme(getInitialTheme());
+    getContext().tempoBpm = loadSavedBpm();
+    initInputControls();
+    registerPerfToggleHook(() => togglePerfMode());
 
     document.body.innerHTML = '';
 
@@ -140,6 +167,56 @@ export function buildUI() {
     });
 
     tabBar.appendChild(el('span', { className: 'tab-bar-spacer' }));
+
+    // Global Tap Tempo / BPM widget
+    const tempoWrap = el('div', { className: 'tempo-bar', title: 'Global BPM & Tap Tempo (shortcut: T)' });
+    const tapBtn = el('button', { type: 'button', className: 'tempo-tap-btn', textContent: 'TAP' });
+    const bpmDown = el('button', { type: 'button', className: 'tempo-nudge-btn', textContent: '−', 'aria-label': 'Decrease BPM' });
+    const bpmVal = el('span', { className: 'tempo-bpm-val', textContent: `${getContext().tempoBpm} BPM` });
+    const bpmUp = el('button', { type: 'button', className: 'tempo-nudge-btn', textContent: '+', 'aria-label': 'Increase BPM' });
+
+    const flashTap = () => {
+        tapBtn.classList.add('flash');
+        setTimeout(() => tapBtn.classList.remove('flash'), 120);
+    };
+    tapBtn.addEventListener('click', () => {
+        tapTempo();
+        flashTap();
+    });
+    bpmDown.addEventListener('click', () => nudgeBpm(-1));
+    bpmUp.addEventListener('click', () => nudgeBpm(1));
+    registerBpmListener((bpm) => {
+        bpmVal.textContent = `${bpm} BPM`;
+        flashTap();
+    });
+    tempoWrap.appendChild(tapBtn);
+    tempoWrap.appendChild(bpmDown);
+    tempoWrap.appendChild(bpmVal);
+    tempoWrap.appendChild(bpmUp);
+    tabBar.appendChild(tempoWrap);
+
+    // WebMIDI & Shortcuts modal button
+    const midiBtn = el('button', {
+        type: 'button',
+        id: 'midi-modal-btn',
+        className: 'chrome-pill-btn',
+        textContent: 'MIDI'
+    });
+    midiBtn.addEventListener('click', openMidiModal);
+    registerMidiBadgeButton(midiBtn);
+    tabBar.appendChild(midiBtn);
+
+    // Performance / Zen live mode button
+    const perfBtn = el('button', {
+        type: 'button',
+        id: 'perf-toggle-btn',
+        className: 'chrome-pill-btn',
+        textContent: 'Perf',
+        title: 'Performance mode (shortcut: P)',
+        'aria-pressed': 'false'
+    });
+    perfBtn.addEventListener('click', () => togglePerfMode());
+    tabBar.appendChild(perfBtn);
 
     const themeBtn = el('button', {
         type: 'button',

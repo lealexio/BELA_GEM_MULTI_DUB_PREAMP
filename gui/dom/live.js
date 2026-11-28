@@ -13,6 +13,7 @@ import { buildMetersSection, startMeterAnim, stopMeterAnim } from './meters.js';
 import { buildConsoleCard, buildSwitchesCard } from './console.js';
 import { buildMasterEqCard, drawMasterEqCurve } from './masterEq.js';
 import { buildSamplerCard } from './sampler.js';
+import { toggleKillMaskBit, registerInputUiRefreshHook } from '../input-control.js';
 
 /** AUX1–4 live controls — handles for sync from configMeta (buffer 6). */
 const _micRows = [null, null, null, null];
@@ -193,6 +194,248 @@ function buildMetersTile() {
     wrap.classList.add('live-tile');
     wrap.dataset.tile = 'meters';
     return wrap;
+}
+
+const _auxMuteBtns = [null, null, null, null];
+const _auxSoloBtns = [null, null, null, null];
+const _liveKillBtns = [null, null, null, null];
+let _mbWarmthSlider = null;
+let _mbWarmthVal = null;
+let _mbBassMonoBtn = null;
+let _mbBassMonoFreqSlider = null;
+let _mbBassMonoFreqVal = null;
+let _mbWidthSlider = null;
+let _mbWidthVal = null;
+let _mbPunchSlider = null;
+let _mbPunchVal = null;
+let _masterBusHoldUntil = 0;
+
+/** Refreshes Channels Mute/Solo, Kills, and Master Bus DSP controls from context state. */
+export function refreshLiveMasterBusUi() {
+    const ctx = getContext();
+    for (let i = 0; i < 4; i++) {
+        if (_auxMuteBtns[i]) {
+            _auxMuteBtns[i].classList.toggle('active', !!ctx.auxMuted[i]);
+            _auxMuteBtns[i].setAttribute('aria-pressed', ctx.auxMuted[i] ? 'true' : 'false');
+        }
+        if (_auxSoloBtns[i]) {
+            _auxSoloBtns[i].classList.toggle('active', !!ctx.auxSolo[i]);
+            _auxSoloBtns[i].setAttribute('aria-pressed', ctx.auxSolo[i] ? 'true' : 'false');
+        }
+        const killed = (ctx.switchStates && ctx.switchStates[i] > 0.5) || ((ctx.guiKillsMask & (1 << i)) !== 0);
+        if (_liveKillBtns[i]) {
+            _liveKillBtns[i].classList.toggle('active', killed);
+            _liveKillBtns[i].setAttribute('aria-pressed', killed ? 'true' : 'false');
+        }
+    }
+    const mb = ctx.masterBus;
+    if (_mbWarmthSlider && document.activeElement !== _mbWarmthSlider) {
+        const pct = Math.round((mb.warmth || 0) * 100);
+        _mbWarmthSlider.value = String(pct);
+        if (_mbWarmthVal) _mbWarmthVal.textContent = pct + '%';
+    }
+    if (_mbBassMonoBtn) {
+        _mbBassMonoBtn.classList.toggle('active', !!mb.bassMono);
+        _mbBassMonoBtn.textContent = mb.bassMono ? 'Bass Mono ON' : 'Bass Mono OFF';
+        _mbBassMonoBtn.setAttribute('aria-pressed', mb.bassMono ? 'true' : 'false');
+    }
+    if (_mbBassMonoFreqSlider && document.activeElement !== _mbBassMonoFreqSlider) {
+        const hz = Math.round(mb.bassMonoFreq || 100);
+        _mbBassMonoFreqSlider.value = String(hz);
+        if (_mbBassMonoFreqVal) _mbBassMonoFreqVal.textContent = hz + ' Hz';
+    }
+    if (_mbWidthSlider && document.activeElement !== _mbWidthSlider) {
+        const pct = Math.round((mb.stereoWidth ?? 1) * 100);
+        _mbWidthSlider.value = String(pct);
+        if (_mbWidthVal) _mbWidthVal.textContent = pct + '%';
+    }
+    if (_mbPunchSlider && document.activeElement !== _mbPunchSlider) {
+        const pct = Math.round((mb.punch || 0) * 100);
+        _mbPunchSlider.value = String(pct);
+        if (_mbPunchVal) _mbPunchVal.textContent = pct + '%';
+    }
+}
+
+/** Syncs Channels Mute/Solo, Kills, and Master Bus DSP from Buffer 12. */
+export function syncMasterBusFromBuffer12(fxBuf) {
+    if (!fxBuf || fxBuf.length < 31) return;
+    const ctx = getContext();
+    if (Date.now() >= _masterBusHoldUntil) {
+        for (let i = 0; i < 4; i++) {
+            ctx.auxMuted[i] = fxBuf[17 + i] > 0.5;
+            ctx.auxSolo[i] = fxBuf[21 + i] > 0.5;
+        }
+        ctx.guiKillsMask = Math.round(fxBuf[25] || 0) & 0x0F;
+        ctx.masterBus.warmth = fxBuf[26] || 0;
+        ctx.masterBus.bassMono = fxBuf[27] > 0.5;
+        ctx.masterBus.bassMonoFreq = fxBuf[28] || 100;
+        ctx.masterBus.stereoWidth = fxBuf[29] ?? 1.0;
+        ctx.masterBus.punch = fxBuf[30] || 0;
+    }
+    refreshLiveMasterBusUi();
+}
+
+function _buildLiveSlider(label, unit, min, max, step, value, onInput) {
+    const wrap = el('div', { className: 'mb-slider-item' });
+    const top = el('div', { className: 'mb-slider-top' });
+    top.appendChild(el('span', { className: 'mb-slider-lbl', textContent: label }));
+    const valEl = el('span', { className: 'mb-slider-val', textContent: value + unit });
+    top.appendChild(valEl);
+    wrap.appendChild(top);
+    const inp = el('input', {
+        type: 'range',
+        className: 'fx-range-slider',
+        min: String(min),
+        max: String(max),
+        step: String(step || 1),
+        value: String(value),
+        'aria-label': label
+    });
+    inp.addEventListener('input', () => {
+        const v = parseFloat(inp.value);
+        valEl.textContent = v + unit;
+        _masterBusHoldUntil = Date.now() + 1200;
+        onInput(v);
+    });
+    wrap.appendChild(inp);
+    return { wrap, inp, valEl };
+}
+
+/** Builds the Live Channels Mute/Solo, Kills, and Master Bus DSP tile. */
+function buildMasterBusCard() {
+    const ctx = getContext();
+    const card = el('div', { className: 'card live-tile', id: 'live-master-bus-card' });
+    card.dataset.tile = 'masterBus';
+    const hdr = el('div', { className: 'card-header-row' });
+    hdr.appendChild(cardTitle('Channels & Master DSP'));
+    hdr.appendChild(el('span', { className: 'card-meta', textContent: 'Keys: 1–4 Kills · Space Siren' }));
+    card.appendChild(hdr);
+
+    const grid = el('div', { className: 'mb-grid' });
+
+    // Left: AUX1-4 Mute/Solo + Clickable Kills
+    const chCol = el('div', { className: 'mb-col' });
+    const auxRowWrap = el('div', { className: 'mb-aux-list' });
+    for (let i = 0; i < 4; i++) {
+        const row = el('div', { className: 'mb-aux-item' });
+        row.appendChild(el('span', { className: 'mb-aux-name', textContent: 'AUX' + (i + 1) }));
+        const mBtn = el('button', {
+            type: 'button',
+            className: 'mb-ms-btn mute' + (ctx.auxMuted[i] ? ' active' : ''),
+            textContent: 'Mute',
+            title: `Mute AUX ${i + 1}`,
+            'aria-pressed': ctx.auxMuted[i] ? 'true' : 'false'
+        });
+        mBtn.addEventListener('click', () => {
+            ctx.auxMuted[i] = !ctx.auxMuted[i];
+            _masterBusHoldUntil = Date.now() + 1200;
+            _sendMicControl({ event: 'custom', auxMute: { aux: i, muted: ctx.auxMuted[i] } });
+            refreshLiveMasterBusUi();
+        });
+        const sBtn = el('button', {
+            type: 'button',
+            className: 'mb-ms-btn solo' + (ctx.auxSolo[i] ? ' active' : ''),
+            textContent: 'Solo',
+            title: `Solo AUX ${i + 1}`,
+            'aria-pressed': ctx.auxSolo[i] ? 'true' : 'false'
+        });
+        sBtn.addEventListener('click', () => {
+            ctx.auxSolo[i] = !ctx.auxSolo[i];
+            _masterBusHoldUntil = Date.now() + 1200;
+            _sendMicControl({ event: 'custom', auxSolo: { aux: i, solo: ctx.auxSolo[i] } });
+            refreshLiveMasterBusUi();
+        });
+        _auxMuteBtns[i] = mBtn;
+        _auxSoloBtns[i] = sBtn;
+        row.appendChild(mBtn);
+        row.appendChild(sBtn);
+        auxRowWrap.appendChild(row);
+    }
+    chCol.appendChild(auxRowWrap);
+
+    const killRow = el('div', { className: 'mb-kill-row' });
+    [
+        { idx: 0, label: 'SUB', key: '1' },
+        { idx: 1, label: 'KICK', key: '2' },
+        { idx: 2, label: 'MID', key: '3' },
+        { idx: 3, label: 'TOP', key: '4' }
+    ].forEach(({ idx, label, key }) => {
+        const btn = el('button', {
+            type: 'button',
+            className: 'mb-kill-btn',
+            title: `Toggle ${label} Kill (key: ${key})`,
+            'aria-pressed': 'false'
+        });
+        btn.innerHTML = `<span>${label}</span><small>${key}</small>`;
+        btn.addEventListener('click', () => {
+            _masterBusHoldUntil = Date.now() + 1200;
+            toggleKillMaskBit(idx);
+        });
+        _liveKillBtns[idx] = btn;
+        killRow.appendChild(btn);
+    });
+    chCol.appendChild(killRow);
+    grid.appendChild(chCol);
+
+    // Right: Master Warmth, 4-Band Punch, Bass Mono, Stereo Width
+    const dspCol = el('div', { className: 'mb-col mb-dsp-col' });
+    const mb = ctx.masterBus;
+
+    const wCtrl = _buildLiveSlider('Analog Warmth', '%', 0, 100, 1, Math.round((mb.warmth || 0) * 100), (v) => {
+        mb.warmth = v / 100;
+        _sendMicControl({ event: 'custom', masterBus: { warmth: mb.warmth } });
+    });
+    _mbWarmthSlider = wCtrl.inp;
+    _mbWarmthVal = wCtrl.valEl;
+    dspCol.appendChild(wCtrl.wrap);
+
+    const pCtrl = _buildLiveSlider('4-Band Punch', '%', 0, 100, 1, Math.round((mb.punch || 0) * 100), (v) => {
+        mb.punch = v / 100;
+        _sendMicControl({ event: 'custom', masterBus: { punch: mb.punch } });
+    });
+    _mbPunchSlider = pCtrl.inp;
+    _mbPunchVal = pCtrl.valEl;
+    dspCol.appendChild(pCtrl.wrap);
+
+    const swCtrl = _buildLiveSlider('Stereo Width', '%', 0, 150, 1, Math.round((mb.stereoWidth ?? 1) * 100), (v) => {
+        mb.stereoWidth = v / 100;
+        _sendMicControl({ event: 'custom', masterBus: { stereoWidth: mb.stereoWidth } });
+    });
+    _mbWidthSlider = swCtrl.inp;
+    _mbWidthVal = swCtrl.valEl;
+    dspCol.appendChild(swCtrl.wrap);
+
+    const bmRow = el('div', { className: 'mb-bm-row' });
+    const bmBtn = el('button', {
+        type: 'button',
+        className: 'mb-bm-btn' + (mb.bassMono ? ' active' : ''),
+        textContent: mb.bassMono ? 'Bass Mono ON' : 'Bass Mono OFF',
+        'aria-pressed': mb.bassMono ? 'true' : 'false'
+    });
+    bmBtn.addEventListener('click', () => {
+        mb.bassMono = !mb.bassMono;
+        _masterBusHoldUntil = Date.now() + 1200;
+        _sendMicControl({ event: 'custom', masterBus: { bassMono: mb.bassMono } });
+        refreshLiveMasterBusUi();
+    });
+    _mbBassMonoBtn = bmBtn;
+    bmRow.appendChild(bmBtn);
+
+    const bmfCtrl = _buildLiveSlider('Mono <', ' Hz', 60, 200, 5, Math.round(mb.bassMonoFreq || 100), (v) => {
+        mb.bassMonoFreq = v;
+        _sendMicControl({ event: 'custom', masterBus: { bassMonoFreq: v } });
+    });
+    _mbBassMonoFreqSlider = bmfCtrl.inp;
+    _mbBassMonoFreqVal = bmfCtrl.valEl;
+    bmRow.appendChild(bmfCtrl.wrap);
+    dspCol.appendChild(bmRow);
+
+    grid.appendChild(dspCol);
+    card.appendChild(grid);
+
+    registerInputUiRefreshHook(refreshLiveMasterBusUi);
+    refreshLiveMasterBusUi();
+    return card;
 }
 
 /** Builds one layout row: checkbox + label + ▲▼. */
@@ -404,6 +647,10 @@ function _appendTile(board, id, prefs, pairedDone) {
         if (showSiren) grid.appendChild(buildSirenCard());
         if (showMic) grid.appendChild(buildMicInputsCard());
         board.appendChild(grid);
+        return;
+    }
+    if (id === 'masterBus') {
+        board.appendChild(buildMasterBusCard());
         return;
     }
     if (id === 'sampler') {

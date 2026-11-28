@@ -60,14 +60,23 @@ public:
     /** Enables or disables the effect. */
     void setEnabled(bool en);
 
+    /** Enables or disables stereo Ping-Pong cross-feedback mode. */
+    void setPingPong(bool pp);
+
+    /** Returns true if Ping-Pong stereo mode is enabled. */
+    bool isPingPong() const { return pingPong_.load(std::memory_order_relaxed); }
+
     /** Immediately clears / flushes the delay memory buffer. */
     void clear();
 
     /** Returns true if kill send is currently active. */
     bool isKillSendActive() const { return killSend_.load(std::memory_order_relaxed); }
 
-    /** Processes one audio sample. Returns the wet delay output. */
+    /** Processes one audio sample (mono sum). Returns the wet delay output. */
     float process(float inSample);
+
+    /** Processes one audio sample into stereo wet outputs (ping-pong when enabled). */
+    void processStereo(float inSample, float &outL, float &outR);
 
     /** Reads and resets the recent peak output for UI metering. */
     float getAndResetPeak();
@@ -77,6 +86,7 @@ private:
 
     float sampleRate_ = kDefaultSampleRate;
     float buffer_[kMaxDelaySamples] = {};
+    float bufferR_[kMaxDelaySamples] = {};
     int   writePos_ = 0;
 
     // Thread-safe parameters
@@ -88,6 +98,7 @@ private:
     std::atomic<bool>  killSend_{false};
     std::atomic<bool>  clearPending_{false};
     std::atomic<bool>  enabled_{true};
+    std::atomic<bool>  pingPong_{kEchoDubPingPongDefault};
 
     // Audio-thread state
     float currentDelaySamples_ = 16537.5f; // smoothed read position
@@ -99,8 +110,10 @@ private:
     int   clearRemainingSamples_ = 0;
     float clearFadeGain_       = 1.0f;
 
-    BiquadFilter loopHpf_; // Loop high-pass filter (180 Hz)
-    BiquadFilter loopLpf_; // Loop tape tone low-pass filter (1000 - 5000 Hz)
+    BiquadFilter loopHpf_;  // Loop high-pass filter (180 Hz) L
+    BiquadFilter loopLpf_;  // Loop tape tone low-pass filter L
+    BiquadFilter loopHpfR_; // Loop high-pass filter (180 Hz) R (Ping-Pong)
+    BiquadFilter loopLpfR_; // Loop tape tone low-pass filter R (Ping-Pong)
 
     /** 4-point Hermite cubic interpolation for clean delay pitch bending. */
     static inline float hermite4(float frac, float y0, float y1, float y2, float y3) {

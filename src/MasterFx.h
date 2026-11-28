@@ -6,6 +6,7 @@
 #include "FilterSection.h"
 #include "GraphicEq.h"
 #include "BandTrim.h"
+#include "MasterDynamics.h"
 
 /**
  * Master effects bus.
@@ -139,6 +140,18 @@ public:
      */
     float processFxReturn2(float sample);
 
+    /** Sets the master 4-band punch / dynamics blend [0.0–1.0]. */
+    void setDynamics(float amount);
+
+    /** Sets the analog warmth soft-clipper drive [0.0–1.0]. */
+    void setWarmth(float drive);
+
+    /**
+     * Applies smooth analog warmth soft-clipping (gain-compensated fastTanh)
+     * to one master sample prior to brickwall limiting.
+     */
+    float applyWarmth(float sample);
+
     /**
      * Applies the brickwall output limiter to one sample.
      * Call on the final mixed master output in render.cpp (after FX return injection).
@@ -169,9 +182,13 @@ private:
     BandTrim      bandTrim_;
     BandTrim      bandTrimMic_;    ///< Dedicated BandTrim for mic-mode path
     KillSwitch    kills_;
+    MasterDynamics dynamics_;
     NoiseGate         fxReturnGate_;
     NoiseGate         fxReturnGate2_;
     BrickwallLimiter  outputLimiter_;
 
-    float masterGain_ = 1.f;
+    float masterGain_        = 1.f;
+    float warmthTarget_      = kMasterWarmthDefaultDrive;
+    float warmthSmooth_      = kMasterWarmthDefaultDrive;
+    float warmthSmoothCoeff_ = 0.f;
 };

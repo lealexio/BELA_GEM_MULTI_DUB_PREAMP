@@ -89,6 +89,9 @@ var __belaPreampSketch = (() => {
     flutter: 0.2,
     level: 0.75,
     kill: false,
+    pingPong: false,
+    sync: false,
+    subdiv: "1/8d",
     enabled: true
   };
   var TUBBY_SPRING_DEFAULTS = {
@@ -104,6 +107,8 @@ var __belaPreampSketch = (() => {
     feedback: 0.6,
     stages: 6,
     level: 0.8,
+    sync: false,
+    subdiv: "1/1",
     enabled: true
   };
   var TAPE_DRIVE_DEFAULTS = {
@@ -119,6 +124,8 @@ var __belaPreampSketch = (() => {
     feedback: 0.55,
     grainSize: 50,
     level: 0.75,
+    sync: false,
+    subdiv: "1/8d",
     enabled: true
   };
   var DUB_DUCKER_DEFAULTS = {
@@ -129,9 +136,26 @@ var __belaPreampSketch = (() => {
     // 0: Siren, 1: Mic, 2: Master, 3: All
     enabled: true
   };
+  var FX_CHAIN_DEFAULTS = {
+    echoToSpring: 0,
+    tapeToEcho: 0
+  };
+  var MASTER_BUS_DEFAULTS = {
+    warmth: 0,
+    bassMono: true,
+    bassMonoFreq: 100,
+    stereoWidth: 1,
+    punch: 0
+  };
+  var TEMPO_DEFAULTS = {
+    bpm: 130,
+    min: 40,
+    max: 220
+  };
   var LIVE_TILES = [
     { id: "siren", label: "Siren", pair: true, defaultOn: true },
     { id: "mic", label: "Mic inputs", pair: true, defaultOn: true },
+    { id: "masterBus", label: "Channels & Master DSP", pair: false, defaultOn: true },
     { id: "sampler", label: "Sampler", pair: false, defaultOn: true },
     { id: "meters", label: "VU meters", pair: false, defaultOn: true },
     { id: "switches", label: "Switches", pair: false, defaultOn: false },
@@ -144,6 +168,11 @@ var __belaPreampSketch = (() => {
   var LIVE_LAYOUT_STORAGE_KEY_V1 = "belaDubPreamp.liveLayout.v1";
   var LIVE_LAYOUT_STORAGE_KEY = "belaDubPreamp.liveLayout.v2";
   var THEME_STORAGE_KEY = "belaDubPreamp.theme";
+  var PRESETS_STORAGE_KEY = "belaDubPreamp.presets.v1";
+  var MIDI_STORAGE_KEY = "belaDubPreamp.midiMap.v1";
+  var TEMPO_STORAGE_KEY = "belaDubPreamp.tempo.v1";
+  var SAMPLER_CFG_STORAGE_KEY = "belaDubPreamp.samplerCfg.v1";
+  var SAMPLER_PAD_KEYS = ["Q", "W", "E", "R", "A", "S", "D", "F"];
   var DETECT_POT_MIN_DELTA = 0.25;
   var MUX_POTS_PER_MUX = 10;
   var MUX_RAW_SIZE = 80;
@@ -511,7 +540,7 @@ var __belaPreampSketch = (() => {
       samplerListEl: null,
       samplerEmptyEl: null,
       audioLevels: new Float32Array(13),
-      fxState: new Float32Array(17),
+      fxState: new Float32Array(34),
       fxRouting: [
         [0, 0],
         // AUX 1 [Send 1, Send 2]
@@ -533,6 +562,18 @@ var __belaPreampSketch = (() => {
       tapeDrive: __spreadValues({}, TAPE_DRIVE_DEFAULTS),
       shimmerDelay: __spreadValues({}, SHIMMER_DELAY_DEFAULTS),
       dubDucker: __spreadValues({}, DUB_DUCKER_DEFAULTS),
+      fxChain: __spreadValues({}, FX_CHAIN_DEFAULTS),
+      masterBus: __spreadValues({}, MASTER_BUS_DEFAULTS),
+      auxMuted: [false, false, false, false],
+      auxSolo: [false, false, false, false],
+      guiKillsMask: 0,
+      tempoBpm: TEMPO_DEFAULTS.bpm,
+      perfMode: false,
+      samplerSelectedSlot: 0,
+      samplerSlotCfg: {},
+      midiConnected: false,
+      midiDeviceName: "",
+      midiLearnTarget: null,
       fxSubMeterEl: null,
       fxDubMeterEl: null,
       fxSpringMeterEl: null,
@@ -1612,6 +1653,7 @@ padding-top:12px;
 position:fixed;inset:0;z-index:calc(var(--z-popup) + 20);
 background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;padding:16px;
 }
+.map-modal-backdrop[hidden]{display:none!important}
 .map-modal-panel{
 width:min(440px,100%);background:var(--bg-elev);border:1px solid var(--line);
 border-radius:var(--radius);box-shadow:var(--shadow);padding:18px;
@@ -1642,6 +1684,160 @@ border-radius:var(--radius);box-shadow:var(--shadow);padding:18px;
 transition-duration:.01ms!important;
 animation-duration:.01ms!important;
 }
+}
+
+/* --- Tap Tempo, Chrome Pill Buttons, Performance Mode --- */
+.tempo-bar{
+display:inline-flex;align-items:center;gap:4px;margin-right:8px;
+padding:3px 6px;border-radius:var(--radius-sm);background:var(--surface);border:1px solid var(--line);
+flex-shrink:0;
+}
+.tempo-tap-btn{
+padding:3px 8px;border:none;border-radius:4px;background:var(--accent);color:#fff;
+font-size:11px;font-weight:800;letter-spacing:.04em;cursor:pointer;transition:transform .08s ease;
+}
+.tempo-tap-btn.flash{transform:scale(1.08);filter:brightness(1.2)}
+.tempo-nudge-btn{
+width:20px;height:20px;border:1px solid var(--line);border-radius:4px;background:var(--bg-elev);
+color:var(--ink);font-size:12px;font-weight:700;line-height:1;cursor:pointer;
+}
+.tempo-bpm-val{
+font-family:var(--mono);font-size:12px;font-weight:700;color:var(--ink);
+min-width:58px;text-align:center;font-variant-numeric:tabular-nums;
+}
+.chrome-pill-btn{
+padding:5px 10px;margin-right:6px;border-radius:var(--radius-sm);
+border:1px solid var(--line);background:var(--surface);color:var(--ink-soft);
+font-size:11px;font-weight:700;cursor:pointer;flex-shrink:0;
+}
+.chrome-pill-btn:hover{color:var(--ink);border-color:var(--muted)}
+.chrome-pill-btn.active{background:var(--accent);color:#fff;border-color:var(--accent)}
+.chrome-pill-btn.midi-online{border-color:var(--ok);color:var(--ok)}
+
+#bela-gui.perf-mode #gui-header{min-height:32px;padding:4px 12px}
+#bela-gui.perf-mode #gui-logo{height:22px}
+#bela-gui.perf-mode .tab-btn[data-tab="2"],
+#bela-gui.perf-mode .tab-btn[data-tab="3"],
+#bela-gui.perf-mode #theme-toggle-btn,
+#bela-gui.perf-mode #live-layout-gear{display:none}
+#bela-gui.perf-mode #live-board{max-width:100%}
+#bela-gui.perf-mode .sampler-pad{min-height:64px;font-size:14px}
+#bela-gui.perf-mode .mb-kill-btn{min-height:48px;font-size:13px}
+
+/* --- Channels & Master DSP Tile --- */
+.mb-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,260px),1fr));gap:14px}
+.mb-col{display:flex;flex-direction:column;gap:10px}
+.mb-aux-list{display:grid;grid-template-columns:repeat(2,1fr);gap:6px}
+.mb-aux-item{
+display:flex;align-items:center;gap:5px;padding:6px 8px;
+background:var(--surface);border:1px solid var(--line-soft);border-radius:var(--radius-sm);
+}
+.mb-aux-name{font-size:11px;font-weight:700;font-family:var(--mono);color:var(--ink);margin-right:auto}
+.mb-ms-btn{
+padding:3px 8px;height:24px;border-radius:4px;border:1px solid var(--line);
+background:var(--bg-elev);color:var(--muted);font-size:10px;font-weight:800;cursor:pointer;
+}
+.mb-ms-btn.mute.active{background:var(--danger);color:#fff;border-color:var(--danger)}
+.mb-ms-btn.solo.active{background:var(--warn);color:#111;border-color:var(--warn)}
+.mb-kill-row{display:grid;grid-template-columns:repeat(4,1fr);gap:6px}
+.mb-kill-btn{
+display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;
+padding:8px 4px;border-radius:var(--radius-sm);border:1px solid var(--line);
+background:var(--surface);color:var(--ink);font-size:11px;font-weight:800;cursor:pointer;
+}
+.mb-kill-btn small{font-size:9px;font-family:var(--mono);color:var(--muted);font-weight:600}
+.mb-kill-btn.active{background:var(--danger);color:#fff;border-color:var(--danger)}
+.mb-kill-btn.active small{color:rgba(255,255,255,.85)}
+.mb-dsp-col{gap:8px}
+.mb-slider-item{display:flex;flex-direction:column;gap:3px}
+.mb-slider-top{display:flex;justify-content:space-between;align-items:center;font-size:11px}
+.mb-slider-lbl{font-weight:600;color:var(--ink-soft)}
+.mb-slider-val{font-family:var(--mono);font-weight:700;color:var(--ink)}
+.mb-bm-row{display:grid;grid-template-columns:auto 1fr;align-items:center;gap:10px;margin-top:2px}
+.mb-bm-btn{
+padding:6px 10px;border-radius:var(--radius-sm);border:1px solid var(--line);
+background:var(--surface);color:var(--muted);font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap;
+}
+.mb-bm-btn.active{background:var(--info);color:#fff;border-color:var(--info)}
+
+/* --- Presets Bar, Sync & Ping-Pong --- */
+.fx-presets-bar{margin-bottom:12px}
+.fx-preset-slots-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(100px,1fr));gap:6px;margin-top:8px}
+.fx-preset-slot-btn{
+padding:6px 8px;border-radius:var(--radius-sm);border:1px solid var(--line);
+background:var(--surface);color:var(--muted);font-size:11px;font-weight:600;
+text-overflow:ellipsis;overflow:hidden;white-space:nowrap;cursor:pointer;
+}
+.fx-preset-slot-btn.filled{color:var(--ink);border-color:var(--info)}
+.fx-preset-slot-btn.selected{outline:2px solid var(--accent);outline-offset:1px}
+.fx-sync-btn.active{background:var(--info);color:#fff;border-color:var(--info)}
+.fx-action-box.dual-action{display:flex;gap:6px;flex-wrap:wrap}
+.btn-ping-pong.active{background:var(--info);color:#fff;border-color:var(--info)}
+
+/* --- Sampler Loop/Pitch/Upload & Playhead --- */
+#live-sampler-card.drag-over{outline:2px dashed var(--accent);outline-offset:-4px}
+.sampler-hdr-tools{display:flex;align-items:center;gap:6px;margin-left:auto}
+.sampler-upload-status{font-size:11px;font-family:var(--mono);color:var(--info)}
+.sampler-tool-btn{
+padding:4px 8px;border-radius:4px;border:1px solid var(--line);
+background:var(--surface);color:var(--ink);font-size:11px;font-weight:700;cursor:pointer;
+}
+.sampler-tool-btn.stop:hover{background:var(--danger);color:#fff;border-color:var(--danger)}
+.sampler-pad{position:relative;overflow:hidden;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px}
+.sampler-pad.selected{box-shadow:inset 0 0 0 2px var(--info)}
+.sampler-pad-badges{display:flex;align-items:center;gap:4px;font-size:9px;opacity:.8}
+.sampler-key-badge{
+padding:1px 4px;border-radius:3px;background:rgba(128,128,128,.2);font-family:var(--mono);font-weight:700;
+}
+.sampler-loop-badge{display:none;font-weight:800;color:var(--info)}
+.sampler-pad.loop-on .sampler-loop-badge{display:inline}
+.sampler-pad-prog{
+position:absolute;left:0;bottom:0;height:3px;width:0%;background:var(--accent);pointer-events:none;
+}
+.sampler-inspector{
+display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:10px;padding:8px 10px;
+background:var(--surface);border:1px solid var(--line-soft);border-radius:var(--radius-sm);font-size:11px;
+}
+.sampler-insp-name{font-family:var(--mono);font-weight:700;color:var(--ink);min-width:90px}
+.sampler-insp-loop{
+padding:4px 8px;border-radius:4px;border:1px solid var(--line);background:var(--bg-elev);
+color:var(--muted);font-size:11px;font-weight:700;cursor:pointer;
+}
+.sampler-insp-loop.active{background:var(--info);color:#fff;border-color:var(--info)}
+.sampler-insp-ctrl{display:inline-flex;align-items:center;gap:6px;color:var(--ink-soft);font-weight:600}
+.sampler-insp-ctrl input[type=range]{width:80px}
+.sampler-insp-val{font-family:var(--mono);font-weight:700;min-width:38px;color:var(--ink)}
+
+/* --- WebMIDI & Shortcuts Modal --- */
+.midi-modal-panel{width:min(540px,100%);max-height:85dvh;display:flex;flex-direction:column;gap:10px}
+.midi-modal-hdr{display:flex;align-items:center;justify-content:space-between}
+.midi-close-btn{
+padding:4px 10px;border-radius:4px;border:1px solid var(--line);background:var(--surface);color:var(--ink);cursor:pointer;font-size:12px;font-weight:600;
+}
+.midi-shortcuts-box{
+display:flex;flex-wrap:wrap;gap:6px 10px;padding:8px 10px;border-radius:var(--radius-sm);
+background:var(--surface);border:1px solid var(--line-soft);font-size:11px;color:var(--ink-soft);
+}
+.midi-shortcuts-box kbd{
+padding:1px 5px;border-radius:3px;border:1px solid var(--line);background:var(--bg-elev);
+font-family:var(--mono);font-size:10px;font-weight:700;color:var(--ink);margin-right:2px;
+}
+.midi-status-line{font-size:11px;font-family:var(--mono);color:var(--muted)}
+.midi-rows-wrap{overflow-y:auto;display:flex;flex-direction:column;gap:5px;padding-right:4px}
+.midi-map-row{
+display:grid;grid-template-columns:1fr auto auto auto;align-items:center;gap:8px;
+padding:5px 8px;border-radius:4px;background:var(--surface);border:1px solid var(--line-soft);font-size:12px;
+}
+.midi-bind-val{font-family:var(--mono);font-size:11px;color:var(--muted)}
+.midi-bind-val.mapped{color:var(--ok);font-weight:700}
+.midi-learn-btn{
+padding:3px 9px;border-radius:4px;border:1px solid var(--info);background:rgba(37,99,235,.12);
+color:var(--info);font-size:11px;font-weight:700;cursor:pointer;
+}
+.midi-learn-btn.learning{background:var(--accent);border-color:var(--accent);color:#fff}
+.midi-clear-btn{
+width:22px;height:22px;border-radius:4px;border:1px solid var(--line);background:var(--bg-elev);
+color:var(--muted);cursor:pointer;font-weight:700;
 }
     `;
     document.head.appendChild(s);
@@ -6071,6 +6267,40 @@ animation-duration:.01ms!important;
     ctx2d.globalAlpha = isDark ? 0.14 : 0.08;
     ctx2d.fill();
     ctx2d.globalAlpha = 1;
+    const killBands = [
+      { idx: 0, label: "SUB KILLED", f0: cfg.FREQ_MIN, f1: cfg.KILL_FC[0] },
+      { idx: 1, label: "KICK KILLED", f0: cfg.KILL_FC[0], f1: cfg.KILL_FC[1] },
+      { idx: 2, label: "MID KILLED", f0: cfg.KILL_FC[1], f1: cfg.KILL_FC[2] },
+      { idx: 3, label: "TOP KILLED", f0: cfg.KILL_FC[2], f1: cfg.FREQ_MAX }
+    ];
+    killBands.forEach((kb) => {
+      if (_stableSwitches[kb.idx] <= 0.5) return;
+      const x0 = masterEqFreqToX(kb.f0, plotX, plotW);
+      const x1 = masterEqFreqToX(kb.f1, plotX, plotW);
+      const w = Math.max(0, x1 - x0);
+      ctx2d.save();
+      ctx2d.beginPath();
+      ctx2d.rect(x0, plotY, w, plotH);
+      ctx2d.clip();
+      ctx2d.fillStyle = isDark ? "rgba(239, 68, 68, 0.14)" : "rgba(220, 38, 38, 0.10)";
+      ctx2d.fillRect(x0, plotY, w, plotH);
+      ctx2d.strokeStyle = isDark ? "rgba(239, 68, 68, 0.25)" : "rgba(220, 38, 38, 0.20)";
+      ctx2d.lineWidth = 1;
+      for (let sx = x0 - plotH; sx < x1 + plotH; sx += 12) {
+        ctx2d.beginPath();
+        ctx2d.moveTo(sx, plotY + plotH);
+        ctx2d.lineTo(sx + plotH, plotY);
+        ctx2d.stroke();
+      }
+      if (w > 46) {
+        ctx2d.fillStyle = isDark ? "#fca5a5" : "#b91c1c";
+        ctx2d.font = "bold 10px monospace";
+        ctx2d.textAlign = "center";
+        ctx2d.textBaseline = "top";
+        ctx2d.fillText(kb.label, x0 + w * 0.5, plotY + 6);
+      }
+      ctx2d.restore();
+    });
   }
   function drawMasterEqCurve() {
     const targets = getContext().masterEqTargets || [];
@@ -6228,6 +6458,51 @@ animation-duration:.01ms!important;
   var EMPTY_MSG = "No samples folder found (src/samples/).";
   var WAIT_MSG = "Waiting for Bela\u2026";
   var NONE_MSG = "No WAV/MP3 files in src/samples/.";
+  var _inspTitleEl = null;
+  var _inspLoopBtn = null;
+  var _inspGainSlider = null;
+  var _inspGainVal = null;
+  var _inspPitchSlider = null;
+  var _inspPitchVal = null;
+  var _uploadStatusEl = null;
+  var _padProgressEls = [];
+  function _loadSlotCfgMap() {
+    try {
+      const raw = localStorage.getItem(SAMPLER_CFG_STORAGE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed === "object") return parsed;
+      }
+    } catch (_) {
+    }
+    return {};
+  }
+  function _saveSlotCfgMap(map) {
+    try {
+      localStorage.setItem(SAMPLER_CFG_STORAGE_KEY, JSON.stringify(map));
+    } catch (_) {
+    }
+  }
+  function _getSlotCfg(slot) {
+    const ctx = getContext();
+    if (!ctx.samplerSlotCfg || typeof ctx.samplerSlotCfg !== "object") {
+      ctx.samplerSlotCfg = _loadSlotCfgMap();
+    }
+    const existing = ctx.samplerSlotCfg[slot];
+    if (existing) return existing;
+    return { loop: false, gain: 1, pitch: 0 };
+  }
+  function _pushSlotCfg(slot, cfg) {
+    const ctx = getContext();
+    ctx.samplerSlotCfg[slot] = __spreadValues({}, cfg);
+    _saveSlotCfgMap(ctx.samplerSlotCfg);
+    if (belaControlReady()) {
+      Bela.control.send({
+        event: "custom",
+        samplerSlotCfg: { slot, loop: !!cfg.loop, gain: cfg.gain, pitch: cfg.pitch }
+      });
+    }
+  }
   function decodeSampleNames(namesBuf, count) {
     const names = [];
     if (!namesBuf || count <= 0) return names;
@@ -6245,8 +6520,82 @@ animation-duration:.01ms!important;
     return names;
   }
   function _sendPlay(slot) {
+    const ctx = getContext();
+    ctx.samplerSelectedSlot = slot;
+    _refreshInspector();
+    const cfg = _getSlotCfg(slot);
     if (!belaControlReady()) return;
+    Bela.control.send({
+      event: "custom",
+      samplerSlotCfg: { slot, loop: !!cfg.loop, gain: cfg.gain, pitch: cfg.pitch }
+    });
     Bela.control.send({ event: "custom", samplerPlay: slot });
+  }
+  function _sendStop() {
+    if (!belaControlReady()) return;
+    Bela.control.send({ event: "custom", samplerStop: true });
+  }
+  function _refreshInspector() {
+    var _a;
+    const ctx = getContext();
+    const slot = ctx.samplerSelectedSlot || 0;
+    const cfg = _getSlotCfg(slot);
+    const name = ctx.samplerNames && ctx.samplerNames[slot] || `Slot ${slot + 1}`;
+    if (_inspTitleEl) _inspTitleEl.textContent = `#${slot + 1} ${_padLabel(name)}`;
+    if (_inspLoopBtn) {
+      _inspLoopBtn.classList.toggle("active", !!cfg.loop);
+      _inspLoopBtn.setAttribute("aria-pressed", cfg.loop ? "true" : "false");
+    }
+    if (_inspGainSlider) {
+      const pct = Math.round(((_a = cfg.gain) != null ? _a : 1) * 100);
+      _inspGainSlider.value = String(pct);
+      if (_inspGainVal) _inspGainVal.textContent = pct + "%";
+    }
+    if (_inspPitchSlider) {
+      const st = Math.round(cfg.pitch || 0);
+      _inspPitchSlider.value = String(st);
+      if (_inspPitchVal) _inspPitchVal.textContent = (st > 0 ? "+" : "") + st + " st";
+    }
+    (ctx.samplerButtons || []).forEach((btn, i) => {
+      const sc = _getSlotCfg(i);
+      btn.classList.toggle("loop-on", !!sc.loop);
+      btn.classList.toggle("selected", i === slot);
+    });
+  }
+  function _handleUploadFile(file) {
+    if (!file) return;
+    if (!/\.(wav|mp3)$/i.test(file.name)) {
+      if (_uploadStatusEl) _uploadStatusEl.textContent = "WAV / MP3 only";
+      return;
+    }
+    if (file.size > 4 * 1024 * 1024) {
+      if (_uploadStatusEl) _uploadStatusEl.textContent = "Max 4 MB";
+      return;
+    }
+    if (!belaControlReady()) {
+      if (_uploadStatusEl) _uploadStatusEl.textContent = "Bela offline";
+      return;
+    }
+    if (_uploadStatusEl) _uploadStatusEl.textContent = "Uploading\u2026";
+    const reader = new FileReader();
+    reader.onload = () => {
+      const bytes = new Uint8Array(reader.result);
+      let bin = "";
+      const chunk = 32768;
+      for (let i = 0; i < bytes.length; i += chunk) {
+        bin += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk));
+      }
+      const b64 = btoa(bin);
+      Bela.control.send({
+        event: "custom",
+        uploadSample: { name: file.name, dataB64: b64 }
+      });
+      if (_uploadStatusEl) _uploadStatusEl.textContent = `Sent ${file.name}`;
+      setTimeout(() => {
+        if (_uploadStatusEl) _uploadStatusEl.textContent = "";
+      }, 3e3);
+    };
+    reader.readAsArrayBuffer(file);
   }
   function _padLabel(filename) {
     const base = String(filename || "").replace(/\.(wav|mp3)$/i, "").trim();
@@ -6260,6 +6609,7 @@ animation-duration:.01ms!important;
     if (!list || !empty) return;
     list.innerHTML = "";
     ctx.samplerButtons = [];
+    _padProgressEls = [];
     ctx.samplerHighlight = -1;
     if (!names.length) {
       empty.style.display = "";
@@ -6269,21 +6619,88 @@ animation-duration:.01ms!important;
     empty.style.display = "none";
     list.style.display = "";
     names.forEach((name, i) => {
-      const btn = el("button", { className: "sampler-pad", type: "button" });
-      btn.title = name;
-      btn.textContent = _padLabel(name);
+      const cfg = _getSlotCfg(i);
+      const btn = el("button", {
+        className: "sampler-pad" + (cfg.loop ? " loop-on" : "") + (i === ctx.samplerSelectedSlot ? " selected" : ""),
+        type: "button"
+      });
+      btn.title = `${name} (Click to play, Right-click to select)`;
+      const lbl = el("span", { className: "sampler-pad-lbl", textContent: _padLabel(name) });
+      btn.appendChild(lbl);
+      const meta = el("span", { className: "sampler-pad-badges" });
+      if (i < SAMPLER_PAD_KEYS.length) {
+        meta.appendChild(el("kbd", { className: "sampler-key-badge", textContent: SAMPLER_PAD_KEYS[i] }));
+      }
+      const loopTag = el("span", { className: "sampler-loop-badge", textContent: "\u221E", title: "Loop enabled" });
+      meta.appendChild(loopTag);
+      btn.appendChild(meta);
+      const prog = el("span", { className: "sampler-pad-prog" });
+      btn.appendChild(prog);
+      _padProgressEls.push(prog);
       btn.addEventListener("click", () => _sendPlay(i));
+      btn.addEventListener("contextmenu", (e) => {
+        e.preventDefault();
+        ctx.samplerSelectedSlot = i;
+        _refreshInspector();
+      });
       list.appendChild(btn);
       ctx.samplerButtons.push(btn);
+      if (cfg.loop || cfg.gain !== 1 || cfg.pitch !== 0) {
+        _pushSlotCfg(i, cfg);
+      }
     });
+    _refreshInspector();
   }
   function buildSamplerCard() {
-    const card = el("div", { className: "card live-tile" });
+    const card = el("div", { className: "card live-tile", id: "live-sampler-card" });
     card.dataset.tile = "sampler";
     const hdr = el("div", { className: "card-header-row" });
     hdr.appendChild(cardTitle("Sampler"));
-    hdr.appendChild(el("span", { className: "card-meta", textContent: "Siren bus" }));
+    const tools = el("div", { className: "sampler-hdr-tools" });
+    _uploadStatusEl = el("span", { className: "sampler-upload-status" });
+    tools.appendChild(_uploadStatusEl);
+    const stopBtn = el("button", {
+      type: "button",
+      className: "sampler-tool-btn stop",
+      textContent: "\u25A0 Stop",
+      title: "Stop playing sample (key: X)"
+    });
+    stopBtn.addEventListener("click", _sendStop);
+    tools.appendChild(stopBtn);
+    const fileInput = el("input", {
+      type: "file",
+      accept: ".wav,.mp3,audio/wav,audio/mpeg",
+      style: "display:none"
+    });
+    fileInput.addEventListener("change", () => {
+      if (fileInput.files && fileInput.files[0]) {
+        _handleUploadFile(fileInput.files[0]);
+        fileInput.value = "";
+      }
+    });
+    const upBtn = el("button", {
+      type: "button",
+      className: "sampler-tool-btn",
+      textContent: "+ WAV/MP3",
+      title: "Upload WAV/MP3 sample to Bela (or drag & drop)"
+    });
+    upBtn.addEventListener("click", () => fileInput.click());
+    tools.appendChild(upBtn);
+    tools.appendChild(fileInput);
+    hdr.appendChild(tools);
     card.appendChild(hdr);
+    card.addEventListener("dragover", (e) => {
+      e.preventDefault();
+      card.classList.add("drag-over");
+    });
+    card.addEventListener("dragleave", () => card.classList.remove("drag-over"));
+    card.addEventListener("drop", (e) => {
+      e.preventDefault();
+      card.classList.remove("drag-over");
+      if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0]) {
+        _handleUploadFile(e.dataTransfer.files[0]);
+      }
+    });
     const body = el("div", { id: "sampler-body" });
     const empty = el("div", { id: "sampler-empty", className: "sampler-empty" });
     empty.textContent = EMPTY_MSG;
@@ -6291,6 +6708,54 @@ animation-duration:.01ms!important;
     const list = el("div", { id: "sampler-grid", className: "sampler-grid" });
     list.style.display = "none";
     body.appendChild(list);
+    const insp = el("div", { className: "sampler-inspector" });
+    _inspTitleEl = el("span", { className: "sampler-insp-name", textContent: "#1" });
+    insp.appendChild(_inspTitleEl);
+    _inspLoopBtn = el("button", {
+      type: "button",
+      className: "sampler-insp-loop",
+      textContent: "\u221E Loop",
+      "aria-pressed": "false"
+    });
+    _inspLoopBtn.addEventListener("click", () => {
+      const slot = getContext().samplerSelectedSlot || 0;
+      const cfg = __spreadValues({}, _getSlotCfg(slot));
+      cfg.loop = !cfg.loop;
+      _pushSlotCfg(slot, cfg);
+      _refreshInspector();
+    });
+    insp.appendChild(_inspLoopBtn);
+    const gWrap = el("label", { className: "sampler-insp-ctrl" });
+    gWrap.appendChild(el("span", { textContent: "Vol" }));
+    _inspGainSlider = el("input", { type: "range", min: "0", max: "150", step: "5", value: "100", "aria-label": "Pad Gain" });
+    _inspGainVal = el("span", { className: "sampler-insp-val", textContent: "100%" });
+    _inspGainSlider.addEventListener("input", () => {
+      const slot = getContext().samplerSelectedSlot || 0;
+      const cfg = __spreadValues({}, _getSlotCfg(slot));
+      const pct = parseInt(_inspGainSlider.value, 10);
+      cfg.gain = pct / 100;
+      _inspGainVal.textContent = pct + "%";
+      _pushSlotCfg(slot, cfg);
+    });
+    gWrap.appendChild(_inspGainSlider);
+    gWrap.appendChild(_inspGainVal);
+    insp.appendChild(gWrap);
+    const pWrap = el("label", { className: "sampler-insp-ctrl" });
+    pWrap.appendChild(el("span", { textContent: "Pitch" }));
+    _inspPitchSlider = el("input", { type: "range", min: "-12", max: "12", step: "1", value: "0", "aria-label": "Pad Pitch" });
+    _inspPitchVal = el("span", { className: "sampler-insp-val", textContent: "0 st" });
+    _inspPitchSlider.addEventListener("input", () => {
+      const slot = getContext().samplerSelectedSlot || 0;
+      const cfg = __spreadValues({}, _getSlotCfg(slot));
+      const st = parseInt(_inspPitchSlider.value, 10);
+      cfg.pitch = st;
+      _inspPitchVal.textContent = (st > 0 ? "+" : "") + st + " st";
+      _pushSlotCfg(slot, cfg);
+    });
+    pWrap.appendChild(_inspPitchSlider);
+    pWrap.appendChild(_inspPitchVal);
+    insp.appendChild(pWrap);
+    body.appendChild(insp);
     card.appendChild(body);
     const ctx = getContext();
     ctx.samplerEmptyEl = empty;
@@ -6351,12 +6816,503 @@ animation-duration:.01ms!important;
     }
     const playingSlot = Math.round(st[2]);
     const isPlaying = st[3] > 0.5;
+    const playhead = Math.max(0, Math.min(1, st[4] || 0));
     const highlight = isPlaying ? playingSlot : -1;
+    _padProgressEls.forEach((prog, i) => {
+      if (!prog) return;
+      prog.style.width = i === highlight ? Math.round(playhead * 100) + "%" : "0%";
+    });
     if (ctx.samplerHighlight === highlight) return;
     ctx.samplerHighlight = highlight;
     (ctx.samplerButtons || []).forEach((btn, i) => {
       btn.classList.toggle("playing", i === highlight);
     });
+  }
+
+  // gui/tempo.js
+  var DELAY_SUBDIVS = [
+    { id: "1/16", label: "1/16", beats: 0.25 },
+    { id: "1/8", label: "1/8", beats: 0.5 },
+    { id: "1/8d", label: "1/8d", beats: 0.75 },
+    { id: "1/4", label: "1/4", beats: 1 },
+    { id: "1/2", label: "1/2", beats: 2 }
+  ];
+  var PHASER_SUBDIVS = [
+    { id: "1/2", label: "1/2", beats: 2 },
+    { id: "1/1", label: "1 Bar", beats: 4 },
+    { id: "2/1", label: "2 Bar", beats: 8 },
+    { id: "4/1", label: "4 Bar", beats: 16 }
+  ];
+  var _taps = [];
+  var _bpmListeners = [];
+  var _syncUiHook = null;
+  function _sendBela(payload) {
+    if (!belaControlReady()) return;
+    Bela.control.send(payload);
+  }
+  function loadSavedBpm() {
+    try {
+      const raw = localStorage.getItem(TEMPO_STORAGE_KEY);
+      if (raw) {
+        const v = parseFloat(raw);
+        if (!isNaN(v)) {
+          return Math.max(TEMPO_DEFAULTS.min, Math.min(TEMPO_DEFAULTS.max, Math.round(v * 10) / 10));
+        }
+      }
+    } catch (_) {
+    }
+    return TEMPO_DEFAULTS.bpm;
+  }
+  function _saveBpm(bpm) {
+    try {
+      localStorage.setItem(TEMPO_STORAGE_KEY, String(bpm));
+    } catch (_) {
+    }
+  }
+  function registerBpmListener(fn) {
+    if (typeof fn === "function") _bpmListeners.push(fn);
+  }
+  function registerTempoSyncUiHook(fn) {
+    _syncUiHook = fn;
+  }
+  function subdivToDelayMs(bpm, subdivId, minMs = 40, maxMs = 1500) {
+    const item = DELAY_SUBDIVS.find((s) => s.id === subdivId) || DELAY_SUBDIVS[2];
+    const ms = Math.round(6e4 / Math.max(20, bpm) * item.beats);
+    return Math.max(minMs, Math.min(maxMs, ms));
+  }
+  function subdivToPhaserHz(bpm, subdivId) {
+    const item = PHASER_SUBDIVS.find((s) => s.id === subdivId) || PHASER_SUBDIVS[1];
+    const hz = bpm / 60 / item.beats;
+    return Math.max(0.05, Math.min(5, Math.round(hz * 100) / 100));
+  }
+  function applyTempoSyncToEffects() {
+    const ctx = getContext();
+    const bpm = ctx.tempoBpm || TEMPO_DEFAULTS.bpm;
+    if (ctx.echoDub && ctx.echoDub.sync) {
+      const ms = subdivToDelayMs(bpm, ctx.echoDub.subdiv, 40, 1500);
+      if (ctx.echoDub.time !== ms) {
+        ctx.echoDub.time = ms;
+        _sendBela({ event: "custom", echoDub: { time: ms }, echuDub: { time: ms } });
+      }
+    }
+    if (ctx.shimmerDelay && ctx.shimmerDelay.sync) {
+      const ms = subdivToDelayMs(bpm, ctx.shimmerDelay.subdiv, 40, 1500);
+      if (ctx.shimmerDelay.delayTime !== ms) {
+        ctx.shimmerDelay.delayTime = ms;
+        _sendBela({ event: "custom", shimmerDelay: { delayTime: ms } });
+      }
+    }
+    if (ctx.blackArk && ctx.blackArk.sync) {
+      const hz = subdivToPhaserHz(bpm, ctx.blackArk.subdiv);
+      if (ctx.blackArk.rate !== hz) {
+        ctx.blackArk.rate = hz;
+        _sendBela({ event: "custom", blackArk: { rate: hz } });
+      }
+    }
+    if (typeof _syncUiHook === "function") _syncUiHook();
+  }
+  function setBpm(nextBpm) {
+    const ctx = getContext();
+    const clamped = Math.max(TEMPO_DEFAULTS.min, Math.min(TEMPO_DEFAULTS.max, Math.round(nextBpm * 10) / 10));
+    ctx.tempoBpm = clamped;
+    _saveBpm(clamped);
+    applyTempoSyncToEffects();
+    _bpmListeners.forEach((fn) => fn(clamped));
+    return clamped;
+  }
+  function nudgeBpm(delta) {
+    const ctx = getContext();
+    return setBpm((ctx.tempoBpm || TEMPO_DEFAULTS.bpm) + delta);
+  }
+  function tapTempo() {
+    const now = performance.now();
+    if (_taps.length && now - _taps[_taps.length - 1] > 2e3) {
+      _taps = [];
+    }
+    _taps.push(now);
+    if (_taps.length > 6) _taps.shift();
+    if (_taps.length >= 2) {
+      let sum = 0;
+      for (let i = 1; i < _taps.length; i++) {
+        sum += _taps[i] - _taps[i - 1];
+      }
+      const avgMs = sum / (_taps.length - 1);
+      if (avgMs > 100) {
+        const bpm = 6e4 / avgMs;
+        setBpm(Math.round(bpm));
+      }
+    }
+    return getContext().tempoBpm;
+  }
+
+  // gui/input-control.js
+  var MIDI_ACTIONS = [
+    { id: "kill_0", label: "Kill SUB", kind: "toggle" },
+    { id: "kill_1", label: "Kill KICK", kind: "toggle" },
+    { id: "kill_2", label: "Kill MID", kind: "toggle" },
+    { id: "kill_3", label: "Kill TOP", kind: "toggle" },
+    { id: "siren_gate", label: "Dub Siren Gate", kind: "momentary" },
+    { id: "tap_tempo", label: "Tap Tempo", kind: "trigger" },
+    { id: "aux_mute_0", label: "AUX 1 Mute", kind: "toggle" },
+    { id: "aux_mute_1", label: "AUX 2 Mute", kind: "toggle" },
+    { id: "aux_mute_2", label: "AUX 3 Mute", kind: "toggle" },
+    { id: "aux_mute_3", label: "AUX 4 Mute", kind: "toggle" },
+    { id: "echo_kill", label: "Echo Dub Kill Send", kind: "toggle" },
+    { id: "echo_clear", label: "Echo Dub Clear", kind: "trigger" },
+    { id: "spring_splash", label: "Tubby Spring Splash", kind: "trigger" },
+    { id: "master_warmth", label: "Master Warmth (CC)", kind: "cc" },
+    { id: "master_width", label: "Stereo Width (CC)", kind: "cc" },
+    { id: "master_punch", label: "Master 4-Band Punch (CC)", kind: "cc" },
+    { id: "sampler_0", label: "Sampler Pad 1", kind: "trigger" },
+    { id: "sampler_1", label: "Sampler Pad 2", kind: "trigger" },
+    { id: "sampler_2", label: "Sampler Pad 3", kind: "trigger" },
+    { id: "sampler_3", label: "Sampler Pad 4", kind: "trigger" },
+    { id: "sampler_4", label: "Sampler Pad 5", kind: "trigger" },
+    { id: "sampler_5", label: "Sampler Pad 6", kind: "trigger" },
+    { id: "sampler_6", label: "Sampler Pad 7", kind: "trigger" },
+    { id: "sampler_7", label: "Sampler Pad 8", kind: "trigger" }
+  ];
+  var _midiMap = {};
+  var _midiAccess = null;
+  var _modalEl = null;
+  var _modalStatusEl = null;
+  var _modalRowsWrap = null;
+  var _perfToggleHook = null;
+  var _uiRefreshHook = null;
+  var _midiBadgeBtn = null;
+  var _spaceSirenActive = false;
+  var SAMPLER_KEY_MAP = {
+    KeyQ: 0,
+    KeyW: 1,
+    KeyE: 2,
+    KeyR: 3,
+    KeyA: 4,
+    KeyS: 5,
+    KeyD: 6,
+    KeyF: 7
+  };
+  function _sendBela2(payload) {
+    if (!belaControlReady()) return;
+    Bela.control.send(payload);
+  }
+  function registerPerfToggleHook(fn) {
+    _perfToggleHook = fn;
+  }
+  function registerInputUiRefreshHook(fn) {
+    _uiRefreshHook = fn;
+  }
+  function registerMidiBadgeButton(btn) {
+    _midiBadgeBtn = btn;
+    _updateMidiBadge();
+  }
+  function _loadMidiMap() {
+    try {
+      const raw = localStorage.getItem(MIDI_STORAGE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed === "object") return parsed;
+      }
+    } catch (_) {
+    }
+    return {};
+  }
+  function _saveMidiMap() {
+    try {
+      localStorage.setItem(MIDI_STORAGE_KEY, JSON.stringify(_midiMap));
+    } catch (_) {
+    }
+  }
+  function toggleKillMaskBit(bitIdx) {
+    const ctx = getContext();
+    ctx.guiKillsMask = (ctx.guiKillsMask ^ 1 << bitIdx) & 15;
+    _sendBela2({ event: "custom", guiKillsMask: ctx.guiKillsMask });
+    if (typeof _uiRefreshHook === "function") _uiRefreshHook();
+  }
+  function setSirenGuiGate(on) {
+    _sendBela2({ event: "custom", sirenGate: !!on });
+  }
+  function _executeAction(actionId, valueNorm, isPress) {
+    const ctx = getContext();
+    if (actionId.startsWith("kill_")) {
+      if (!isPress) return;
+      const idx = parseInt(actionId.slice(5), 10);
+      toggleKillMaskBit(idx);
+      return;
+    }
+    if (actionId === "siren_gate") {
+      setSirenGuiGate(isPress);
+      return;
+    }
+    if (actionId === "tap_tempo") {
+      if (isPress) tapTempo();
+      return;
+    }
+    if (actionId.startsWith("aux_mute_")) {
+      if (!isPress) return;
+      const idx = parseInt(actionId.slice(9), 10);
+      ctx.auxMuted[idx] = !ctx.auxMuted[idx];
+      _sendBela2({ event: "custom", auxMute: { aux: idx, muted: ctx.auxMuted[idx] } });
+      if (typeof _uiRefreshHook === "function") _uiRefreshHook();
+      return;
+    }
+    if (actionId === "echo_kill") {
+      if (!isPress) return;
+      ctx.echoDub.kill = !ctx.echoDub.kill;
+      _sendBela2({ event: "custom", echoDub: { kill: ctx.echoDub.kill }, echuDub: { kill: ctx.echoDub.kill } });
+      if (typeof _uiRefreshHook === "function") _uiRefreshHook();
+      return;
+    }
+    if (actionId === "echo_clear") {
+      if (isPress) _sendBela2({ event: "custom", echoDubClear: true, echuDubClear: true });
+      return;
+    }
+    if (actionId === "spring_splash") {
+      if (isPress) _sendBela2({ event: "custom", tubbySpringSplash: true });
+      return;
+    }
+    if (actionId === "master_warmth") {
+      ctx.masterBus.warmth = Math.max(0, Math.min(1, valueNorm));
+      _sendBela2({ event: "custom", masterBus: { warmth: ctx.masterBus.warmth } });
+      if (typeof _uiRefreshHook === "function") _uiRefreshHook();
+      return;
+    }
+    if (actionId === "master_width") {
+      ctx.masterBus.stereoWidth = Math.round(valueNorm * 1.5 * 100) / 100;
+      _sendBela2({ event: "custom", masterBus: { stereoWidth: ctx.masterBus.stereoWidth } });
+      if (typeof _uiRefreshHook === "function") _uiRefreshHook();
+      return;
+    }
+    if (actionId === "master_punch") {
+      ctx.masterBus.punch = Math.max(0, Math.min(1, valueNorm));
+      _sendBela2({ event: "custom", masterBus: { punch: ctx.masterBus.punch } });
+      if (typeof _uiRefreshHook === "function") _uiRefreshHook();
+      return;
+    }
+    if (actionId.startsWith("sampler_")) {
+      if (!isPress) return;
+      const slot = parseInt(actionId.slice(8), 10);
+      _sendBela2({ event: "custom", samplerPlay: slot });
+    }
+  }
+  function _isTextInputFocused() {
+    const a = document.activeElement;
+    if (!a) return false;
+    const tag = a.tagName;
+    return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || a.isContentEditable;
+  }
+  function initKeyboardShortcuts() {
+    if (typeof window === "undefined") return;
+    window.addEventListener("keydown", (e) => {
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      if (_modalEl && !_modalEl.hasAttribute("hidden")) {
+        if (e.key === "Escape") closeMidiModal();
+        return;
+      }
+      if (_isTextInputFocused()) return;
+      if (e.code === "Space") {
+        e.preventDefault();
+        if (!e.repeat && !_spaceSirenActive) {
+          _spaceSirenActive = true;
+          setSirenGuiGate(true);
+        }
+        return;
+      }
+      if (e.repeat) return;
+      if (e.key === "1" || e.key === "2" || e.key === "3" || e.key === "4") {
+        e.preventDefault();
+        toggleKillMaskBit(parseInt(e.key, 10) - 1);
+        return;
+      }
+      if (e.code === "KeyT") {
+        e.preventDefault();
+        tapTempo();
+        return;
+      }
+      if (e.code === "KeyP") {
+        e.preventDefault();
+        if (typeof _perfToggleHook === "function") _perfToggleHook();
+        return;
+      }
+      if (e.code === "KeyX" || e.key === "Backspace") {
+        e.preventDefault();
+        _sendBela2({ event: "custom", samplerStop: true });
+        return;
+      }
+      if (SAMPLER_KEY_MAP[e.code] !== void 0) {
+        e.preventDefault();
+        _sendBela2({ event: "custom", samplerPlay: SAMPLER_KEY_MAP[e.code] });
+      }
+    });
+    window.addEventListener("keyup", (e) => {
+      if (e.code === "Space" && _spaceSirenActive) {
+        _spaceSirenActive = false;
+        setSirenGuiGate(false);
+      }
+    });
+    window.addEventListener("blur", () => {
+      if (_spaceSirenActive) {
+        _spaceSirenActive = false;
+        setSirenGuiGate(false);
+      }
+    });
+  }
+  function _formatMidiBinding(b) {
+    if (!b) return "\u2014";
+    const prefix = b.type === "cc" ? "CC" : "Note";
+    return `Ch${b.ch + 1} \xB7 ${prefix} ${b.num}`;
+  }
+  function _onMidiMessage(ev) {
+    const d = ev.data;
+    if (!d || d.length < 2) return;
+    const status = d[0] & 240;
+    const ch = d[0] & 15;
+    const num = d[1];
+    const val = d.length > 2 ? d[2] : 0;
+    let msgType = null;
+    let isPress = false;
+    if (status === 144 && val > 0) {
+      msgType = "note";
+      isPress = true;
+    } else if (status === 128 || status === 144 && val === 0) {
+      msgType = "note";
+      isPress = false;
+    } else if (status === 176) {
+      msgType = "cc";
+      isPress = val >= 64;
+    } else {
+      return;
+    }
+    const ctx = getContext();
+    if (ctx.midiLearnTarget) {
+      if (msgType === "note" && !isPress) return;
+      const targetId = ctx.midiLearnTarget;
+      ctx.midiLearnTarget = null;
+      _midiMap[targetId] = { type: msgType, ch, num };
+      _saveMidiMap();
+      _renderMidiRows();
+      return;
+    }
+    const norm = val / 127;
+    for (const [actionId, b] of Object.entries(_midiMap)) {
+      if (!b || b.type !== msgType || b.ch !== ch || b.num !== num) continue;
+      if (msgType === "cc") {
+        const meta = MIDI_ACTIONS.find((a) => a.id === actionId);
+        if (meta && meta.kind === "cc") {
+          _executeAction(actionId, norm, true);
+        } else if (isPress) {
+          _executeAction(actionId, norm, true);
+        }
+      } else {
+        _executeAction(actionId, norm, isPress);
+      }
+    }
+  }
+  function _bindMidiInputs() {
+    if (!_midiAccess) return;
+    const ctx = getContext();
+    let count = 0;
+    let firstName = "";
+    for (const inp of _midiAccess.inputs.values()) {
+      inp.onmidimessage = _onMidiMessage;
+      if (!firstName) firstName = inp.name || "MIDI Device";
+      count++;
+    }
+    ctx.midiConnected = count > 0;
+    ctx.midiDeviceName = count > 1 ? `${firstName} (+${count - 1})` : firstName;
+    _updateMidiBadge();
+    if (_modalStatusEl) {
+      _modalStatusEl.textContent = count > 0 ? `Connected: ${ctx.midiDeviceName}` : "No MIDI input detected (plug in a USB MIDI controller)";
+    }
+  }
+  function _updateMidiBadge() {
+    if (!_midiBadgeBtn) return;
+    const ctx = getContext();
+    _midiBadgeBtn.classList.toggle("midi-online", !!ctx.midiConnected);
+    _midiBadgeBtn.title = ctx.midiConnected ? `WebMIDI connected (${ctx.midiDeviceName}) \xB7 Shortcuts & MIDI Learn` : "Keyboard Shortcuts & WebMIDI Learn";
+  }
+  function initInputControls() {
+    _midiMap = _loadMidiMap();
+    initKeyboardShortcuts();
+    if (typeof navigator !== "undefined" && typeof navigator.requestMIDIAccess === "function") {
+      navigator.requestMIDIAccess().then((access) => {
+        _midiAccess = access;
+        _bindMidiInputs();
+        access.onstatechange = () => _bindMidiInputs();
+      }).catch(() => {
+        if (_modalStatusEl) _modalStatusEl.textContent = "WebMIDI permission denied or unavailable.";
+      });
+    }
+  }
+  function _renderMidiRows() {
+    if (!_modalRowsWrap) return;
+    const ctx = getContext();
+    _modalRowsWrap.innerHTML = "";
+    MIDI_ACTIONS.forEach((act) => {
+      const row = el("div", { className: "midi-map-row" });
+      row.appendChild(el("span", { className: "midi-act-lbl", textContent: act.label }));
+      const binding = _midiMap[act.id];
+      row.appendChild(el("span", {
+        className: "midi-bind-val" + (binding ? " mapped" : ""),
+        textContent: _formatMidiBinding(binding)
+      }));
+      const isLearning = ctx.midiLearnTarget === act.id;
+      const learnBtn = el("button", {
+        type: "button",
+        className: "midi-learn-btn" + (isLearning ? " learning" : ""),
+        textContent: isLearning ? "Listening\u2026" : "Learn"
+      });
+      learnBtn.addEventListener("click", () => {
+        ctx.midiLearnTarget = isLearning ? null : act.id;
+        _renderMidiRows();
+      });
+      row.appendChild(learnBtn);
+      const clearBtn = el("button", {
+        type: "button",
+        className: "midi-clear-btn",
+        textContent: "\xD7",
+        title: "Clear MIDI binding",
+        disabled: !binding
+      });
+      clearBtn.addEventListener("click", () => {
+        delete _midiMap[act.id];
+        _saveMidiMap();
+        _renderMidiRows();
+      });
+      row.appendChild(clearBtn);
+      _modalRowsWrap.appendChild(row);
+    });
+  }
+  function openMidiModal() {
+    if (!_modalEl) {
+      const backdrop = el("div", { className: "map-modal-backdrop", id: "midi-modal-backdrop", hidden: true });
+      backdrop.addEventListener("click", (e) => {
+        if (e.target === backdrop) closeMidiModal();
+      });
+      const panel = el("div", { className: "map-modal-panel midi-modal-panel", role: "dialog", "aria-modal": "true", "aria-label": "Keyboard & WebMIDI Control" });
+      const hdr = el("div", { className: "midi-modal-hdr" });
+      hdr.appendChild(el("div", { className: "map-modal-title", textContent: "Keyboard Shortcuts & WebMIDI" }));
+      const closeBtn = el("button", { type: "button", className: "midi-close-btn", textContent: "Close" });
+      closeBtn.addEventListener("click", closeMidiModal);
+      hdr.appendChild(closeBtn);
+      panel.appendChild(hdr);
+      const shortcutsBox = el("div", { className: "midi-shortcuts-box" });
+      shortcutsBox.innerHTML = "<span><kbd>Space</kbd> Siren Gate</span><span><kbd>1</kbd>\u2013<kbd>4</kbd> Kill SUB/KICK/MID/TOP</span><span><kbd>T</kbd> Tap Tempo</span><span><kbd>Q</kbd><kbd>W</kbd><kbd>E</kbd><kbd>R</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd><kbd>F</kbd> Sampler 1\u20138</span><span><kbd>X</kbd> Stop Sample</span><span><kbd>P</kbd> Perf Mode</span>";
+      panel.appendChild(shortcutsBox);
+      _modalStatusEl = el("div", { className: "midi-status-line" });
+      _modalStatusEl.textContent = typeof navigator !== "undefined" && navigator.requestMIDIAccess ? getContext().midiConnected ? `Connected: ${getContext().midiDeviceName}` : "No MIDI input detected" : "WebMIDI requires Chrome/Edge over HTTPS or localhost.";
+      panel.appendChild(_modalStatusEl);
+      _modalRowsWrap = el("div", { className: "midi-rows-wrap" });
+      panel.appendChild(_modalRowsWrap);
+      backdrop.appendChild(panel);
+      document.body.appendChild(backdrop);
+      _modalEl = backdrop;
+    }
+    _renderMidiRows();
+    _modalEl.removeAttribute("hidden");
+  }
+  function closeMidiModal() {
+    getContext().midiLearnTarget = null;
+    if (_modalEl) _modalEl.setAttribute("hidden", "");
   }
 
   // gui/dom/live.js
@@ -6503,6 +7459,230 @@ animation-duration:.01ms!important;
     wrap.classList.add("live-tile");
     wrap.dataset.tile = "meters";
     return wrap;
+  }
+  var _auxMuteBtns = [null, null, null, null];
+  var _auxSoloBtns = [null, null, null, null];
+  var _liveKillBtns = [null, null, null, null];
+  var _mbWarmthSlider = null;
+  var _mbWarmthVal = null;
+  var _mbBassMonoBtn = null;
+  var _mbBassMonoFreqSlider = null;
+  var _mbBassMonoFreqVal = null;
+  var _mbWidthSlider = null;
+  var _mbWidthVal = null;
+  var _mbPunchSlider = null;
+  var _mbPunchVal = null;
+  var _masterBusHoldUntil = 0;
+  function refreshLiveMasterBusUi() {
+    var _a;
+    const ctx = getContext();
+    for (let i = 0; i < 4; i++) {
+      if (_auxMuteBtns[i]) {
+        _auxMuteBtns[i].classList.toggle("active", !!ctx.auxMuted[i]);
+        _auxMuteBtns[i].setAttribute("aria-pressed", ctx.auxMuted[i] ? "true" : "false");
+      }
+      if (_auxSoloBtns[i]) {
+        _auxSoloBtns[i].classList.toggle("active", !!ctx.auxSolo[i]);
+        _auxSoloBtns[i].setAttribute("aria-pressed", ctx.auxSolo[i] ? "true" : "false");
+      }
+      const killed = ctx.switchStates && ctx.switchStates[i] > 0.5 || (ctx.guiKillsMask & 1 << i) !== 0;
+      if (_liveKillBtns[i]) {
+        _liveKillBtns[i].classList.toggle("active", killed);
+        _liveKillBtns[i].setAttribute("aria-pressed", killed ? "true" : "false");
+      }
+    }
+    const mb = ctx.masterBus;
+    if (_mbWarmthSlider && document.activeElement !== _mbWarmthSlider) {
+      const pct = Math.round((mb.warmth || 0) * 100);
+      _mbWarmthSlider.value = String(pct);
+      if (_mbWarmthVal) _mbWarmthVal.textContent = pct + "%";
+    }
+    if (_mbBassMonoBtn) {
+      _mbBassMonoBtn.classList.toggle("active", !!mb.bassMono);
+      _mbBassMonoBtn.textContent = mb.bassMono ? "Bass Mono ON" : "Bass Mono OFF";
+      _mbBassMonoBtn.setAttribute("aria-pressed", mb.bassMono ? "true" : "false");
+    }
+    if (_mbBassMonoFreqSlider && document.activeElement !== _mbBassMonoFreqSlider) {
+      const hz = Math.round(mb.bassMonoFreq || 100);
+      _mbBassMonoFreqSlider.value = String(hz);
+      if (_mbBassMonoFreqVal) _mbBassMonoFreqVal.textContent = hz + " Hz";
+    }
+    if (_mbWidthSlider && document.activeElement !== _mbWidthSlider) {
+      const pct = Math.round(((_a = mb.stereoWidth) != null ? _a : 1) * 100);
+      _mbWidthSlider.value = String(pct);
+      if (_mbWidthVal) _mbWidthVal.textContent = pct + "%";
+    }
+    if (_mbPunchSlider && document.activeElement !== _mbPunchSlider) {
+      const pct = Math.round((mb.punch || 0) * 100);
+      _mbPunchSlider.value = String(pct);
+      if (_mbPunchVal) _mbPunchVal.textContent = pct + "%";
+    }
+  }
+  function syncMasterBusFromBuffer12(fxBuf) {
+    var _a;
+    if (!fxBuf || fxBuf.length < 31) return;
+    const ctx = getContext();
+    if (Date.now() >= _masterBusHoldUntil) {
+      for (let i = 0; i < 4; i++) {
+        ctx.auxMuted[i] = fxBuf[17 + i] > 0.5;
+        ctx.auxSolo[i] = fxBuf[21 + i] > 0.5;
+      }
+      ctx.guiKillsMask = Math.round(fxBuf[25] || 0) & 15;
+      ctx.masterBus.warmth = fxBuf[26] || 0;
+      ctx.masterBus.bassMono = fxBuf[27] > 0.5;
+      ctx.masterBus.bassMonoFreq = fxBuf[28] || 100;
+      ctx.masterBus.stereoWidth = (_a = fxBuf[29]) != null ? _a : 1;
+      ctx.masterBus.punch = fxBuf[30] || 0;
+    }
+    refreshLiveMasterBusUi();
+  }
+  function _buildLiveSlider(label, unit, min, max, step, value, onInput) {
+    const wrap = el("div", { className: "mb-slider-item" });
+    const top = el("div", { className: "mb-slider-top" });
+    top.appendChild(el("span", { className: "mb-slider-lbl", textContent: label }));
+    const valEl = el("span", { className: "mb-slider-val", textContent: value + unit });
+    top.appendChild(valEl);
+    wrap.appendChild(top);
+    const inp = el("input", {
+      type: "range",
+      className: "fx-range-slider",
+      min: String(min),
+      max: String(max),
+      step: String(step || 1),
+      value: String(value),
+      "aria-label": label
+    });
+    inp.addEventListener("input", () => {
+      const v = parseFloat(inp.value);
+      valEl.textContent = v + unit;
+      _masterBusHoldUntil = Date.now() + 1200;
+      onInput(v);
+    });
+    wrap.appendChild(inp);
+    return { wrap, inp, valEl };
+  }
+  function buildMasterBusCard() {
+    var _a;
+    const ctx = getContext();
+    const card = el("div", { className: "card live-tile", id: "live-master-bus-card" });
+    card.dataset.tile = "masterBus";
+    const hdr = el("div", { className: "card-header-row" });
+    hdr.appendChild(cardTitle("Channels & Master DSP"));
+    hdr.appendChild(el("span", { className: "card-meta", textContent: "Keys: 1\u20134 Kills \xB7 Space Siren" }));
+    card.appendChild(hdr);
+    const grid = el("div", { className: "mb-grid" });
+    const chCol = el("div", { className: "mb-col" });
+    const auxRowWrap = el("div", { className: "mb-aux-list" });
+    for (let i = 0; i < 4; i++) {
+      const row = el("div", { className: "mb-aux-item" });
+      row.appendChild(el("span", { className: "mb-aux-name", textContent: "AUX" + (i + 1) }));
+      const mBtn = el("button", {
+        type: "button",
+        className: "mb-ms-btn mute" + (ctx.auxMuted[i] ? " active" : ""),
+        textContent: "Mute",
+        title: `Mute AUX ${i + 1}`,
+        "aria-pressed": ctx.auxMuted[i] ? "true" : "false"
+      });
+      mBtn.addEventListener("click", () => {
+        ctx.auxMuted[i] = !ctx.auxMuted[i];
+        _masterBusHoldUntil = Date.now() + 1200;
+        _sendMicControl({ event: "custom", auxMute: { aux: i, muted: ctx.auxMuted[i] } });
+        refreshLiveMasterBusUi();
+      });
+      const sBtn = el("button", {
+        type: "button",
+        className: "mb-ms-btn solo" + (ctx.auxSolo[i] ? " active" : ""),
+        textContent: "Solo",
+        title: `Solo AUX ${i + 1}`,
+        "aria-pressed": ctx.auxSolo[i] ? "true" : "false"
+      });
+      sBtn.addEventListener("click", () => {
+        ctx.auxSolo[i] = !ctx.auxSolo[i];
+        _masterBusHoldUntil = Date.now() + 1200;
+        _sendMicControl({ event: "custom", auxSolo: { aux: i, solo: ctx.auxSolo[i] } });
+        refreshLiveMasterBusUi();
+      });
+      _auxMuteBtns[i] = mBtn;
+      _auxSoloBtns[i] = sBtn;
+      row.appendChild(mBtn);
+      row.appendChild(sBtn);
+      auxRowWrap.appendChild(row);
+    }
+    chCol.appendChild(auxRowWrap);
+    const killRow = el("div", { className: "mb-kill-row" });
+    [
+      { idx: 0, label: "SUB", key: "1" },
+      { idx: 1, label: "KICK", key: "2" },
+      { idx: 2, label: "MID", key: "3" },
+      { idx: 3, label: "TOP", key: "4" }
+    ].forEach(({ idx, label, key }) => {
+      const btn = el("button", {
+        type: "button",
+        className: "mb-kill-btn",
+        title: `Toggle ${label} Kill (key: ${key})`,
+        "aria-pressed": "false"
+      });
+      btn.innerHTML = `<span>${label}</span><small>${key}</small>`;
+      btn.addEventListener("click", () => {
+        _masterBusHoldUntil = Date.now() + 1200;
+        toggleKillMaskBit(idx);
+      });
+      _liveKillBtns[idx] = btn;
+      killRow.appendChild(btn);
+    });
+    chCol.appendChild(killRow);
+    grid.appendChild(chCol);
+    const dspCol = el("div", { className: "mb-col mb-dsp-col" });
+    const mb = ctx.masterBus;
+    const wCtrl = _buildLiveSlider("Analog Warmth", "%", 0, 100, 1, Math.round((mb.warmth || 0) * 100), (v) => {
+      mb.warmth = v / 100;
+      _sendMicControl({ event: "custom", masterBus: { warmth: mb.warmth } });
+    });
+    _mbWarmthSlider = wCtrl.inp;
+    _mbWarmthVal = wCtrl.valEl;
+    dspCol.appendChild(wCtrl.wrap);
+    const pCtrl = _buildLiveSlider("4-Band Punch", "%", 0, 100, 1, Math.round((mb.punch || 0) * 100), (v) => {
+      mb.punch = v / 100;
+      _sendMicControl({ event: "custom", masterBus: { punch: mb.punch } });
+    });
+    _mbPunchSlider = pCtrl.inp;
+    _mbPunchVal = pCtrl.valEl;
+    dspCol.appendChild(pCtrl.wrap);
+    const swCtrl = _buildLiveSlider("Stereo Width", "%", 0, 150, 1, Math.round(((_a = mb.stereoWidth) != null ? _a : 1) * 100), (v) => {
+      mb.stereoWidth = v / 100;
+      _sendMicControl({ event: "custom", masterBus: { stereoWidth: mb.stereoWidth } });
+    });
+    _mbWidthSlider = swCtrl.inp;
+    _mbWidthVal = swCtrl.valEl;
+    dspCol.appendChild(swCtrl.wrap);
+    const bmRow = el("div", { className: "mb-bm-row" });
+    const bmBtn = el("button", {
+      type: "button",
+      className: "mb-bm-btn" + (mb.bassMono ? " active" : ""),
+      textContent: mb.bassMono ? "Bass Mono ON" : "Bass Mono OFF",
+      "aria-pressed": mb.bassMono ? "true" : "false"
+    });
+    bmBtn.addEventListener("click", () => {
+      mb.bassMono = !mb.bassMono;
+      _masterBusHoldUntil = Date.now() + 1200;
+      _sendMicControl({ event: "custom", masterBus: { bassMono: mb.bassMono } });
+      refreshLiveMasterBusUi();
+    });
+    _mbBassMonoBtn = bmBtn;
+    bmRow.appendChild(bmBtn);
+    const bmfCtrl = _buildLiveSlider("Mono <", " Hz", 60, 200, 5, Math.round(mb.bassMonoFreq || 100), (v) => {
+      mb.bassMonoFreq = v;
+      _sendMicControl({ event: "custom", masterBus: { bassMonoFreq: v } });
+    });
+    _mbBassMonoFreqSlider = bmfCtrl.inp;
+    _mbBassMonoFreqVal = bmfCtrl.valEl;
+    bmRow.appendChild(bmfCtrl.wrap);
+    dspCol.appendChild(bmRow);
+    grid.appendChild(dspCol);
+    card.appendChild(grid);
+    registerInputUiRefreshHook(refreshLiveMasterBusUi);
+    refreshLiveMasterBusUi();
+    return card;
   }
   function _buildLayoutRow(prefs, tileId, index) {
     const tile = LIVE_TILES.find((t) => t.id === tileId);
@@ -6686,6 +7866,10 @@ animation-duration:.01ms!important;
       if (showSiren) grid.appendChild(buildSirenCard());
       if (showMic) grid.appendChild(buildMicInputsCard());
       board.appendChild(grid);
+      return;
+    }
+    if (id === "masterBus") {
+      board.appendChild(buildMasterBusCard());
       return;
     }
     if (id === "sampler") {
@@ -7388,8 +8572,161 @@ animation-duration:.01ms!important;
     }
   }
 
+  // gui/presets.js
+  var PRESET_SLOTS = 8;
+  var _uiSyncCallback = null;
+  function registerPresetUiSync(fn) {
+    _uiSyncCallback = fn;
+  }
+  function _sendBela3(payload) {
+    if (!belaControlReady()) return;
+    Bela.control.send(payload);
+  }
+  function loadPresets() {
+    const empty = new Array(PRESET_SLOTS).fill(null);
+    try {
+      const raw = localStorage.getItem(PRESETS_STORAGE_KEY);
+      if (!raw) return empty;
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        for (let i = 0; i < PRESET_SLOTS; i++) {
+          empty[i] = parsed[i] && typeof parsed[i] === "object" ? parsed[i] : null;
+        }
+      }
+    } catch (_) {
+    }
+    return empty;
+  }
+  function _saveAllPresets(list) {
+    try {
+      localStorage.setItem(PRESETS_STORAGE_KEY, JSON.stringify(list));
+    } catch (_) {
+    }
+  }
+  function captureSnapshot(name) {
+    const ctx = getContext();
+    return {
+      name: name || "Preset",
+      savedAt: (/* @__PURE__ */ new Date()).toISOString(),
+      tempoBpm: ctx.tempoBpm,
+      fxRouting: ctx.fxRouting.map((pair) => [pair[0], pair[1]]),
+      subRoar: __spreadValues({}, ctx.subRoar),
+      echoDub: __spreadValues({}, ctx.echoDub),
+      tubbySpring: __spreadValues({}, ctx.tubbySpring),
+      blackArk: __spreadValues({}, ctx.blackArk),
+      tapeDrive: __spreadValues({}, ctx.tapeDrive),
+      shimmerDelay: __spreadValues({}, ctx.shimmerDelay),
+      dubDucker: __spreadValues({}, ctx.dubDucker),
+      fxChain: __spreadValues({}, ctx.fxChain),
+      masterBus: __spreadValues({}, ctx.masterBus)
+    };
+  }
+  function savePresetSlot(slotIdx, customName) {
+    if (slotIdx < 0 || slotIdx >= PRESET_SLOTS) return null;
+    const list = loadPresets();
+    const existing = list[slotIdx];
+    const name = customName && customName.trim() || existing && existing.name || `Preset ${slotIdx + 1}`;
+    const snap = captureSnapshot(name);
+    list[slotIdx] = snap;
+    _saveAllPresets(list);
+    return snap;
+  }
+  function clearPresetSlot(slotIdx) {
+    if (slotIdx < 0 || slotIdx >= PRESET_SLOTS) return;
+    const list = loadPresets();
+    list[slotIdx] = null;
+    _saveAllPresets(list);
+  }
+  function applySnapshot(snap) {
+    if (!snap || typeof snap !== "object") return false;
+    const ctx = getContext();
+    if (Array.isArray(snap.fxRouting)) {
+      for (let a = 0; a < 5; a++) {
+        const pair = snap.fxRouting[a];
+        if (Array.isArray(pair) && pair.length >= 2) {
+          for (let s = 0; s < 2; s++) {
+            const dest = Math.max(0, Math.min(7, parseInt(pair[s], 10) || 0));
+            ctx.fxRouting[a][s] = dest;
+            _sendBela3({ event: "custom", fxRoute: { aux: a, send: s, dest } });
+          }
+        }
+      }
+    }
+    if (snap.subRoar) {
+      Object.assign(ctx.subRoar, SUB_ROAR_DEFAULTS, snap.subRoar);
+      _sendBela3({ event: "custom", subRoar: __spreadValues({}, ctx.subRoar) });
+    }
+    if (snap.echoDub) {
+      Object.assign(ctx.echoDub, ECHO_DUB_DEFAULTS, snap.echoDub);
+      _sendBela3({ event: "custom", echoDub: __spreadValues({}, ctx.echoDub), echuDub: __spreadValues({}, ctx.echoDub) });
+    }
+    if (snap.tubbySpring) {
+      Object.assign(ctx.tubbySpring, TUBBY_SPRING_DEFAULTS, snap.tubbySpring);
+      _sendBela3({ event: "custom", tubbySpring: __spreadValues({}, ctx.tubbySpring) });
+    }
+    if (snap.blackArk) {
+      Object.assign(ctx.blackArk, BLACK_ARK_DEFAULTS, snap.blackArk);
+      _sendBela3({ event: "custom", blackArk: __spreadValues({}, ctx.blackArk) });
+    }
+    if (snap.tapeDrive) {
+      Object.assign(ctx.tapeDrive, TAPE_DRIVE_DEFAULTS, snap.tapeDrive);
+      _sendBela3({ event: "custom", tapeDrive: __spreadValues({}, ctx.tapeDrive) });
+    }
+    if (snap.shimmerDelay) {
+      Object.assign(ctx.shimmerDelay, SHIMMER_DELAY_DEFAULTS, snap.shimmerDelay);
+      _sendBela3({ event: "custom", shimmerDelay: __spreadValues({}, ctx.shimmerDelay) });
+    }
+    if (snap.dubDucker) {
+      Object.assign(ctx.dubDucker, DUB_DUCKER_DEFAULTS, snap.dubDucker);
+      _sendBela3({ event: "custom", dubDucker: __spreadValues({}, ctx.dubDucker) });
+    }
+    if (snap.fxChain) {
+      Object.assign(ctx.fxChain, FX_CHAIN_DEFAULTS, snap.fxChain);
+      _sendBela3({ event: "custom", fxChain: __spreadValues({}, ctx.fxChain) });
+    }
+    if (snap.masterBus) {
+      Object.assign(ctx.masterBus, MASTER_BUS_DEFAULTS, snap.masterBus);
+      _sendBela3({ event: "custom", masterBus: __spreadValues({}, ctx.masterBus) });
+    }
+    if (typeof snap.tempoBpm === "number") {
+      setBpm(snap.tempoBpm);
+    }
+    if (typeof _uiSyncCallback === "function") _uiSyncCallback();
+    return true;
+  }
+  function recallPresetSlot(slotIdx) {
+    const list = loadPresets();
+    const snap = list[slotIdx];
+    if (!snap) return false;
+    return applySnapshot(snap);
+  }
+  function exportPresetsJson() {
+    return JSON.stringify({ version: 1, presets: loadPresets() }, null, 2);
+  }
+  function importPresetsJson(text) {
+    const parsed = JSON.parse(text);
+    const arr = Array.isArray(parsed) ? parsed : parsed && Array.isArray(parsed.presets) ? parsed.presets : null;
+    if (!arr) throw new Error("Invalid preset JSON format");
+    const out = new Array(PRESET_SLOTS).fill(null);
+    for (let i = 0; i < PRESET_SLOTS; i++) {
+      if (arr[i] && typeof arr[i] === "object") out[i] = arr[i];
+    }
+    _saveAllPresets(out);
+    return out;
+  }
+
   // gui/dom/fx.js
   var ICON_SEND = ["M22 2L11 13", "M22 2l-7 20-4-9-9-4 20-7Z"];
+  var _fxContainerEl = null;
+  var _presetSlotBtns = [];
+  var _selectedPresetSlot = 0;
+  var _echoPingPongBtn = null;
+  var _echoTimeSyncCtrl = null;
+  var _shimmerTimeSyncCtrl = null;
+  var _phaserRateSyncCtrl = null;
+  var _chainEchoSpringCtrl = null;
+  var _chainTapeEchoCtrl = null;
+  var _fxBusSyncHoldUntil = 0;
   function sendBelaControl(payload) {
     if (typeof Bela !== "undefined" && Bela.control && typeof Bela.control.send === "function") {
       Bela.control.send(payload);
@@ -7473,8 +8810,24 @@ animation-duration:.01ms!important;
       _windowBlurBound = true;
       window.addEventListener("blur", clearMomentaryFxTriggers);
     }
+    _fxContainerEl = container;
+    registerTempoSyncUiHook(_syncTimeControlsFromState);
+    registerPresetUiSync(() => {
+      if (!_fxContainerEl) return;
+      const scrollY = _fxContainerEl.parentElement ? _fxContainerEl.parentElement.scrollTop : 0;
+      _rebuildFxGrid(_fxContainerEl);
+      if (_fxContainerEl.parentElement) _fxContainerEl.parentElement.scrollTop = scrollY;
+    });
+    _rebuildFxGrid(container);
+    pane.appendChild(container);
+    return pane;
+  }
+  function _rebuildFxGrid(container) {
+    container.innerHTML = "";
+    container.appendChild(buildPresetsBarCard());
     container.appendChild(buildRoutingMatrixCard());
     const fxGrid = el("div", { className: "fx-modules-grid" });
+    fxGrid.appendChild(buildFxChainCard());
     fxGrid.appendChild(buildTapeDriveCard());
     fxGrid.appendChild(buildDubDuckerCard());
     fxGrid.appendChild(buildSubRoarCard());
@@ -7483,8 +8836,153 @@ animation-duration:.01ms!important;
     fxGrid.appendChild(buildShimmerDelayCard());
     fxGrid.appendChild(buildBlackArkPhaserCard());
     container.appendChild(fxGrid);
-    pane.appendChild(container);
-    return pane;
+  }
+  function _refreshPresetSlotsUi() {
+    const presets = loadPresets();
+    _presetSlotBtns.forEach((btn, i) => {
+      const snap = presets[i];
+      btn.classList.toggle("filled", !!snap);
+      btn.classList.toggle("selected", i === _selectedPresetSlot);
+      btn.textContent = snap ? `${i + 1}: ${snap.name}` : `P${i + 1}`;
+      btn.title = snap ? `${snap.name} (Click to recall, Shift+Click to overwrite)` : `Empty slot P${i + 1} (Click Save to store here)`;
+    });
+  }
+  function buildPresetsBarCard() {
+    const card = el("div", { className: "fx-card fx-presets-bar" });
+    const hdr = el("div", { className: "fx-card-header" });
+    hdr.appendChild(el("div", { className: "fx-card-title", textContent: "Snapshots / Presets" }));
+    const actions = el("div", { className: "fx-routing-tools" });
+    const saveBtn = el("button", { type: "button", className: "fx-tool-btn active", textContent: "Save Slot" });
+    saveBtn.addEventListener("click", () => {
+      const presets = loadPresets();
+      const curName = presets[_selectedPresetSlot] && presets[_selectedPresetSlot].name || `Preset ${_selectedPresetSlot + 1}`;
+      const name = window.prompt(`Name for Snapshot P${_selectedPresetSlot + 1}:`, curName);
+      if (name === null) return;
+      savePresetSlot(_selectedPresetSlot, name);
+      _refreshPresetSlotsUi();
+    });
+    const delBtn = el("button", { type: "button", className: "fx-tool-btn", textContent: "Clear" });
+    delBtn.addEventListener("click", () => {
+      clearPresetSlot(_selectedPresetSlot);
+      _refreshPresetSlotsUi();
+    });
+    const expBtn = el("button", { type: "button", className: "fx-tool-btn", textContent: "Export" });
+    expBtn.addEventListener("click", () => {
+      const blob = new Blob([exportPresetsJson()], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "dub-preamp-presets.json";
+      a.click();
+      URL.revokeObjectURL(url);
+    });
+    const impInp = el("input", { type: "file", accept: ".json,application/json", style: "display:none" });
+    impInp.addEventListener("change", () => {
+      const f = impInp.files && impInp.files[0];
+      if (!f) return;
+      const r = new FileReader();
+      r.onload = () => {
+        try {
+          importPresetsJson(String(r.result || ""));
+          _refreshPresetSlotsUi();
+        } catch (_) {
+        }
+      };
+      r.readAsText(f);
+      impInp.value = "";
+    });
+    const impBtn = el("button", { type: "button", className: "fx-tool-btn", textContent: "Import" });
+    impBtn.addEventListener("click", () => impInp.click());
+    actions.appendChild(saveBtn);
+    actions.appendChild(delBtn);
+    actions.appendChild(expBtn);
+    actions.appendChild(impBtn);
+    actions.appendChild(impInp);
+    hdr.appendChild(actions);
+    card.appendChild(hdr);
+    const slotRow = el("div", { className: "fx-preset-slots-grid" });
+    _presetSlotBtns = [];
+    for (let i = 0; i < PRESET_SLOTS; i++) {
+      const btn = el("button", { type: "button", className: "fx-preset-slot-btn" });
+      btn.addEventListener("click", (e) => {
+        _selectedPresetSlot = i;
+        if (e.shiftKey) {
+          savePresetSlot(i);
+        } else {
+          recallPresetSlot(i);
+        }
+        _refreshPresetSlotsUi();
+      });
+      _presetSlotBtns.push(btn);
+      slotRow.appendChild(btn);
+    }
+    _refreshPresetSlotsUi();
+    card.appendChild(slotRow);
+    return card;
+  }
+  function buildFxChainCard() {
+    const ctx = getContext();
+    const card = el("div", { className: "fx-card" });
+    const hdr = el("div", { className: "fx-card-header" });
+    hdr.appendChild(el("div", { className: "fx-card-title", textContent: "Series FX Chain" }));
+    hdr.appendChild(el("span", { className: "card-meta", textContent: "Internal Sends" }));
+    card.appendChild(hdr);
+    const controls = el("div", { className: "fx-controls-list" });
+    const teCtrl = createFxSlider({
+      label: "Tape \u2192 Echo",
+      unit: "%",
+      min: 0,
+      max: 100,
+      step: 1,
+      value: Math.round((ctx.fxChain.tapeToEcho || 0) * 100),
+      onChange: (val) => {
+        const amt = val / 100;
+        ctx.fxChain.tapeToEcho = amt;
+        _fxBusSyncHoldUntil = Date.now() + 1200;
+        sendBelaControl({ event: "custom", fxChain: { tapeToEcho: amt } });
+      }
+    });
+    _chainTapeEchoCtrl = teCtrl;
+    controls.appendChild(teCtrl);
+    const esCtrl = createFxSlider({
+      label: "Echo \u2192 Spring",
+      unit: "%",
+      min: 0,
+      max: 100,
+      step: 1,
+      value: Math.round((ctx.fxChain.echoToSpring || 0) * 100),
+      onChange: (val) => {
+        const amt = val / 100;
+        ctx.fxChain.echoToSpring = amt;
+        _fxBusSyncHoldUntil = Date.now() + 1200;
+        sendBelaControl({ event: "custom", fxChain: { echoToSpring: amt } });
+      }
+    });
+    _chainEchoSpringCtrl = esCtrl;
+    controls.appendChild(esCtrl);
+    card.appendChild(controls);
+    return card;
+  }
+  function _syncTimeControlsFromState() {
+    const ctx = getContext();
+    if (_echoTimeSyncCtrl) {
+      const s = _echoTimeSyncCtrl.querySelector("input[type=range]");
+      const b = _echoTimeSyncCtrl.querySelector(".fx-slider-val");
+      if (s) s.value = String(ctx.echoDub.time);
+      if (b) b.textContent = ctx.echoDub.time + " ms";
+    }
+    if (_shimmerTimeSyncCtrl) {
+      const s = _shimmerTimeSyncCtrl.querySelector("input[type=range]");
+      const b = _shimmerTimeSyncCtrl.querySelector(".fx-slider-val");
+      if (s) s.value = String(ctx.shimmerDelay.delayTime);
+      if (b) b.textContent = ctx.shimmerDelay.delayTime + " ms";
+    }
+    if (_phaserRateSyncCtrl) {
+      const s = _phaserRateSyncCtrl.querySelector("input[type=range]");
+      const b = _phaserRateSyncCtrl.querySelector(".fx-slider-val");
+      if (s) s.value = String(ctx.blackArk.rate);
+      if (b) b.textContent = ctx.blackArk.rate + " Hz";
+    }
   }
   function buildRoutingMatrixCard() {
     const ctx = getContext();
@@ -7899,32 +9397,57 @@ animation-duration:.01ms!important;
       value: dub.time,
       onChange: (val) => {
         dub.time = val;
+        dub.sync = false;
+        syncBtn.classList.remove("active");
+        syncBtn.setAttribute("aria-pressed", "false");
         sendBelaControl({ event: "custom", echoDub: { time: val }, echuDub: { time: val } });
       }
     });
+    _echoTimeSyncCtrl = timeCtrl;
     const timeSliderRef = timeCtrl.querySelector("input[type=range]");
     const timeBadgeRef = timeCtrl.querySelector(".fx-slider-val");
     controls.appendChild(timeCtrl);
     const syncRow = el("div", { className: "fx-preset-row" });
-    [
-      { label: "1/16", ms: 125 },
-      { label: "1/8", ms: 250 },
-      { label: "1/8d", ms: 375 },
-      { label: "1/4", ms: 500 },
-      { label: "Dub", ms: 750 }
-    ].forEach((preset) => {
+    const syncBtn = el("button", {
+      type: "button",
+      className: "fx-mini-btn fx-sync-btn" + (dub.sync ? " active" : ""),
+      textContent: "Sync",
+      title: "Lock delay time to global BPM",
+      "aria-pressed": dub.sync ? "true" : "false"
+    });
+    const subBtns = [];
+    const updateSubBtns = () => {
+      subBtns.forEach(({ btn, id }) => btn.classList.toggle("active", dub.sync && dub.subdiv === id));
+    };
+    syncBtn.addEventListener("click", () => {
+      dub.sync = !dub.sync;
+      syncBtn.classList.toggle("active", dub.sync);
+      syncBtn.setAttribute("aria-pressed", dub.sync ? "true" : "false");
+      if (dub.sync) applyTempoSyncToEffects();
+      updateSubBtns();
+    });
+    syncRow.appendChild(syncBtn);
+    DELAY_SUBDIVS.forEach((preset) => {
       const pBtn = el("button", {
         type: "button",
-        className: "fx-mini-btn",
-        textContent: preset.label,
-        title: `${preset.ms} ms`
+        className: "fx-mini-btn" + (dub.sync && dub.subdiv === preset.id ? " active" : ""),
+        textContent: preset.label
       });
       pBtn.addEventListener("click", () => {
-        dub.time = preset.ms;
-        if (timeSliderRef) timeSliderRef.value = preset.ms;
-        if (timeBadgeRef) timeBadgeRef.textContent = preset.ms + " ms";
-        sendBelaControl({ event: "custom", echoDub: { time: preset.ms }, echuDub: { time: preset.ms } });
+        dub.subdiv = preset.id;
+        const ms = subdivToDelayMs(ctx.tempoBpm || 130, preset.id, 40, 1500);
+        dub.time = ms;
+        if (!dub.sync) {
+          dub.sync = true;
+          syncBtn.classList.add("active");
+          syncBtn.setAttribute("aria-pressed", "true");
+        }
+        if (timeSliderRef) timeSliderRef.value = ms;
+        if (timeBadgeRef) timeBadgeRef.textContent = ms + " ms";
+        updateSubBtns();
+        sendBelaControl({ event: "custom", echoDub: { time: ms }, echuDub: { time: ms } });
       });
+      subBtns.push({ btn: pBtn, id: preset.id });
       syncRow.appendChild(pBtn);
     });
     controls.appendChild(syncRow);
@@ -8005,7 +9528,24 @@ animation-duration:.01ms!important;
       clearBtn.classList.add("flash");
       setTimeout(() => clearBtn.classList.remove("flash"), 240);
     });
+    const ppBtn = el("button", {
+      type: "button",
+      className: "fx-big-btn btn-ping-pong" + (dub.pingPong ? " active" : ""),
+      textContent: dub.pingPong ? "Ping-Pong ON" : "Ping-Pong",
+      title: "Stereo Ping-Pong cross-feedback (requires Master Stereo)",
+      "aria-pressed": dub.pingPong ? "true" : "false"
+    });
+    ppBtn.addEventListener("click", () => {
+      dub.pingPong = !dub.pingPong;
+      _fxBusSyncHoldUntil = Date.now() + 1200;
+      ppBtn.classList.toggle("active", dub.pingPong);
+      ppBtn.setAttribute("aria-pressed", dub.pingPong ? "true" : "false");
+      ppBtn.textContent = dub.pingPong ? "Ping-Pong ON" : "Ping-Pong";
+      sendBelaControl({ event: "custom", echoDub: { pingPong: dub.pingPong }, echuDub: { pingPong: dub.pingPong } });
+    });
+    _echoPingPongBtn = ppBtn;
     actionBox.appendChild(killBtn);
+    actionBox.appendChild(ppBtn);
     actionBox.appendChild(clearBtn);
     card.appendChild(actionBox);
     return card;
@@ -8137,7 +9677,7 @@ animation-duration:.01ms!important;
       semiRow.appendChild(pBtn);
     });
     controls.appendChild(semiRow);
-    controls.appendChild(createFxSlider({
+    const shTimeCtrl = createFxSlider({
       label: "Time",
       unit: " ms",
       min: 40,
@@ -8146,9 +9686,57 @@ animation-duration:.01ms!important;
       value: ctx.shimmerDelay.delayTime,
       onChange: (val) => {
         ctx.shimmerDelay.delayTime = val;
+        ctx.shimmerDelay.sync = false;
+        shSyncBtn.classList.remove("active");
+        shSyncBtn.setAttribute("aria-pressed", "false");
         sendBelaControl({ event: "custom", shimmerDelay: { delayTime: val } });
       }
-    }));
+    });
+    _shimmerTimeSyncCtrl = shTimeCtrl;
+    const shTimeSlider = shTimeCtrl.querySelector("input[type=range]");
+    const shTimeBadge = shTimeCtrl.querySelector(".fx-slider-val");
+    controls.appendChild(shTimeCtrl);
+    const shSyncRow = el("div", { className: "fx-preset-row" });
+    const shSyncBtn = el("button", {
+      type: "button",
+      className: "fx-mini-btn fx-sync-btn" + (ctx.shimmerDelay.sync ? " active" : ""),
+      textContent: "Sync",
+      "aria-pressed": ctx.shimmerDelay.sync ? "true" : "false"
+    });
+    const shSubBtns = [];
+    const updateShSubs = () => {
+      shSubBtns.forEach(({ btn, id }) => btn.classList.toggle("active", ctx.shimmerDelay.sync && ctx.shimmerDelay.subdiv === id));
+    };
+    shSyncBtn.addEventListener("click", () => {
+      ctx.shimmerDelay.sync = !ctx.shimmerDelay.sync;
+      shSyncBtn.classList.toggle("active", ctx.shimmerDelay.sync);
+      shSyncBtn.setAttribute("aria-pressed", ctx.shimmerDelay.sync ? "true" : "false");
+      if (ctx.shimmerDelay.sync) applyTempoSyncToEffects();
+      updateShSubs();
+    });
+    shSyncRow.appendChild(shSyncBtn);
+    DELAY_SUBDIVS.forEach((preset) => {
+      const pBtn = el("button", {
+        type: "button",
+        className: "fx-mini-btn" + (ctx.shimmerDelay.sync && ctx.shimmerDelay.subdiv === preset.id ? " active" : ""),
+        textContent: preset.label
+      });
+      pBtn.addEventListener("click", () => {
+        ctx.shimmerDelay.subdiv = preset.id;
+        const ms = subdivToDelayMs(ctx.tempoBpm || 130, preset.id, 40, 1500);
+        ctx.shimmerDelay.delayTime = ms;
+        ctx.shimmerDelay.sync = true;
+        shSyncBtn.classList.add("active");
+        shSyncBtn.setAttribute("aria-pressed", "true");
+        if (shTimeSlider) shTimeSlider.value = ms;
+        if (shTimeBadge) shTimeBadge.textContent = ms + " ms";
+        updateShSubs();
+        sendBelaControl({ event: "custom", shimmerDelay: { delayTime: ms } });
+      });
+      shSubBtns.push({ btn: pBtn, id: preset.id });
+      shSyncRow.appendChild(pBtn);
+    });
+    controls.appendChild(shSyncRow);
     controls.appendChild(createFxSlider({
       label: "Feedback",
       unit: "%",
@@ -8223,30 +9811,54 @@ animation-duration:.01ms!important;
       value: ctx.blackArk.rate,
       onChange: (val) => {
         ctx.blackArk.rate = val;
+        ctx.blackArk.sync = false;
+        phSyncBtn.classList.remove("active");
+        phSyncBtn.setAttribute("aria-pressed", "false");
         sendBelaControl({ event: "custom", blackArk: { rate: val } });
       }
     });
+    _phaserRateSyncCtrl = rateCtrl;
     const rateSliderRef = rateCtrl.querySelector("input[type=range]");
     const rateBadgeRef = rateCtrl.querySelector(".fx-slider-val");
     controls.appendChild(rateCtrl);
     const ratePresetRow = el("div", { className: "fx-preset-row" });
-    [
-      { label: "0.1 Hz", hz: 0.1 },
-      { label: "0.25 Hz", hz: 0.25 },
-      { label: "0.8 Hz", hz: 0.8 },
-      { label: "2.5 Hz", hz: 2.5 }
-    ].forEach((preset) => {
+    const phSyncBtn = el("button", {
+      type: "button",
+      className: "fx-mini-btn fx-sync-btn" + (ctx.blackArk.sync ? " active" : ""),
+      textContent: "Sync",
+      "aria-pressed": ctx.blackArk.sync ? "true" : "false"
+    });
+    const phSubBtns = [];
+    const updatePhSubs = () => {
+      phSubBtns.forEach(({ btn, id }) => btn.classList.toggle("active", ctx.blackArk.sync && ctx.blackArk.subdiv === id));
+    };
+    phSyncBtn.addEventListener("click", () => {
+      ctx.blackArk.sync = !ctx.blackArk.sync;
+      phSyncBtn.classList.toggle("active", ctx.blackArk.sync);
+      phSyncBtn.setAttribute("aria-pressed", ctx.blackArk.sync ? "true" : "false");
+      if (ctx.blackArk.sync) applyTempoSyncToEffects();
+      updatePhSubs();
+    });
+    ratePresetRow.appendChild(phSyncBtn);
+    PHASER_SUBDIVS.forEach((preset) => {
       const pBtn = el("button", {
         type: "button",
-        className: "fx-mini-btn",
+        className: "fx-mini-btn" + (ctx.blackArk.sync && ctx.blackArk.subdiv === preset.id ? " active" : ""),
         textContent: preset.label
       });
       pBtn.addEventListener("click", () => {
-        ctx.blackArk.rate = preset.hz;
-        if (rateSliderRef) rateSliderRef.value = preset.hz;
-        if (rateBadgeRef) rateBadgeRef.textContent = preset.hz + " Hz";
-        sendBelaControl({ event: "custom", blackArk: { rate: preset.hz } });
+        ctx.blackArk.subdiv = preset.id;
+        const hz = subdivToPhaserHz(ctx.tempoBpm || 130, preset.id);
+        ctx.blackArk.rate = hz;
+        ctx.blackArk.sync = true;
+        phSyncBtn.classList.add("active");
+        phSyncBtn.setAttribute("aria-pressed", "true");
+        if (rateSliderRef) rateSliderRef.value = hz;
+        if (rateBadgeRef) rateBadgeRef.textContent = hz + " Hz";
+        updatePhSubs();
+        sendBelaControl({ event: "custom", blackArk: { rate: hz } });
       });
+      phSubBtns.push({ btn: pBtn, id: preset.id });
       ratePresetRow.appendChild(pBtn);
     });
     controls.appendChild(ratePresetRow);
@@ -8367,6 +9979,38 @@ animation-duration:.01ms!important;
         }
       });
     }
+    syncMasterBusFromBuffer12(ctx.fxState);
+    if (ctx.fxState.length >= 34 && Date.now() >= _fxBusSyncHoldUntil) {
+      const pp = ctx.fxState[31] > 0.5;
+      if (ctx.echoDub.pingPong !== pp) {
+        ctx.echoDub.pingPong = pp;
+        if (_echoPingPongBtn) {
+          _echoPingPongBtn.classList.toggle("active", pp);
+          _echoPingPongBtn.setAttribute("aria-pressed", pp ? "true" : "false");
+          _echoPingPongBtn.textContent = pp ? "Ping-Pong ON" : "Ping-Pong";
+        }
+      }
+      const es = ctx.fxState[32] || 0;
+      if (Math.abs((ctx.fxChain.echoToSpring || 0) - es) > 5e-3) {
+        ctx.fxChain.echoToSpring = es;
+        if (_chainEchoSpringCtrl) {
+          const s = _chainEchoSpringCtrl.querySelector("input[type=range]");
+          const b = _chainEchoSpringCtrl.querySelector(".fx-slider-val");
+          if (s && document.activeElement !== s) s.value = String(Math.round(es * 100));
+          if (b) b.textContent = Math.round(es * 100) + "%";
+        }
+      }
+      const te = ctx.fxState[33] || 0;
+      if (Math.abs((ctx.fxChain.tapeToEcho || 0) - te) > 5e-3) {
+        ctx.fxChain.tapeToEcho = te;
+        if (_chainTapeEchoCtrl) {
+          const s = _chainTapeEchoCtrl.querySelector("input[type=range]");
+          const b = _chainTapeEchoCtrl.querySelector(".fx-slider-val");
+          if (s && document.activeElement !== s) s.value = String(Math.round(te * 100));
+          if (b) b.textContent = Math.round(te * 100) + "%";
+        }
+      }
+    }
   }
   function autoMeter(elNode, peakVal) {
     if (!elNode) return;
@@ -8441,8 +10085,31 @@ animation-duration:.01ms!important;
   function toggleTheme() {
     setTheme(_currentTheme === "dark" ? "light" : "dark");
   }
+  function togglePerfMode(forceState) {
+    const ctx = getContext();
+    const next = typeof forceState === "boolean" ? forceState : !ctx.perfMode;
+    ctx.perfMode = next;
+    const root = document.getElementById("bela-gui");
+    if (root) root.classList.toggle("perf-mode", next);
+    const btn = document.getElementById("perf-toggle-btn");
+    if (btn) {
+      btn.classList.toggle("active", next);
+      btn.setAttribute("aria-pressed", next ? "true" : "false");
+    }
+    if (next && ctx.currentTab !== TAB_LIVE) {
+      switchTab(TAB_LIVE);
+    } else if (ctx.currentTab === TAB_LIVE) {
+      ctx.meterVu.forEach((vu) => {
+        if (vu) vu.resize();
+      });
+      if (isLiveTileOn(ctx.liveLayoutPrefs, "masterEq")) drawMasterEqCurve();
+    }
+  }
   function buildUI() {
     setTheme(getInitialTheme());
+    getContext().tempoBpm = loadSavedBpm();
+    initInputControls();
+    registerPerfToggleHook(() => togglePerfMode());
     document.body.innerHTML = "";
     const root = el("div", { id: "bela-gui" });
     const topChrome = el("header", { id: "top-chrome" });
@@ -8491,6 +10158,49 @@ animation-duration:.01ms!important;
       tabBar.appendChild(btn);
     });
     tabBar.appendChild(el("span", { className: "tab-bar-spacer" }));
+    const tempoWrap = el("div", { className: "tempo-bar", title: "Global BPM & Tap Tempo (shortcut: T)" });
+    const tapBtn = el("button", { type: "button", className: "tempo-tap-btn", textContent: "TAP" });
+    const bpmDown = el("button", { type: "button", className: "tempo-nudge-btn", textContent: "\u2212", "aria-label": "Decrease BPM" });
+    const bpmVal = el("span", { className: "tempo-bpm-val", textContent: `${getContext().tempoBpm} BPM` });
+    const bpmUp = el("button", { type: "button", className: "tempo-nudge-btn", textContent: "+", "aria-label": "Increase BPM" });
+    const flashTap = () => {
+      tapBtn.classList.add("flash");
+      setTimeout(() => tapBtn.classList.remove("flash"), 120);
+    };
+    tapBtn.addEventListener("click", () => {
+      tapTempo();
+      flashTap();
+    });
+    bpmDown.addEventListener("click", () => nudgeBpm(-1));
+    bpmUp.addEventListener("click", () => nudgeBpm(1));
+    registerBpmListener((bpm) => {
+      bpmVal.textContent = `${bpm} BPM`;
+      flashTap();
+    });
+    tempoWrap.appendChild(tapBtn);
+    tempoWrap.appendChild(bpmDown);
+    tempoWrap.appendChild(bpmVal);
+    tempoWrap.appendChild(bpmUp);
+    tabBar.appendChild(tempoWrap);
+    const midiBtn = el("button", {
+      type: "button",
+      id: "midi-modal-btn",
+      className: "chrome-pill-btn",
+      textContent: "MIDI"
+    });
+    midiBtn.addEventListener("click", openMidiModal);
+    registerMidiBadgeButton(midiBtn);
+    tabBar.appendChild(midiBtn);
+    const perfBtn = el("button", {
+      type: "button",
+      id: "perf-toggle-btn",
+      className: "chrome-pill-btn",
+      textContent: "Perf",
+      title: "Performance mode (shortcut: P)",
+      "aria-pressed": "false"
+    });
+    perfBtn.addEventListener("click", () => togglePerfMode());
+    tabBar.appendChild(perfBtn);
     const themeBtn = el("button", {
       type: "button",
       id: "theme-toggle-btn",
@@ -8652,8 +10362,10 @@ animation-duration:.01ms!important;
         ctx.samplerState = b[10];
         ctx.samplerStateLive = true;
       }
-      if (b[11] && b[11].length && !ctx.samplerNamesBuilt) {
+      if (b[11] && b[11].length && b[11].ts !== ctx._lastSamplerNamesTs) {
+        ctx._lastSamplerNamesTs = b[11].ts;
         ctx.samplerNamesBuf = Float32Array.from(b[11]);
+        ctx.samplerNamesBuilt = false;
       }
       if (b[7]) {
         if (!ctx.prevMuxRawValues) {
@@ -8706,6 +10418,7 @@ animation-duration:.01ms!important;
       updateSiren();
       updateSampler();
       updateSwitches();
+      refreshLiveMasterBusUi();
       updateMasterEq();
       updateDevControlsLive();
       updateMappingLive();

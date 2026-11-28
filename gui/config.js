@@ -35,6 +35,9 @@ export const ECHO_DUB_DEFAULTS = {
     flutter: 0.20,
     level: 0.75,
     kill: false,
+    pingPong: false,
+    sync: false,
+    subdiv: '1/8d',
     enabled: true
 };
 export const ECHU_DUB_DEFAULTS = ECHO_DUB_DEFAULTS;
@@ -53,6 +56,8 @@ export const BLACK_ARK_DEFAULTS = {
     feedback: 0.60,
     stages: 6,
     level: 0.80,
+    sync: false,
+    subdiv: '1/1',
     enabled: true
 };
 
@@ -70,6 +75,8 @@ export const SHIMMER_DELAY_DEFAULTS = {
     feedback: 0.55,
     grainSize: 50,
     level: 0.75,
+    sync: false,
+    subdiv: '1/8d',
     enabled: true
 };
 
@@ -81,6 +88,25 @@ export const DUB_DUCKER_DEFAULTS = {
     enabled: true
 };
 
+export const FX_CHAIN_DEFAULTS = {
+    echoToSpring: 0.0,
+    tapeToEcho: 0.0
+};
+
+export const MASTER_BUS_DEFAULTS = {
+    warmth: 0.0,
+    bassMono: true,
+    bassMonoFreq: 100,
+    stereoWidth: 1.0,
+    punch: 0.0
+};
+
+export const TEMPO_DEFAULTS = {
+    bpm: 130,
+    min: 40,
+    max: 220
+};
+
 /**
  * Selectable Live dashboard tiles (Mapping excluded).
  * `pair` tiles share the top 2-column grid when both are enabled.
@@ -88,6 +114,7 @@ export const DUB_DUCKER_DEFAULTS = {
 export const LIVE_TILES = [
     { id: 'siren', label: 'Siren', pair: true, defaultOn: true },
     { id: 'mic', label: 'Mic inputs', pair: true, defaultOn: true },
+    { id: 'masterBus', label: 'Channels & Master DSP', pair: false, defaultOn: true },
     { id: 'sampler', label: 'Sampler', pair: false, defaultOn: true },
     { id: 'meters', label: 'VU meters', pair: false, defaultOn: true },
     { id: 'switches', label: 'Switches', pair: false, defaultOn: false },
@@ -106,6 +133,13 @@ export const LIVE_LAYOUT_STORAGE_KEY_V1 = 'belaDubPreamp.liveLayout.v1';
 export const LIVE_LAYOUT_STORAGE_KEY = 'belaDubPreamp.liveLayout.v2';
 /** localStorage key for UI theme ('dark' | 'light'). */
 export const THEME_STORAGE_KEY = 'belaDubPreamp.theme';
+export const PRESETS_STORAGE_KEY = 'belaDubPreamp.presets.v1';
+export const MIDI_STORAGE_KEY = 'belaDubPreamp.midiMap.v1';
+export const TEMPO_STORAGE_KEY = 'belaDubPreamp.tempo.v1';
+export const SAMPLER_CFG_STORAGE_KEY = 'belaDubPreamp.samplerCfg.v1';
+
+/** Keyboard pad labels for Sampler slots 0..7. */
+export const SAMPLER_PAD_KEYS = ['Q', 'W', 'E', 'R', 'A', 'S', 'D', 'F'];
 
 /** Minimum pot travel (0–1) required to accept a detect hit. */
 export const DETECT_POT_MIN_DELTA = 0.25;

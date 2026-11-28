@@ -6,7 +6,7 @@ import { initContext, getContext } from './context.js';
 import { injectCSS } from './css.js';
 import { buildUI } from './dom/shell.js';
 import { layoutTopChrome, hideP5Dom } from './dom/utils.js';
-import { updateSiren, syncMicInputs } from './dom/live.js';
+import { updateSiren, syncMicInputs, refreshLiveMasterBusUi } from './dom/live.js';
 import { updateSampler } from './dom/sampler.js';
 import { updateConsole, updateSwitches } from './dom/console.js';
 import { startMeterAnim, syncCodecGains, updateClipIndicators, clearClipBadges, syncMasterStereo, rebuildMetersSection } from './dom/meters.js';
@@ -126,9 +126,11 @@ export default function sketch(p) {
             ctx.samplerState = b[10];
             ctx.samplerStateLive = true;
         }
-        // Buffer 11: packed sample names (static, resent periodically)
-        if (b[11] && b[11].length && !ctx.samplerNamesBuilt) {
+        // Buffer 11: packed sample names (static, resent periodically or on upload)
+        if (b[11] && b[11].length && b[11].ts !== ctx._lastSamplerNamesTs) {
+            ctx._lastSamplerNamesTs = b[11].ts;
             ctx.samplerNamesBuf = Float32Array.from(b[11]);
+            ctx.samplerNamesBuilt = false;
         }
         if (b[7]) {
             if (!ctx.prevMuxRawValues) {
@@ -189,6 +191,7 @@ export default function sketch(p) {
         updateSiren();
         updateSampler();
         updateSwitches();
+        refreshLiveMasterBusUi();
         updateMasterEq();
         updateDevControlsLive();
         updateMappingLive();

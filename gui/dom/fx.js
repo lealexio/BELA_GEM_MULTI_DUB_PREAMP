@@ -14,8 +14,27 @@ import {
     FX_DEST_MUTE
 } from '../config.js';
 import { el, svgIcon } from './utils.js';
+import {
+    DELAY_SUBDIVS, PHASER_SUBDIVS, subdivToDelayMs, subdivToPhaserHz,
+    applyTempoSyncToEffects, registerTempoSyncUiHook
+} from '../tempo.js';
+import {
+    PRESET_SLOTS, loadPresets, savePresetSlot, clearPresetSlot,
+    recallPresetSlot, exportPresetsJson, importPresetsJson, registerPresetUiSync
+} from '../presets.js';
+import { syncMasterBusFromBuffer12 } from './live.js';
 
 const ICON_SEND = ['M22 2L11 13', 'M22 2l-7 20-4-9-9-4 20-7Z'];
+let _fxContainerEl = null;
+let _presetSlotBtns = [];
+let _selectedPresetSlot = 0;
+let _echoPingPongBtn = null;
+let _echoTimeSyncCtrl = null;
+let _shimmerTimeSyncCtrl = null;
+let _phaserRateSyncCtrl = null;
+let _chainEchoSpringCtrl = null;
+let _chainTapeEchoCtrl = null;
+let _fxBusSyncHoldUntil = 0;
 
 function sendBelaControl(payload) {
     /* global Bela */
@@ -117,9 +136,27 @@ export function buildFxPane() {
         window.addEventListener('blur', clearMomentaryFxTriggers);
     }
 
+    _fxContainerEl = container;
+    registerTempoSyncUiHook(_syncTimeControlsFromState);
+    registerPresetUiSync(() => {
+        if (!_fxContainerEl) return;
+        const scrollY = _fxContainerEl.parentElement ? _fxContainerEl.parentElement.scrollTop : 0;
+        _rebuildFxGrid(_fxContainerEl);
+        if (_fxContainerEl.parentElement) _fxContainerEl.parentElement.scrollTop = scrollY;
+    });
+
+    _rebuildFxGrid(container);
+    pane.appendChild(container);
+    return pane;
+}
+
+function _rebuildFxGrid(container) {
+    container.innerHTML = '';
+    container.appendChild(buildPresetsBarCard());
     container.appendChild(buildRoutingMatrixCard());
 
     const fxGrid = el('div', { className: 'fx-modules-grid' });
+    fxGrid.appendChild(buildFxChainCard());
     fxGrid.appendChild(buildTapeDriveCard());
     fxGrid.appendChild(buildDubDuckerCard());
     fxGrid.appendChild(buildSubRoarCard());
@@ -129,8 +166,159 @@ export function buildFxPane() {
     fxGrid.appendChild(buildBlackArkPhaserCard());
 
     container.appendChild(fxGrid);
-    pane.appendChild(container);
-    return pane;
+}
+
+function _refreshPresetSlotsUi() {
+    const presets = loadPresets();
+    _presetSlotBtns.forEach((btn, i) => {
+        const snap = presets[i];
+        btn.classList.toggle('filled', !!snap);
+        btn.classList.toggle('selected', i === _selectedPresetSlot);
+        btn.textContent = snap ? `${i + 1}: ${snap.name}` : `P${i + 1}`;
+        btn.title = snap
+            ? `${snap.name} (Click to recall, Shift+Click to overwrite)`
+            : `Empty slot P${i + 1} (Click Save to store here)`;
+    });
+}
+
+function buildPresetsBarCard() {
+    const card = el('div', { className: 'fx-card fx-presets-bar' });
+    const hdr = el('div', { className: 'fx-card-header' });
+    hdr.appendChild(el('div', { className: 'fx-card-title', textContent: 'Snapshots / Presets' }));
+
+    const actions = el('div', { className: 'fx-routing-tools' });
+    const saveBtn = el('button', { type: 'button', className: 'fx-tool-btn active', textContent: 'Save Slot' });
+    saveBtn.addEventListener('click', () => {
+        const presets = loadPresets();
+        const curName = (presets[_selectedPresetSlot] && presets[_selectedPresetSlot].name) || `Preset ${_selectedPresetSlot + 1}`;
+        const name = window.prompt(`Name for Snapshot P${_selectedPresetSlot + 1}:`, curName);
+        if (name === null) return;
+        savePresetSlot(_selectedPresetSlot, name);
+        _refreshPresetSlotsUi();
+    });
+
+    const delBtn = el('button', { type: 'button', className: 'fx-tool-btn', textContent: 'Clear' });
+    delBtn.addEventListener('click', () => {
+        clearPresetSlot(_selectedPresetSlot);
+        _refreshPresetSlotsUi();
+    });
+
+    const expBtn = el('button', { type: 'button', className: 'fx-tool-btn', textContent: 'Export' });
+    expBtn.addEventListener('click', () => {
+        const blob = new Blob([exportPresetsJson()], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'dub-preamp-presets.json';
+        a.click();
+        URL.revokeObjectURL(url);
+    });
+
+    const impInp = el('input', { type: 'file', accept: '.json,application/json', style: 'display:none' });
+    impInp.addEventListener('change', () => {
+        const f = impInp.files && impInp.files[0];
+        if (!f) return;
+        const r = new FileReader();
+        r.onload = () => {
+            try {
+                importPresetsJson(String(r.result || ''));
+                _refreshPresetSlotsUi();
+            } catch (_) {}
+        };
+        r.readAsText(f);
+        impInp.value = '';
+    });
+    const impBtn = el('button', { type: 'button', className: 'fx-tool-btn', textContent: 'Import' });
+    impBtn.addEventListener('click', () => impInp.click());
+
+    actions.appendChild(saveBtn);
+    actions.appendChild(delBtn);
+    actions.appendChild(expBtn);
+    actions.appendChild(impBtn);
+    actions.appendChild(impInp);
+    hdr.appendChild(actions);
+    card.appendChild(hdr);
+
+    const slotRow = el('div', { className: 'fx-preset-slots-grid' });
+    _presetSlotBtns = [];
+    for (let i = 0; i < PRESET_SLOTS; i++) {
+        const btn = el('button', { type: 'button', className: 'fx-preset-slot-btn' });
+        btn.addEventListener('click', (e) => {
+            _selectedPresetSlot = i;
+            if (e.shiftKey) {
+                savePresetSlot(i);
+            } else {
+                recallPresetSlot(i);
+            }
+            _refreshPresetSlotsUi();
+        });
+        _presetSlotBtns.push(btn);
+        slotRow.appendChild(btn);
+    }
+    _refreshPresetSlotsUi();
+    card.appendChild(slotRow);
+    return card;
+}
+
+/** Series FX Chaining Card (Tape -> Echo, Echo -> Tubby Spring) */
+function buildFxChainCard() {
+    const ctx = getContext();
+    const card = el('div', { className: 'fx-card' });
+    const hdr = el('div', { className: 'fx-card-header' });
+    hdr.appendChild(el('div', { className: 'fx-card-title', textContent: 'Series FX Chain' }));
+    hdr.appendChild(el('span', { className: 'card-meta', textContent: 'Internal Sends' }));
+    card.appendChild(hdr);
+
+    const controls = el('div', { className: 'fx-controls-list' });
+    const teCtrl = createFxSlider({
+        label: 'Tape → Echo', unit: '%', min: 0, max: 100, step: 1,
+        value: Math.round((ctx.fxChain.tapeToEcho || 0) * 100),
+        onChange: val => {
+            const amt = val / 100.0;
+            ctx.fxChain.tapeToEcho = amt;
+            _fxBusSyncHoldUntil = Date.now() + 1200;
+            sendBelaControl({ event: 'custom', fxChain: { tapeToEcho: amt } });
+        }
+    });
+    _chainTapeEchoCtrl = teCtrl;
+    controls.appendChild(teCtrl);
+
+    const esCtrl = createFxSlider({
+        label: 'Echo → Spring', unit: '%', min: 0, max: 100, step: 1,
+        value: Math.round((ctx.fxChain.echoToSpring || 0) * 100),
+        onChange: val => {
+            const amt = val / 100.0;
+            ctx.fxChain.echoToSpring = amt;
+            _fxBusSyncHoldUntil = Date.now() + 1200;
+            sendBelaControl({ event: 'custom', fxChain: { echoToSpring: amt } });
+        }
+    });
+    _chainEchoSpringCtrl = esCtrl;
+    controls.appendChild(esCtrl);
+    card.appendChild(controls);
+    return card;
+}
+
+function _syncTimeControlsFromState() {
+    const ctx = getContext();
+    if (_echoTimeSyncCtrl) {
+        const s = _echoTimeSyncCtrl.querySelector('input[type=range]');
+        const b = _echoTimeSyncCtrl.querySelector('.fx-slider-val');
+        if (s) s.value = String(ctx.echoDub.time);
+        if (b) b.textContent = ctx.echoDub.time + ' ms';
+    }
+    if (_shimmerTimeSyncCtrl) {
+        const s = _shimmerTimeSyncCtrl.querySelector('input[type=range]');
+        const b = _shimmerTimeSyncCtrl.querySelector('.fx-slider-val');
+        if (s) s.value = String(ctx.shimmerDelay.delayTime);
+        if (b) b.textContent = ctx.shimmerDelay.delayTime + ' ms';
+    }
+    if (_phaserRateSyncCtrl) {
+        const s = _phaserRateSyncCtrl.querySelector('input[type=range]');
+        const b = _phaserRateSyncCtrl.querySelector('.fx-slider-val');
+        if (s) s.value = String(ctx.blackArk.rate);
+        if (b) b.textContent = ctx.blackArk.rate + ' Hz';
+    }
 }
 
 /** Builds the channel FX send routing matrix card with direct Send Trigger buttons. */
@@ -540,33 +728,59 @@ function buildEchoDubCard() {
         value: dub.time,
         onChange: val => {
             dub.time = val;
+            dub.sync = false;
+            syncBtn.classList.remove('active');
+            syncBtn.setAttribute('aria-pressed', 'false');
             sendBelaControl({ event: 'custom', echoDub: { time: val }, echuDub: { time: val } });
         }
     });
+    _echoTimeSyncCtrl = timeCtrl;
     const timeSliderRef = timeCtrl.querySelector('input[type=range]');
     const timeBadgeRef = timeCtrl.querySelector('.fx-slider-val');
     controls.appendChild(timeCtrl);
 
     const syncRow = el('div', { className: 'fx-preset-row' });
-    [
-        { label: '1/16', ms: 125 },
-        { label: '1/8', ms: 250 },
-        { label: '1/8d', ms: 375 },
-        { label: '1/4', ms: 500 },
-        { label: 'Dub', ms: 750 }
-    ].forEach(preset => {
+    const syncBtn = el('button', {
+        type: 'button',
+        className: 'fx-mini-btn fx-sync-btn' + (dub.sync ? ' active' : ''),
+        textContent: 'Sync',
+        title: 'Lock delay time to global BPM',
+        'aria-pressed': dub.sync ? 'true' : 'false'
+    });
+    const subBtns = [];
+    const updateSubBtns = () => {
+        subBtns.forEach(({ btn, id }) => btn.classList.toggle('active', dub.sync && dub.subdiv === id));
+    };
+    syncBtn.addEventListener('click', () => {
+        dub.sync = !dub.sync;
+        syncBtn.classList.toggle('active', dub.sync);
+        syncBtn.setAttribute('aria-pressed', dub.sync ? 'true' : 'false');
+        if (dub.sync) applyTempoSyncToEffects();
+        updateSubBtns();
+    });
+    syncRow.appendChild(syncBtn);
+
+    DELAY_SUBDIVS.forEach(preset => {
         const pBtn = el('button', {
             type: 'button',
-            className: 'fx-mini-btn',
-            textContent: preset.label,
-            title: `${preset.ms} ms`
+            className: 'fx-mini-btn' + (dub.sync && dub.subdiv === preset.id ? ' active' : ''),
+            textContent: preset.label
         });
         pBtn.addEventListener('click', () => {
-            dub.time = preset.ms;
-            if (timeSliderRef) timeSliderRef.value = preset.ms;
-            if (timeBadgeRef) timeBadgeRef.textContent = preset.ms + ' ms';
-            sendBelaControl({ event: 'custom', echoDub: { time: preset.ms }, echuDub: { time: preset.ms } });
+            dub.subdiv = preset.id;
+            const ms = subdivToDelayMs(ctx.tempoBpm || 130, preset.id, 40, 1500);
+            dub.time = ms;
+            if (!dub.sync) {
+                dub.sync = true;
+                syncBtn.classList.add('active');
+                syncBtn.setAttribute('aria-pressed', 'true');
+            }
+            if (timeSliderRef) timeSliderRef.value = ms;
+            if (timeBadgeRef) timeBadgeRef.textContent = ms + ' ms';
+            updateSubBtns();
+            sendBelaControl({ event: 'custom', echoDub: { time: ms }, echuDub: { time: ms } });
         });
+        subBtns.push({ btn: pBtn, id: preset.id });
         syncRow.appendChild(pBtn);
     });
     controls.appendChild(syncRow);
@@ -634,7 +848,25 @@ function buildEchoDubCard() {
         setTimeout(() => clearBtn.classList.remove('flash'), 240);
     });
 
+    const ppBtn = el('button', {
+        type: 'button',
+        className: 'fx-big-btn btn-ping-pong' + (dub.pingPong ? ' active' : ''),
+        textContent: dub.pingPong ? 'Ping-Pong ON' : 'Ping-Pong',
+        title: 'Stereo Ping-Pong cross-feedback (requires Master Stereo)',
+        'aria-pressed': dub.pingPong ? 'true' : 'false'
+    });
+    ppBtn.addEventListener('click', () => {
+        dub.pingPong = !dub.pingPong;
+        _fxBusSyncHoldUntil = Date.now() + 1200;
+        ppBtn.classList.toggle('active', dub.pingPong);
+        ppBtn.setAttribute('aria-pressed', dub.pingPong ? 'true' : 'false');
+        ppBtn.textContent = dub.pingPong ? 'Ping-Pong ON' : 'Ping-Pong';
+        sendBelaControl({ event: 'custom', echoDub: { pingPong: dub.pingPong }, echuDub: { pingPong: dub.pingPong } });
+    });
+    _echoPingPongBtn = ppBtn;
+
     actionBox.appendChild(killBtn);
+    actionBox.appendChild(ppBtn);
     actionBox.appendChild(clearBtn);
     card.appendChild(actionBox);
     return card;
@@ -758,14 +990,63 @@ function buildShimmerDelayCard() {
     });
     controls.appendChild(semiRow);
 
-    controls.appendChild(createFxSlider({
+    const shTimeCtrl = createFxSlider({
         label: 'Time', unit: ' ms', min: 40, max: 1500, step: 5,
         value: ctx.shimmerDelay.delayTime,
         onChange: val => {
             ctx.shimmerDelay.delayTime = val;
+            ctx.shimmerDelay.sync = false;
+            shSyncBtn.classList.remove('active');
+            shSyncBtn.setAttribute('aria-pressed', 'false');
             sendBelaControl({ event: 'custom', shimmerDelay: { delayTime: val } });
         }
-    }));
+    });
+    _shimmerTimeSyncCtrl = shTimeCtrl;
+    const shTimeSlider = shTimeCtrl.querySelector('input[type=range]');
+    const shTimeBadge = shTimeCtrl.querySelector('.fx-slider-val');
+    controls.appendChild(shTimeCtrl);
+
+    const shSyncRow = el('div', { className: 'fx-preset-row' });
+    const shSyncBtn = el('button', {
+        type: 'button',
+        className: 'fx-mini-btn fx-sync-btn' + (ctx.shimmerDelay.sync ? ' active' : ''),
+        textContent: 'Sync',
+        'aria-pressed': ctx.shimmerDelay.sync ? 'true' : 'false'
+    });
+    const shSubBtns = [];
+    const updateShSubs = () => {
+        shSubBtns.forEach(({ btn, id }) => btn.classList.toggle('active', ctx.shimmerDelay.sync && ctx.shimmerDelay.subdiv === id));
+    };
+    shSyncBtn.addEventListener('click', () => {
+        ctx.shimmerDelay.sync = !ctx.shimmerDelay.sync;
+        shSyncBtn.classList.toggle('active', ctx.shimmerDelay.sync);
+        shSyncBtn.setAttribute('aria-pressed', ctx.shimmerDelay.sync ? 'true' : 'false');
+        if (ctx.shimmerDelay.sync) applyTempoSyncToEffects();
+        updateShSubs();
+    });
+    shSyncRow.appendChild(shSyncBtn);
+    DELAY_SUBDIVS.forEach(preset => {
+        const pBtn = el('button', {
+            type: 'button',
+            className: 'fx-mini-btn' + (ctx.shimmerDelay.sync && ctx.shimmerDelay.subdiv === preset.id ? ' active' : ''),
+            textContent: preset.label
+        });
+        pBtn.addEventListener('click', () => {
+            ctx.shimmerDelay.subdiv = preset.id;
+            const ms = subdivToDelayMs(ctx.tempoBpm || 130, preset.id, 40, 1500);
+            ctx.shimmerDelay.delayTime = ms;
+            ctx.shimmerDelay.sync = true;
+            shSyncBtn.classList.add('active');
+            shSyncBtn.setAttribute('aria-pressed', 'true');
+            if (shTimeSlider) shTimeSlider.value = ms;
+            if (shTimeBadge) shTimeBadge.textContent = ms + ' ms';
+            updateShSubs();
+            sendBelaControl({ event: 'custom', shimmerDelay: { delayTime: ms } });
+        });
+        shSubBtns.push({ btn: pBtn, id: preset.id });
+        shSyncRow.appendChild(pBtn);
+    });
+    controls.appendChild(shSyncRow);
     controls.appendChild(createFxSlider({
         label: 'Feedback', unit: '%', min: 0, max: 95, step: 1,
         value: Math.round(ctx.shimmerDelay.feedback * 100),
@@ -830,31 +1111,56 @@ function buildBlackArkPhaserCard() {
         value: ctx.blackArk.rate,
         onChange: val => {
             ctx.blackArk.rate = val;
+            ctx.blackArk.sync = false;
+            phSyncBtn.classList.remove('active');
+            phSyncBtn.setAttribute('aria-pressed', 'false');
             sendBelaControl({ event: 'custom', blackArk: { rate: val } });
         }
     });
+    _phaserRateSyncCtrl = rateCtrl;
     const rateSliderRef = rateCtrl.querySelector('input[type=range]');
     const rateBadgeRef = rateCtrl.querySelector('.fx-slider-val');
     controls.appendChild(rateCtrl);
 
     const ratePresetRow = el('div', { className: 'fx-preset-row' });
-    [
-        { label: '0.1 Hz', hz: 0.1 },
-        { label: '0.25 Hz', hz: 0.25 },
-        { label: '0.8 Hz', hz: 0.8 },
-        { label: '2.5 Hz', hz: 2.5 }
-    ].forEach(preset => {
+    const phSyncBtn = el('button', {
+        type: 'button',
+        className: 'fx-mini-btn fx-sync-btn' + (ctx.blackArk.sync ? ' active' : ''),
+        textContent: 'Sync',
+        'aria-pressed': ctx.blackArk.sync ? 'true' : 'false'
+    });
+    const phSubBtns = [];
+    const updatePhSubs = () => {
+        phSubBtns.forEach(({ btn, id }) => btn.classList.toggle('active', ctx.blackArk.sync && ctx.blackArk.subdiv === id));
+    };
+    phSyncBtn.addEventListener('click', () => {
+        ctx.blackArk.sync = !ctx.blackArk.sync;
+        phSyncBtn.classList.toggle('active', ctx.blackArk.sync);
+        phSyncBtn.setAttribute('aria-pressed', ctx.blackArk.sync ? 'true' : 'false');
+        if (ctx.blackArk.sync) applyTempoSyncToEffects();
+        updatePhSubs();
+    });
+    ratePresetRow.appendChild(phSyncBtn);
+
+    PHASER_SUBDIVS.forEach(preset => {
         const pBtn = el('button', {
             type: 'button',
-            className: 'fx-mini-btn',
+            className: 'fx-mini-btn' + (ctx.blackArk.sync && ctx.blackArk.subdiv === preset.id ? ' active' : ''),
             textContent: preset.label
         });
         pBtn.addEventListener('click', () => {
-            ctx.blackArk.rate = preset.hz;
-            if (rateSliderRef) rateSliderRef.value = preset.hz;
-            if (rateBadgeRef) rateBadgeRef.textContent = preset.hz + ' Hz';
-            sendBelaControl({ event: 'custom', blackArk: { rate: preset.hz } });
+            ctx.blackArk.subdiv = preset.id;
+            const hz = subdivToPhaserHz(ctx.tempoBpm || 130, preset.id);
+            ctx.blackArk.rate = hz;
+            ctx.blackArk.sync = true;
+            phSyncBtn.classList.add('active');
+            phSyncBtn.setAttribute('aria-pressed', 'true');
+            if (rateSliderRef) rateSliderRef.value = hz;
+            if (rateBadgeRef) rateBadgeRef.textContent = hz + ' Hz';
+            updatePhSubs();
+            sendBelaControl({ event: 'custom', blackArk: { rate: hz } });
         });
+        phSubBtns.push({ btn: pBtn, id: preset.id });
         ratePresetRow.appendChild(pBtn);
     });
     controls.appendChild(ratePresetRow);
@@ -976,6 +1282,42 @@ export function updateFxLive() {
                 sel.dataset.dest = destStr;
             }
         });
+    }
+
+    // Sync Channels Mute/Solo, Kills & Master Bus DSP (Live tab)
+    syncMasterBusFromBuffer12(ctx.fxState);
+
+    // Sync Ping-Pong & FX Chain state from Buffer 12 [31..33]
+    if (ctx.fxState.length >= 34 && Date.now() >= _fxBusSyncHoldUntil) {
+        const pp = ctx.fxState[31] > 0.5;
+        if (ctx.echoDub.pingPong !== pp) {
+            ctx.echoDub.pingPong = pp;
+            if (_echoPingPongBtn) {
+                _echoPingPongBtn.classList.toggle('active', pp);
+                _echoPingPongBtn.setAttribute('aria-pressed', pp ? 'true' : 'false');
+                _echoPingPongBtn.textContent = pp ? 'Ping-Pong ON' : 'Ping-Pong';
+            }
+        }
+        const es = ctx.fxState[32] || 0;
+        if (Math.abs((ctx.fxChain.echoToSpring || 0) - es) > 0.005) {
+            ctx.fxChain.echoToSpring = es;
+            if (_chainEchoSpringCtrl) {
+                const s = _chainEchoSpringCtrl.querySelector('input[type=range]');
+                const b = _chainEchoSpringCtrl.querySelector('.fx-slider-val');
+                if (s && document.activeElement !== s) s.value = String(Math.round(es * 100));
+                if (b) b.textContent = Math.round(es * 100) + '%';
+            }
+        }
+        const te = ctx.fxState[33] || 0;
+        if (Math.abs((ctx.fxChain.tapeToEcho || 0) - te) > 0.005) {
+            ctx.fxChain.tapeToEcho = te;
+            if (_chainTapeEchoCtrl) {
+                const s = _chainTapeEchoCtrl.querySelector('input[type=range]');
+                const b = _chainTapeEchoCtrl.querySelector('.fx-slider-val');
+                if (s && document.activeElement !== s) s.value = String(Math.round(te * 100));
+                if (b) b.textContent = Math.round(te * 100) + '%';
+            }
+        }
     }
 }
 

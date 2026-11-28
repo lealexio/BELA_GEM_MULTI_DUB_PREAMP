@@ -42,6 +42,25 @@ public:
      */
     void trigger(int slot);
 
+    /** Stops currently playing sample with a click-free fade-out. Safe from any thread. */
+    void stop();
+
+    /** Sets per-slot loop flag, gain [0..1.5], and pitch in semitones [-12..+12]. */
+    void setSlotParams(int slot, bool loop, float gain, float pitchSt);
+
+    /**
+     * Reloads samples from disk into the standby bank and queues a lock-free
+     * atomic bank swap for the audio thread. Call ONLY from a non-RT thread.
+     * Returns true if new bank was queued.
+     */
+    bool reloadFromDisk();
+
+    /** Returns true once when a bank reload just completed on the audio thread. */
+    bool consumeBankReloaded();
+
+    /** Returns the resolved samples directory path (populated at setup). */
+    const char* samplesDir() const { return samplesDir_; }
+
     /**
      * Processes one audio sample.
      * @return Dry output with gain applied (0 when idle).
@@ -55,10 +74,10 @@ public:
     float fxOut2() const { return lastFxOut2_; }
 
     /** True when the samples/ directory was found at setup. */
-    bool folderOk() const { return folderOk_; }
+    bool folderOk() const { return banks_[activeBank_].folderOk; }
 
     /** Number of successfully loaded samples. */
-    int sampleCount() const { return sampleCount_; }
+    int sampleCount() const { return banks_[activeBank_].count; }
 
     /** Filename for slot (empty string if out of range). */
     const char* sampleName(int slot) const;
@@ -86,16 +105,34 @@ private:
     float lastFxOut_    = 0.f;
     float lastFxOut2_   = 0.f;
 
-    bool folderOk_      = false;
-    int  sampleCount_   = 0;
+    struct SampleBank {
+        std::vector<float> buffers[kMaxSamples];
+        char names[kMaxSamples][kMaxSampleNameLen];
+        bool folderOk = false;
+        int  count    = 0;
+    };
 
-    std::vector<float> buffers_[kMaxSamples];
-    char names_[kMaxSamples][kMaxSampleNameLen];
+    SampleBank banks_[2];
+    int        activeBank_ = 0;
+    char       projectName_[128] = {};
+    char       samplesDir_[512]  = {};
 
     int    activeSlot_  = -1;
-    int    readPtr_     = 0;
+    double readPtrF_    = 0.0;
     bool   playing_     = false;
 
-    /// Written by GUI thread; consumed in process(). -1 = none pending.
-    std::atomic<int> pendingTrigger_{-1};
+    /// Per-slot playback settings (lock-free atomic arrays)
+    std::atomic<bool>  slotLoop_[kMaxSamples];
+    std::atomic<float> slotGain_[kMaxSamples];
+    std::atomic<float> slotPitchSt_[kMaxSamples];
+
+    /// Written by GUI/non-RT thread; consumed in process(). -1 = none pending.
+    std::atomic<int>  pendingTrigger_{-1};
+    std::atomic<bool> stopPending_{false};
+    std::atomic<int>  pendingBank_{-1};
+    std::atomic<int>  audioActiveBank_{0};
+    std::atomic<bool> reloading_{false};
+    bool              bankReloadedFlag_ = false;
+
+    bool loadBankFromDisk(SampleBank& bank);
 };

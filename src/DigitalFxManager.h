@@ -86,21 +86,42 @@ public:
         }
     }
 
+    /** Sets series send amount from EchoDub output into TubbySpring input [0..1]. */
+    void setEchoToSpring(float amt) {
+        echoToSpring_.store(clamp(amt, 0.f, 1.f), std::memory_order_relaxed);
+    }
+    float getEchoToSpring() const { return echoToSpring_.load(std::memory_order_relaxed); }
+
+    /** Sets series send amount from TapeDrive output into EchoDub input [0..1]. */
+    void setTapeToEcho(float amt) {
+        tapeToEcho_.store(clamp(amt, 0.f, 1.f), std::memory_order_relaxed);
+    }
+    float getTapeToEcho() const { return tapeToEcho_.load(std::memory_order_relaxed); }
+
     /**
-     * Processes one audio frame through the active digital effects.
-     * Clears input accumulators and returns the wet return sum for the master bus.
+     * Processes one audio frame through the active digital effects into stereo L/R.
+     * Supports TapeDrive -> EchoDub and EchoDub -> TubbySpring series chaining,
+     * plus stereo Ping-Pong EchoDub output.
      */
-    inline float process() {
+    inline void processStereo(float &outL, float &outR) {
+        const float tapeToEcho   = tapeToEcho_.load(std::memory_order_relaxed);
+        const float echoToSpring = echoToSpring_.load(std::memory_order_relaxed);
+
+        float outTape = tapeDrive_.process(tapeIn_);
+
+        float echoL = 0.f, echoR = 0.f;
+        echoDub_.processStereo(echoDubIn_ + outTape * tapeToEcho, echoL, echoR);
+        float echoMono = 0.5f * (echoL + echoR);
+
+        float outSpring  = tubbySpring_.process(springIn_ + echoMono * echoToSpring);
         float outSub     = subRoar_.process(subRoarIn_);
-        float outDub     = echoDub_.process(echoDubIn_);
-        float outSpring  = tubbySpring_.process(springIn_);
         float outPhaser  = blackArk_.process(phaserIn_);
-        float outTape    = tapeDrive_.process(tapeIn_);
         float outShimmer = shimmerDelay_.process(shimmerIn_);
 
         // Apply automatic sidechain ducker attenuation to time-based returns
         float duckGain = dubDucker_.getDuckGain();
-        outDub     *= duckGain;
+        echoL      *= duckGain;
+        echoR      *= duckGain;
         outSpring  *= duckGain;
         outShimmer *= duckGain;
 
@@ -111,7 +132,19 @@ public:
         tapeIn_     = 0.f;
         shimmerIn_  = 0.f;
 
-        return outSub + outDub + outSpring + outPhaser + outTape + outShimmer;
+        const float monoSum = outSub + outSpring + outPhaser + outTape + outShimmer;
+        outL = monoSum + echoL;
+        outR = monoSum + echoR;
+    }
+
+    /**
+     * Processes one audio frame through the active digital effects (mono sum).
+     * Clears input accumulators and returns the wet return sum for the master bus.
+     */
+    inline float process() {
+        float l = 0.f, r = 0.f;
+        processStereo(l, r);
+        return 0.5f * (l + r);
     }
 
     /** Accessors for individual effects */
@@ -136,6 +169,10 @@ private:
     // Per-channel send destination (atomic uint8_t for safe lock-free UI mutation)
     std::atomic<uint8_t> auxFx1Dest_[kNumSendSources];
     std::atomic<uint8_t> auxFx2Dest_[kNumSendSources];
+
+    // Series FX chaining amounts
+    std::atomic<float> echoToSpring_{kFxChainEchoToSpringDefault};
+    std::atomic<float> tapeToEcho_{kFxChainTapeToEchoDefault};
 
     // Audio-thread per-sample input accumulators
     float subRoarIn_  = 0.f;

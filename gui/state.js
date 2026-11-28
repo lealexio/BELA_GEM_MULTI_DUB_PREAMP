@@ -7,7 +7,10 @@ import {
     BLACK_ARK_DEFAULTS,
     TAPE_DRIVE_DEFAULTS,
     SHIMMER_DELAY_DEFAULTS,
-    DUB_DUCKER_DEFAULTS
+    DUB_DUCKER_DEFAULTS,
+    FX_CHAIN_DEFAULTS,
+    MASTER_BUS_DEFAULTS,
+    TEMPO_DEFAULTS
 } from './config.js';
 
 /** Creates the initial mutable GUI state object. */
@@ -27,7 +30,7 @@ export function createState() {
         samplerListEl: null,
         samplerEmptyEl: null,
         audioLevels: new Float32Array(13),
-        fxState: new Float32Array(17),
+        fxState: new Float32Array(34),
         fxRouting: [
             [0, 0], // AUX 1 [Send 1, Send 2]
             [0, 0], // AUX 2 [Send 1, Send 2]
@@ -43,6 +46,18 @@ export function createState() {
         tapeDrive: { ...TAPE_DRIVE_DEFAULTS },
         shimmerDelay: { ...SHIMMER_DELAY_DEFAULTS },
         dubDucker: { ...DUB_DUCKER_DEFAULTS },
+        fxChain: { ...FX_CHAIN_DEFAULTS },
+        masterBus: { ...MASTER_BUS_DEFAULTS },
+        auxMuted: [false, false, false, false],
+        auxSolo: [false, false, false, false],
+        guiKillsMask: 0,
+        tempoBpm: TEMPO_DEFAULTS.bpm,
+        perfMode: false,
+        samplerSelectedSlot: 0,
+        samplerSlotCfg: {},
+        midiConnected: false,
+        midiDeviceName: '',
+        midiLearnTarget: null,
         fxSubMeterEl: null,
         fxDubMeterEl: null,
         fxSpringMeterEl: null,

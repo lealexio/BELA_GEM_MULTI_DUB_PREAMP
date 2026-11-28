@@ -567,8 +567,50 @@ enum class FxSendDest : uint8_t {
     Mute         = 7    ///< Send disabled / muted
 };
 
-/// Size of GUI buffer 12 (6 effect peak meters + 1 ducking reduction + 10 routing values [4 AUX + 1 Siren] = 17)
-constexpr int kGuiFxStateBufSize = 17;
+/// Size of GUI buffer 12:
+/// [0..5]=FX peaks | [6]=duck GR | [7..16]=AUX1..4+Siren routing |
+/// [17..20]=AUX1..4 muted | [21..24]=AUX1..4 solo | [25]=GUI kills mask |
+/// [26]=warmth | [27]=bassMono | [28]=bassMonoFreq | [29]=stereoWidth |
+/// [30]=punch | [31]=pingPong | [32]=echoToSpring | [33]=tapeToEcho
+constexpr int kGuiFxStateBufSize = 34;
+
+// ---------------------------------------------------------------------------
+// Channel Mute / Solo & Master Bus DSP Extensions
+// ---------------------------------------------------------------------------
+
+/// Click-free mute/solo fade duration on channel strips (ms).
+constexpr float kChannelMuteRampMs = 8.f;
+
+/// Master bus analog warmth / soft-clipper defaults and bounds.
+constexpr float kMasterWarmthDefaultDrive = 0.f;
+constexpr float kMasterWarmthMaxGain      = 3.5f;
+constexpr float kMasterWarmthSmoothMs     = 15.f;
+
+/// Master bus Mid-Side Bass Mono & Stereo Width defaults and bounds.
+constexpr bool  kBassMonoEnabledDefault   = true;
+constexpr float kBassMonoFreqDefaultHz    = 100.f;
+constexpr float kBassMonoFreqMinHz        = 60.f;
+constexpr float kBassMonoFreqMaxHz        = 200.f;
+constexpr float kStereoWidthDefault       = 1.0f;
+constexpr float kStereoWidthMax           = 1.5f;
+constexpr float kMasterBusSmoothMs        = 15.f;
+
+/// Master 4-band dynamics / punch processor defaults.
+constexpr float kMasterDynamicsDefault    = 0.f;
+constexpr float kMasterDynamicsThreshold  = 0.32f;
+constexpr float kMasterDynamicsRatio      = 3.0f;
+constexpr float kMasterDynamicsAttackMs   = 8.f;
+constexpr float kMasterDynamicsReleaseMs  = 90.f;
+
+/// Digital FX stereo ping-pong and series chaining defaults.
+constexpr bool  kEchoDubPingPongDefault     = false;
+constexpr float kFxChainEchoToSpringDefault = 0.f;
+constexpr float kFxChainTapeToEchoDefault   = 0.f;
+
+/// Sampler per-slot pitch / gain limits.
+constexpr float kSamplerPitchMinSt  = -12.f;
+constexpr float kSamplerPitchMaxSt  = 12.f;
+constexpr float kSamplerSlotMaxGain = 1.5f;
 
 // --- SUB ROAR Defaults & Ranges ---
 constexpr float kSubRoarTuneMinHz       = 30.f;

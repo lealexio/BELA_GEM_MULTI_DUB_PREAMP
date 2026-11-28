@@ -158,37 +158,62 @@ void SamplePlayer::setup(float sampleRate, const char* projectName) {
     sampleRate_  = sampleRate > 0.f ? sampleRate : kDefaultSampleRate;
     fadeSamples_ = (int)std::max(1.f, msToSamples(kSamplerFadeMs, sampleRate_));
     fadeStep_    = 1.f / (float)fadeSamples_;
-    folderOk_    = false;
-    sampleCount_ = 0;
     playing_     = false;
     activeSlot_  = -1;
-    readPtr_     = 0;
+    readPtrF_    = 0.0;
     fade_        = 0.f;
     fadingOut_   = false;
     pendingTrigger_.store(-1, std::memory_order_relaxed);
+    stopPending_.store(false, std::memory_order_relaxed);
+    pendingBank_.store(-1, std::memory_order_relaxed);
+    activeBank_ = 0;
+    audioActiveBank_.store(0, std::memory_order_relaxed);
+    bankReloadedFlag_ = false;
 
-    for(int i = 0; i < kMaxSamples; ++i) {
-        buffers_[i].clear();
-        names_[i][0] = '\0';
+    if (projectName) snprintf(projectName_, sizeof(projectName_), "%s", projectName);
+    else projectName_[0] = '\0';
+
+    for (int i = 0; i < kMaxSamples; ++i) {
+        slotLoop_[i].store(false, std::memory_order_relaxed);
+        slotGain_[i].store(1.0f, std::memory_order_relaxed);
+        slotPitchSt_[i].store(0.0f, std::memory_order_relaxed);
+    }
+
+    loadBankFromDisk(banks_[0]);
+    if (resolveSamplesDir(projectName_, samplesDir_, sizeof(samplesDir_))) {
+        // resolved
+    } else if (projectName_[0]) {
+        snprintf(samplesDir_, sizeof(samplesDir_), "/root/Bela/projects/%s/samples", projectName_);
+    } else {
+        snprintf(samplesDir_, sizeof(samplesDir_), "samples");
+    }
+}
+
+bool SamplePlayer::loadBankFromDisk(SampleBank& bank) {
+    bank.folderOk = false;
+    bank.count    = 0;
+    for (int i = 0; i < kMaxSamples; ++i) {
+        bank.buffers[i].clear();
+        bank.names[i][0] = '\0';
     }
 
     char dirPath[512];
-    if(!resolveSamplesDir(projectName, dirPath, sizeof(dirPath))) {
-        folderOk_ = false;
-        return;
+    if (!resolveSamplesDir(projectName_, dirPath, sizeof(dirPath))) {
+        bank.folderOk = false;
+        return false;
     }
-    folderOk_ = true;
+    bank.folderOk = true;
 
     DIR* dir = opendir(dirPath);
-    if(!dir) {
-        folderOk_ = false;
-        return;
+    if (!dir) {
+        bank.folderOk = false;
+        return false;
     }
 
     std::vector<std::string> files;
-    while(dirent* ent = readdir(dir)) {
-        if(ent->d_name[0] == '.') continue;
-        if(!isAudioFilename(ent->d_name)) continue;
+    while (dirent* ent = readdir(dir)) {
+        if (ent->d_name[0] == '.') continue;
+        if (!isAudioFilename(ent->d_name)) continue;
         files.push_back(ent->d_name);
     }
     closedir(dir);
@@ -198,19 +223,36 @@ void SamplePlayer::setup(float sampleRate, const char* projectName) {
               });
 
     int loaded = 0;
-    for(size_t i = 0; i < files.size() && loaded < kMaxSamples; ++i) {
+    for (size_t i = 0; i < files.size() && loaded < kMaxSamples; ++i) {
         char loadPath[768];
         snprintf(loadPath, sizeof(loadPath), "%s/%s", dirPath, files[i].c_str());
 
         std::vector<float> mono = loadSampleMono(loadPath);
-        if(mono.empty())
+        if (mono.empty())
             continue;
 
-        buffers_[loaded] = std::move(mono);
-        copySampleName(names_[loaded], files[i].c_str());
+        bank.buffers[loaded] = std::move(mono);
+        copySampleName(bank.names[loaded], files[i].c_str());
         ++loaded;
     }
-    sampleCount_ = loaded;
+    bank.count = loaded;
+    return true;
+}
+
+bool SamplePlayer::reloadFromDisk() {
+    if (reloading_.exchange(true, std::memory_order_acq_rel)) return false;
+    const int cur = audioActiveBank_.load(std::memory_order_acquire);
+    const int target = 1 - cur;
+    loadBankFromDisk(banks_[target]);
+    pendingBank_.store(target, std::memory_order_release);
+    reloading_.store(false, std::memory_order_release);
+    return true;
+}
+
+bool SamplePlayer::consumeBankReloaded() {
+    bool v = bankReloadedFlag_;
+    bankReloadedFlag_ = false;
+    return v;
 }
 
 void SamplePlayer::setControls(float gainPot, float fxSendPot, float fxSend2Pot) {
@@ -220,56 +262,88 @@ void SamplePlayer::setControls(float gainPot, float fxSendPot, float fxSend2Pot)
 }
 
 void SamplePlayer::trigger(int slot) {
-    if(slot < 0 || slot >= sampleCount_) return;
+    if (slot < 0 || slot >= kMaxSamples) return;
+    stopPending_.store(false, std::memory_order_relaxed);
     pendingTrigger_.store(slot, std::memory_order_release);
 }
 
+void SamplePlayer::stop() {
+    stopPending_.store(true, std::memory_order_release);
+}
+
+void SamplePlayer::setSlotParams(int slot, bool loop, float gain, float pitchSt) {
+    if (slot < 0 || slot >= kMaxSamples) return;
+    slotLoop_[slot].store(loop, std::memory_order_relaxed);
+    slotGain_[slot].store(clamp(gain, 0.f, kSamplerSlotMaxGain), std::memory_order_relaxed);
+    slotPitchSt_[slot].store(clamp(pitchSt, kSamplerPitchMinSt, kSamplerPitchMaxSt), std::memory_order_relaxed);
+}
+
 const char* SamplePlayer::sampleName(int slot) const {
-    if(slot < 0 || slot >= sampleCount_) return "";
-    return names_[slot];
+    const SampleBank& bank = banks_[activeBank_];
+    if (slot < 0 || slot >= bank.count) return "";
+    return bank.names[slot];
 }
 
 float SamplePlayer::playhead() const {
-    if(!playing_ || activeSlot_ < 0 || activeSlot_ >= sampleCount_)
+    const SampleBank& bank = banks_[activeBank_];
+    if (!playing_ || activeSlot_ < 0 || activeSlot_ >= bank.count)
         return 0.f;
-    const size_t len = buffers_[activeSlot_].size();
-    if(len == 0) return 0.f;
-    float p = (float)readPtr_ / (float)len;
-    if(p < 0.f) p = 0.f;
-    if(p > 1.f) p = 1.f;
+    const size_t len = bank.buffers[activeSlot_].size();
+    if (len == 0) return 0.f;
+    float p = (float)(readPtrF_ / (double)len);
+    if (p < 0.f) p = 0.f;
+    if (p > 1.f) p = 1.f;
     return p;
 }
 
 float SamplePlayer::process() {
+    const int swapBank = pendingBank_.exchange(-1, std::memory_order_acq_rel);
+    if (swapBank == 0 || swapBank == 1) {
+        activeBank_ = swapBank;
+        audioActiveBank_.store(swapBank, std::memory_order_release);
+        playing_    = false;
+        activeSlot_ = -1;
+        readPtrF_   = 0.0;
+        fade_       = 0.f;
+        fadingOut_  = false;
+        bankReloadedFlag_ = true;
+    }
+
     // Fast path when idle and no pending trigger — avoid atomic RMW every sample.
-    if(!playing_) {
+    if (!playing_) {
         const int peek = pendingTrigger_.load(std::memory_order_relaxed);
-        if(peek < 0) {
+        if (peek < 0) {
             lastFxOut_  = 0.f;
             lastFxOut2_ = 0.f;
             return 0.f;
         }
     }
 
+    SampleBank& bank = banks_[activeBank_];
+
+    if (stopPending_.exchange(false, std::memory_order_acq_rel)) {
+        if (playing_) fadingOut_ = true;
+    }
+
     // Consume pending GUI trigger (may retrigger mid-playback).
     const int trig = pendingTrigger_.exchange(-1, std::memory_order_acq_rel);
-    if(trig >= 0 && trig < sampleCount_ && !buffers_[trig].empty()) {
+    if (trig >= 0 && trig < bank.count && !bank.buffers[trig].empty()) {
         activeSlot_ = trig;
-        readPtr_    = 0;
+        readPtrF_   = 0.0;
         playing_    = true;
         fadingOut_  = false;
         fade_       = 0.f; // fade in from silence
     }
 
-    if(!playing_ || activeSlot_ < 0 || activeSlot_ >= sampleCount_) {
+    if (!playing_ || activeSlot_ < 0 || activeSlot_ >= bank.count) {
         lastFxOut_  = 0.f;
         lastFxOut2_ = 0.f;
         return 0.f;
     }
 
-    const std::vector<float>& buf = buffers_[activeSlot_];
+    const std::vector<float>& buf = bank.buffers[activeSlot_];
     const int len = (int)buf.size();
-    if(len <= 0 || readPtr_ >= len) {
+    if (len <= 0 || readPtrF_ >= (double)len) {
         playing_    = false;
         activeSlot_ = -1;
         fade_       = 0.f;
@@ -278,26 +352,45 @@ float SamplePlayer::process() {
         return 0.f;
     }
 
-    // Fade-out window: clamp start so short files still get a full fade-in first.
-    const int fadeStart = (len > fadeSamples_) ? (len - fadeSamples_) : 0;
-    if(!fadingOut_ && readPtr_ >= fadeStart && fade_ >= 1.f)
-        fadingOut_ = true;
+    const bool isLoop   = slotLoop_[activeSlot_].load(std::memory_order_relaxed);
+    const float sGain   = slotGain_[activeSlot_].load(std::memory_order_relaxed);
+    const float pitchSt = slotPitchSt_[activeSlot_].load(std::memory_order_relaxed);
+    const double speed  = (fabsf(pitchSt) < 0.01f) ? 1.0 : (double)powf(2.f, pitchSt / 12.f);
 
-    if(fadingOut_) {
-        fade_ -= fadeStep_;
-        if(fade_ < 0.f) fade_ = 0.f;
-    } else {
-        fade_ += fadeStep_;
-        if(fade_ > 1.f) fade_ = 1.f;
+    if (!isLoop) {
+        // Fade-out window: clamp start so short files still get a full fade-in first.
+        const int fadeStart = (len > fadeSamples_) ? (len - fadeSamples_) : 0;
+        if (!fadingOut_ && readPtrF_ >= (double)fadeStart && fade_ >= 1.f)
+            fadingOut_ = true;
     }
 
-    const float sample = buf[(size_t)readPtr_] * fade_;
-    ++readPtr_;
+    if (fadingOut_) {
+        fade_ -= fadeStep_;
+        if (fade_ < 0.f) fade_ = 0.f;
+    } else {
+        fade_ += fadeStep_;
+        if (fade_ > 1.f) fade_ = 1.f;
+    }
 
-    if(fadingOut_ && fade_ <= 0.f) {
+    const int i0 = (int)readPtrF_;
+    const float frac = (float)(readPtrF_ - (double)i0);
+    int i1 = i0 + 1;
+    if (i1 >= len) i1 = isLoop ? 0 : (len - 1);
+    const float interp = buf[(size_t)i0] + frac * (buf[(size_t)i1] - buf[(size_t)i0]);
+    const float sample = interp * fade_ * sGain;
+
+    readPtrF_ += speed;
+    if (isLoop && !fadingOut_) {
+        while (readPtrF_ >= (double)len) readPtrF_ -= (double)len;
+    } else if (readPtrF_ >= (double)len && !fadingOut_) {
+        fadingOut_ = true;
+        readPtrF_ = (double)(len - 1);
+    }
+
+    if (fadingOut_ && fade_ <= 0.f) {
         playing_    = false;
         activeSlot_ = -1;
-        readPtr_    = 0;
+        readPtrF_   = 0.0;
     }
 
     const float dry = sample * gain_ * kSamplerGainScale;
