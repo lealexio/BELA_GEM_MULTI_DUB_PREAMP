@@ -1,4 +1,6 @@
 #pragma once
+#include <cstddef>
+#include <cstdint>
 
 /**
  * DSP and software behaviour constants.
@@ -33,6 +35,19 @@ constexpr bool kDebug = false;
 /// Minimum absolute pot movement required to emit a debug log line.
 /// Prevents log spam from ADC jitter on pots that are not touched.
 constexpr float kDebugPotMinMove = 0.01f;
+
+// ---------------------------------------------------------------------------
+// UI Control / Developer Mode Defaults
+// ---------------------------------------------------------------------------
+
+/// Default input gain for AUX1..4 when in developer mode (50%).
+constexpr float kDevModeAuxGain = 0.5f;
+
+/// Default siren gain when in developer mode (50%).
+constexpr float kDevModeSirenGain = 0.5f;
+
+/// Default master volume when in developer mode (5%).
+constexpr float kDevModeMasterGain = 0.05f;
 
 // ---------------------------------------------------------------------------
 // Input clip & signal detection (Hardware LEDs via MCP23017)
@@ -484,15 +499,26 @@ constexpr int kGuiUpdateIntervalSamples = 2205;
 /// Resend static mapping/config-meta buffers every N GUI ticks (~2 s @ 20 fps).
 constexpr int kGuiStaticBufSendDivisor = 40;
 
-/// Float count for GUI buffer 6 (mux, routing, ignoredPots). Must match
-/// sketch.js. Layout: [0-4] mux/cal/i2c | [5-7] master outs | [8-9] fx sends |
-/// [10-13] vu outs
-///         [14-15] fx returns | [16-19] AUX channelL | [20-23] AUX micMode
-///         [24-27] AUX hpfHz | [28-31] AUX channelR | [32] masterStereo | [33]
-///         ignoredPotsCount | [34+] ignored pairs
-constexpr int kGuiConfigMetaHeaderFloats = 34;
+/// Float count for GUI buffer 6 (mux, routing, ignoredPots, boot dev mode,
+/// clip LEDs). Must match gui/config.js.
+/// Layout: [0-4] mux/cal/i2c | [5-7] master outs | [8-9] fx sends |
+///         [10-13] vu outs | [14-15] fx returns | [16-19] AUX channelL |
+///         [20-23] AUX micMode | [24-27] AUX hpfHz | [28-31] AUX channelR |
+///         [32] masterStereo | [33] uiDevMode | [34] ignoredPotsCount |
+///         [35-98] ignored pairs (32 max) | [99] devModeBoot |
+///         [100-104] clipLeds (master, aux1..4)
+constexpr int kGuiConfigMetaHeaderFloats = 35;
+constexpr int kGuiConfigMetaExtraBase = kGuiConfigMetaHeaderFloats + 64; // 99
+constexpr int kGuiConfigMetaClipLedCount = 5;
 constexpr int kGuiConfigMetaSize =
-    kGuiConfigMetaHeaderFloats + 64; // 32 ignored pairs max
+    kGuiConfigMetaExtraBase + 1 + kGuiConfigMetaClipLedCount; // 105
+
+/// Maximum accepted config.json payload size (bytes) when saving from GUI.
+constexpr std::size_t kConfigSaveMaxBytes = 262144;
+
+/// Maximum poll iterations (at 50 ms each = 2 s) waiting for clean audio
+/// shutdown before triggering restart/reboot.
+constexpr int kRestartWaitPollIterations = 40;
 
 /// Raw MUX grid for GUI buffer 7: kNumMux × kPotsPerMux (must match
 /// HardwareConfig.h).
@@ -523,3 +549,166 @@ constexpr unsigned int kMcpReconnectIntervalMs = 1000;
 /// Number of consecutive I2C read errors before declaring MCP23017
 /// disconnected.
 constexpr int kMcpMaxConsecutiveErrors = 5;
+
+// ---------------------------------------------------------------------------
+// Digital Multi-FX Engine (SUB ROAR, ECHO DUB, TUBBY SPRING, BLACK ARK)
+// ---------------------------------------------------------------------------
+
+/// Destination routing enum for channel FX sends.
+enum class FxSendDest : uint8_t {
+    Hardware     = 0,   ///< Physical output jack (OUT0 for FX1, OUT1 for FX2)
+    SubRoar      = 1,   ///< Internal digital FX 1 (SUB ROAR)
+    EchoDub      = 2,   ///< Internal digital FX 2 (ECHO DUB)
+    EchuDub      = 2,   ///< Backward compatibility alias
+    TubbySpring  = 3,   ///< Internal digital FX 3 (TUBBY SPRING)
+    BlackArk     = 4,   ///< Internal digital FX 4 (BLACK ARK PHASER)
+    TapeDrive    = 5,   ///< Internal digital FX 5 (TAPE SATURATION & DRIVE)
+    ShimmerDelay = 6,   ///< Internal digital FX 6 (PITCH DELAY / SHIMMER DUB)
+    Mute         = 7    ///< Send disabled / muted
+};
+
+/// Size of GUI buffer 12:
+/// [0..5]=FX peaks | [6]=duck GR | [7..16]=AUX1..4+Siren routing |
+/// [17..20]=AUX1..4 muted | [21..24]=AUX1..4 solo | [25]=GUI kills mask |
+/// [26]=warmth | [27]=bassMono | [28]=bassMonoFreq | [29]=stereoWidth |
+/// [30]=punch | [31]=pingPong | [32]=echoToSpring | [33]=tapeToEcho
+constexpr int kGuiFxStateBufSize = 34;
+
+// ---------------------------------------------------------------------------
+// Channel Mute / Solo & Master Bus DSP Extensions
+// ---------------------------------------------------------------------------
+
+/// Click-free mute/solo fade duration on channel strips (ms).
+constexpr float kChannelMuteRampMs = 8.f;
+
+/// Master bus analog warmth / soft-clipper defaults and bounds.
+constexpr float kMasterWarmthDefaultDrive = 0.f;
+constexpr float kMasterWarmthMaxGain      = 3.5f;
+constexpr float kMasterWarmthSmoothMs     = 15.f;
+
+/// Master bus Mid-Side Bass Mono & Stereo Width defaults and bounds.
+constexpr bool  kBassMonoEnabledDefault   = true;
+constexpr float kBassMonoFreqDefaultHz    = 100.f;
+constexpr float kBassMonoFreqMinHz        = 60.f;
+constexpr float kBassMonoFreqMaxHz        = 200.f;
+constexpr float kStereoWidthDefault       = 1.0f;
+constexpr float kStereoWidthMax           = 1.5f;
+constexpr float kMasterBusSmoothMs        = 15.f;
+
+/// Master 4-band dynamics / punch processor defaults.
+constexpr float kMasterDynamicsDefault    = 0.f;
+constexpr float kMasterDynamicsThreshold  = 0.32f;
+constexpr float kMasterDynamicsRatio      = 3.0f;
+constexpr float kMasterDynamicsAttackMs   = 8.f;
+constexpr float kMasterDynamicsReleaseMs  = 90.f;
+
+/// Digital FX stereo ping-pong and series chaining defaults.
+constexpr bool  kEchoDubPingPongDefault     = false;
+constexpr float kFxChainEchoToSpringDefault = 0.f;
+constexpr float kFxChainTapeToEchoDefault   = 0.f;
+
+/// Sampler per-slot pitch / gain limits.
+constexpr float kSamplerPitchMinSt  = -12.f;
+constexpr float kSamplerPitchMaxSt  = 12.f;
+constexpr float kSamplerSlotMaxGain = 1.5f;
+
+// --- SUB ROAR Defaults & Ranges ---
+constexpr float kSubRoarTuneMinHz       = 30.f;
+constexpr float kSubRoarTuneMaxHz       = 90.f;
+constexpr float kSubRoarTuneDefaultHz   = 45.f;
+constexpr float kSubRoarDecayMinMs      = 100.f;
+constexpr float kSubRoarDecayMaxMs      = 3000.f;
+constexpr float kSubRoarDecayDefaultMs  = 850.f;
+constexpr float kSubRoarCutoffMinHz     = 40.f;
+constexpr float kSubRoarCutoffMaxHz     = 120.f;
+constexpr float kSubRoarCutoffDefaultHz = 80.f;
+constexpr float kSubRoarDriveDefault    = 0.45f;
+constexpr float kSubRoarReturnDefault   = 1.0f;
+/// Master headroom scaling for SUB ROAR: calibrated to deliver heavy, powerful
+/// sub presence while maintaining clean headroom on the master bus.
+constexpr float kSubRoarGainScale       = 0.55f;
+
+// --- ECHO DUB Defaults & Ranges ---
+constexpr float kEchoDubMaxDelayMs      = 2000.f;
+constexpr float kEchoDubMinDelayMs      = 40.f;
+constexpr float kEchoDubDefaultDelayMs  = 375.f;
+constexpr float kEchoDubDefaultFeedback = 0.65f;
+constexpr float kEchoDubMaxFeedback     = 1.15f;
+constexpr float kEchoDubDefaultToneHz   = 2800.f;
+constexpr float kEchoDubMinToneHz       = 1000.f;
+constexpr float kEchoDubMaxToneHz       = 5000.f;
+constexpr float kEchoDubDefaultFlutter  = 0.20f;
+constexpr float kEchoDubReturnDefault   = 0.75f;
+
+// Aliases for backward compatibility
+constexpr float kEchuDubMaxDelayMs      = kEchoDubMaxDelayMs;
+constexpr float kEchuDubMinDelayMs      = kEchoDubMinDelayMs;
+constexpr float kEchuDubDefaultDelayMs  = kEchoDubDefaultDelayMs;
+constexpr float kEchuDubDefaultFeedback = kEchoDubDefaultFeedback;
+constexpr float kEchuDubMaxFeedback     = kEchoDubMaxFeedback;
+constexpr float kEchuDubDefaultToneHz   = kEchoDubDefaultToneHz;
+constexpr float kEchuDubMinToneHz       = kEchoDubMinToneHz;
+constexpr float kEchuDubMaxToneHz       = kEchoDubMaxToneHz;
+constexpr float kEchuDubDefaultFlutter  = kEchoDubDefaultFlutter;
+constexpr float kEchuDubReturnDefault   = kEchoDubReturnDefault;
+
+// --- TUBBY SPRING Defaults & Ranges ---
+constexpr float kTubbySpringDwellDefault   = 0.65f;
+constexpr float kTubbySpringDecayDefault   = 0.70f;
+constexpr float kTubbySpringToneDefaultHz  = 3200.f;
+constexpr float kTubbySpringReturnDefault  = 0.85f;
+constexpr float kTubbySpringGainScale      = 0.70f;
+
+// --- BLACK ARK PHASER Defaults & Ranges ---
+constexpr float kBlackArkRateMinHz         = 0.02f;
+constexpr float kBlackArkRateMaxHz         = 6.0f;
+constexpr float kBlackArkRateDefaultHz     = 0.25f;
+constexpr float kBlackArkDepthDefault      = 0.75f;
+constexpr float kBlackArkFeedbackDefault   = 0.60f;
+constexpr int   kBlackArkStagesDefault     = 6;
+constexpr float kBlackArkReturnDefault     = 0.80f;
+constexpr float kBlackArkGainScale         = 0.75f;
+
+// --- TAPE SATURATION & DRIVE Defaults & Ranges ---
+constexpr float kTapeDriveDefault          = 0.35f;
+constexpr float kTapeWarmthMinHz           = 6000.f;
+constexpr float kTapeWarmthMaxHz           = 16000.f;
+constexpr float kTapeWarmthDefaultHz       = 11000.f;
+constexpr float kTapeAsymmetryDefault      = 0.30f;
+constexpr float kTapeReturnDefault         = 1.0f;
+constexpr float kTapeGainScale             = 0.80f;
+
+// --- SHIMMER DUB / PITCH DELAY Defaults & Ranges ---
+constexpr int   kShimmerSemitonesMin       = -12;
+constexpr int   kShimmerSemitonesMax       = 12;
+constexpr int   kShimmerSemitonesDefault   = 12;
+constexpr float kShimmerDelayMinMs         = 40.f;
+constexpr float kShimmerDelayMaxMs         = 1500.f;
+constexpr float kShimmerDelayDefaultMs     = 375.f;
+constexpr float kShimmerFeedbackDefault    = 0.55f;
+constexpr float kShimmerGrainSizeDefaultMs = 50.f;
+constexpr float kShimmerReturnDefault      = 0.75f;
+constexpr float kShimmerGainScale          = 0.75f;
+
+// --- DUB DUCKER Defaults & Ranges ---
+constexpr float kDubDuckerThresholdDefault = 0.08f;
+constexpr float kDubDuckerReleaseMinMs     = 50.f;
+constexpr float kDubDuckerReleaseMaxMs     = 1500.f;
+constexpr float kDubDuckerReleaseDefaultMs = 350.f;
+constexpr float kDubDuckerAmountDefault    = 0.75f;
+constexpr int   kDubDuckerSourceDefault    = 0; // 0: Siren, 1: Mic, 2: Master, 3: All
+
+// ---------------------------------------------------------------------------
+// FX Tab Direct Send Trigger & Test Signal
+// ---------------------------------------------------------------------------
+
+/// Fundamental frequency of the optional FX Send test signal (Hz).
+constexpr float kFxTestToneFreqHz = 220.f;
+
+/// Peak amplitude of the optional FX Send test signal.
+constexpr float kFxTestToneGain = 0.25f;
+
+/// Attack / release smoothing times for click-free FX Send test tone gating (ms).
+constexpr float kFxTestToneAttackMs  = 5.f;
+constexpr float kFxTestToneReleaseMs = 25.f;
+

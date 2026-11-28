@@ -9,6 +9,7 @@ https://bela.io
 
 #include "ChannelStrip.h"
 #include "ConfigLoader.h"
+#include "DigitalFxManager.h"
 #include "DspUtils.h"
 #include "DubSiren.h"
 #include "HardwareConfig.h"
@@ -19,12 +20,16 @@ https://bela.io
 #include <Bela.h>
 #include <algorithm>
 #include <atomic>
+#include <cerrno>
 #include <cmath>
 #include <csignal>
 #include <cstdio>
 #include <cstring>
 #include <libraries/Gui/Gui.h>
 #include <libraries/Scope/Scope.h>
+#include <string>
+#include <sys/types.h>
+#include <sys/wait.h>
 #include <unistd.h>
 #include <vector>
 
@@ -36,6 +41,8 @@ ChannelStrip gChannelStrips[kNumAuxChannels][2];
 MasterFx gMasterFx;  // left / mono master bus
 MasterFx gMasterFxR; // right master bus (used only when MASTER_OUTS_COUNT >= 2)
 MasterFx *const gMasterBuses[2] = {&gMasterFx, &gMasterFxR};
+
+DigitalFxManager gDigitalFxManager; // multi-effects digital engine (SUB ROAR & ECHO DUB)
 
 struct AuxPotBinding {
   const PotRef &gain;
@@ -63,6 +70,27 @@ DubSiren gDubSiren;
 SamplePlayer gSamplePlayer;
 AuxiliaryTask gI2cTask;
 AuxiliaryTask gCpuTempTask;
+AuxiliaryTask gSampleReloadTask;
+
+// Channel Mute / Solo, GUI Kill Overrides, & Master Bus DSP controls (atomic)
+static std::atomic<bool>    gAuxMute[kNumAuxChannels];
+static std::atomic<bool>    gAuxSolo[kNumAuxChannels];
+static std::atomic<uint8_t> gGuiKillsMask{0};
+static std::atomic<bool>    gGuiSirenGate{false};
+
+static std::atomic<float> gMasterWarmth{kMasterWarmthDefaultDrive};
+static std::atomic<bool>  gBassMonoEnabled{kBassMonoEnabledDefault};
+static std::atomic<float> gBassMonoFreqHz{kBassMonoFreqDefaultHz};
+static std::atomic<float> gStereoWidth{kStereoWidthDefault};
+static std::atomic<float> gMasterDynamics{kMasterDynamicsDefault};
+
+static BiquadFilter gBassMonoHpf;
+static float gLastBassMonoFreqHz = -1.f;
+static float gSmoothStereoWidth  = kStereoWidthDefault;
+static float gSmoothBassMonoMix  = kBassMonoEnabledDefault ? 1.f : 0.f;
+static float gMasterBusSlewCoeff = 0.f;
+static float gMonoWarmthSmooth   = kMasterWarmthDefaultDrive;
+static float gMonoWarmthCoeff    = 0.f;
 
 // FX send 1 band filters (PA5 = MIDS, PA6 = TOPS)
 BiquadFilter gFxHpf4k;  // TOPS mode : HPF at kFxMidHighFreq
@@ -100,6 +128,15 @@ static BiquadFilter gMonoAirFilter;
 static float gStereoMonoMix = 1.f;
 static float gStereoMonoSlewCoeff = 0.f;
 
+// Direct FX Send Trigger state (driven from GUI FX tab, works in Physical & Dev mode).
+static std::atomic<bool> gFxSendTrigger[DigitalFxManager::kNumSendSources][2];
+static std::atomic<bool> gFxTestToneEnabled{false};
+static std::atomic<bool> gSirenFxTrigger{false};
+static float gFxTestTonePhase = 0.f;
+static float gFxTestToneEnv[kNumAuxChannels][2] = {};
+static float gFxTestAttackCoeff = 0.f;
+static float gFxTestReleaseCoeff = 0.f;
+
 Scope scope;
 
 // ---------------------------------------------------------------------------
@@ -125,6 +162,8 @@ static std::vector<float>
     gConfigMetaBuf; // [kGuiConfigMetaSize] mux/routing/ignoredPots
 static std::vector<float>
     gMuxRawBuf; // [kGuiMuxRawBufSize] raw pot values per MUX channel
+static std::vector<float>
+    gFxStateBuf; // [kGuiFxStateBufSize=12] digital FX peaks [0..3] and routing destinations [4..11]
 
 // Codec gain state — written at boot from config.json and by the gui_control
 // callback (seasocks thread). Broadcast to every connected GUI client via
@@ -182,9 +221,12 @@ static int gGuiUpdateSampleCount =
     0; // accumulates context->audioFrames per block
 static int gGuiStaticSendCount =
     kGuiStaticBufSendDivisor; // force static send on first tick
+static std::atomic<bool> gForceStaticMetaSend{false};
 
 // Path built in setup() from context->projectName — never hardcoded.
 static char kGuiConfigPath[256] = {};
+static char kGuiProjectName[128] = {};
+static std::atomic<bool> gRestartOrRebootPending{false};
 
 // Switch globals in the same order as the JS SWITCH_NAMES array.
 static SwitchRef *const kGuiSwitchRefs[9] = {
@@ -193,9 +235,9 @@ static SwitchRef *const kGuiSwitchRefs[9] = {
     &FX2_FILTER_TOPS, &FX2_FILTER_MIDS, &SIREN_TRIGGER};
 
 /** Packs sample filenames into gSamplerNamesBuf as fixed-width ASCII floats
- * (buffer 11). */
+ * (buffer 11). Zero allocations — safe if called on RT thread after bank swap. */
 static void fillSamplerNamesBuf() {
-  gSamplerNamesBuf.assign(kGuiSamplerNamesSize, 0.f);
+  std::fill(gSamplerNamesBuf.begin(), gSamplerNamesBuf.end(), 0.f);
   const int count = gSamplePlayer.sampleCount();
   for (int i = 0; i < count && i < kMaxSamples; ++i) {
     const char *name = gSamplePlayer.sampleName(i);
@@ -209,8 +251,15 @@ static void fillSamplerNamesBuf() {
   }
 }
 
-/** Fills gConfigMetaBuf with mux/calibration/routing/ignoredPots (buffer 6
- * layout). */
+/** Encodes one ClipLedRef into an exact integer float (-1 = disabled). */
+static float encodeClipLedMeta(const ClipLedRef &ref) {
+  if (!ref.enabled || ref.pin < 0 || ref.pin > 7)
+    return -1.f;
+  return (float)((ref.portB ? 8 : 0) + ref.pin + (ref.activeLow ? 16 : 0));
+}
+
+/** Fills gConfigMetaBuf with mux/calibration/routing/ignoredPots/boot/clipLeds
+ * (buffer 6 layout). */
 static void fillConfigMetaBuf() {
   gConfigMetaBuf.assign(kGuiConfigMetaSize, 0.f);
   gConfigMetaBuf[0] = (float)kActiveMux;
@@ -238,12 +287,26 @@ static void fillConfigMetaBuf() {
   }
   // Master stereo mode (1 = stereo, 0 = mono L+R)
   gConfigMetaBuf[32] = gMasterStereo.load() ? 1.f : 0.f;
+  // UI Control (Dev) mode (1 = active, 0 = hardware)
+  gConfigMetaBuf[33] = gHardwareManager.isUiControlMode() ? 1.f : 0.f;
   // Ignored pots
-  gConfigMetaBuf[33] = (float)kIgnoredPotsCount;
+  gConfigMetaBuf[34] = (float)kIgnoredPotsCount;
   for (int i = 0; i < kIgnoredPotsCount; ++i) {
-    gConfigMetaBuf[34 + i * 2 + 0] = (float)kIgnoredPots[i].mux;
-    gConfigMetaBuf[34 + i * 2 + 1] = (float)kIgnoredPots[i].pot;
+    gConfigMetaBuf[35 + i * 2 + 0] = (float)kIgnoredPots[i].mux;
+    gConfigMetaBuf[35 + i * 2 + 1] = (float)kIgnoredPots[i].pot;
   }
+  // Boot developer mode (distinct from live UI_DEV_MODE) & Clip LEDs
+  gConfigMetaBuf[kGuiConfigMetaExtraBase] = DEV_MODE ? 1.f : 0.f;
+  gConfigMetaBuf[kGuiConfigMetaExtraBase + 1] =
+      encodeClipLedMeta(CLIP_LED_MASTER);
+  gConfigMetaBuf[kGuiConfigMetaExtraBase + 2] =
+      encodeClipLedMeta(CLIP_LED_AUX1);
+  gConfigMetaBuf[kGuiConfigMetaExtraBase + 3] =
+      encodeClipLedMeta(CLIP_LED_AUX2);
+  gConfigMetaBuf[kGuiConfigMetaExtraBase + 4] =
+      encodeClipLedMeta(CLIP_LED_AUX3);
+  gConfigMetaBuf[kGuiConfigMetaExtraBase + 5] =
+      encodeClipLedMeta(CLIP_LED_AUX4);
 }
 
 // ---------------------------------------------------------------------------
@@ -313,6 +376,73 @@ void readCpuTempTask(void *) {
     }
     usleep(kCpuTempPollUs);
   }
+}
+
+/** Reloads samples/ directory into standby bank (non-RT AuxTask). */
+void reloadSamplesTask(void *) {
+  gSamplePlayer.reloadFromDisk();
+}
+
+/** Validates uploaded sample filename (safe basename ending in .wav or .mp3). */
+static bool isValidSampleUploadName(const std::string &name) {
+  if (name.empty() || name.size() >= (size_t)kMaxSampleNameLen)
+    return false;
+  if (name.find("..") != std::string::npos ||
+      name.find('/') != std::string::npos ||
+      name.find('\\') != std::string::npos)
+    return false;
+  for (unsigned char c : name) {
+    bool ok = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+              (c >= '0' && c <= '9') || c == '_' || c == '-' || c == '.' ||
+              c == ' ';
+    if (!ok)
+      return false;
+  }
+  if (name.size() < 4)
+    return false;
+  std::string ext = name.substr(name.size() - 4);
+  for (char &ch : ext)
+    if (ch >= 'A' && ch <= 'Z')
+      ch = (char)(ch - 'A' + 'a');
+  return (ext == ".wav" || ext == ".mp3");
+}
+
+/** Decodes base64 string into bytes (non-RT only). */
+static bool decodeBase64Bytes(const std::string &b64, std::vector<uint8_t> &out) {
+  static const int kLookup[256] = {
+      -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
+      -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
+      -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,62,-1,-1,-1,63,
+      52,53,54,55,56,57,58,59,60,61,-1,-1,-1,-1,-1,-1,
+      -1, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9,10,11,12,13,14,
+      15,16,17,18,19,20,21,22,23,24,25,-1,-1,-1,-1,-1,
+      -1,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,
+      41,42,43,44,45,46,47,48,49,50,51,-1,-1,-1,-1,-1,
+      -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
+      -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
+      -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
+      -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
+      -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
+      -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
+      -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
+      -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1};
+  out.clear();
+  out.reserve((b64.size() * 3) / 4);
+  int val = 0, valb = -8;
+  for (unsigned char c : b64) {
+    if (c == '=' || c == ' ' || c == '\r' || c == '\n')
+      continue;
+    int d = kLookup[c];
+    if (d == -1)
+      return false;
+    val = (val << 6) + d;
+    valb += 6;
+    if (valb >= 0) {
+      out.push_back((uint8_t)((val >> valb) & 0xFF));
+      valb -= 8;
+    }
+  }
+  return !out.empty();
 }
 
 // ---------------------------------------------------------------------------
@@ -429,6 +559,12 @@ static void refreshMicMetaSlots() {
 static void refreshMasterMetaSlot() {
   if (gConfigMetaBuf.size() > 32)
     gConfigMetaBuf[32] = gMasterStereo.load() ? 1.f : 0.f;
+}
+
+/** Updates buffer-6 UI Dev mode slot (multi-client sync). */
+static void refreshUiDevModeMetaSlot() {
+  if (gConfigMetaBuf.size() > 33)
+    gConfigMetaBuf[33] = gHardwareManager.isUiControlMode() ? 1.f : 0.f;
 }
 
 /** Applies the left mic-path HPF cascade when active; otherwise returns x
@@ -593,6 +729,86 @@ static void printChangedSwitches() {
   initialised = true;
 }
 
+/** Converts an ASCII string to wstring safely (masks bytes >= 0x80 to '?'). */
+static std::wstring asciiToWstring(const std::string &s) {
+  std::wstring out;
+  out.reserve(s.size());
+  for (unsigned char c : s)
+    out.push_back((c < 0x80) ? (wchar_t)c : L'?');
+  return out;
+}
+
+/** Sends a config-action ACK JSON back to the GUI control WebSocket.
+ *  Must be called from inside the Seasocks gui_control callback thread. */
+static void sendConfigActionAck(const char *action, bool ok,
+                                const std::string &reqId,
+                                const std::string &error = "",
+                                const std::string &content = "") {
+  JSONObject ack;
+  ack[L"event"] = new JSONValue(L"custom");
+  ack[L"configAction"] = new JSONValue(asciiToWstring(action));
+  ack[L"ok"] = new JSONValue(ok);
+  if (!reqId.empty())
+    ack[L"reqId"] = new JSONValue(asciiToWstring(reqId));
+  if (!error.empty())
+    ack[L"error"] = new JSONValue(asciiToWstring(error));
+  if (!content.empty())
+    ack[L"content"] = new JSONValue(asciiToWstring(content));
+  JSONValue *val = new JSONValue(ack);
+  gGui.sendControl(val, WSServer::kThreadCallback);
+  delete val;
+}
+
+/** Validates project name contains only safe path characters. */
+static bool isValidProjectName(const char *name) {
+  if (!name || name[0] == '\0')
+    return false;
+  if (std::strstr(name, "..") != nullptr)
+    return false;
+  for (const char *p = name; *p != '\0'; ++p) {
+    char c = *p;
+    bool ok = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+              (c >= '0' && c <= '9') || c == '_' || c == '-' || c == '.';
+    if (!ok)
+      return false;
+  }
+  return true;
+}
+
+/**
+ * Spawns a detached transient systemd unit via `systemd-run --no-block --collect`
+ * so the helper survives both `bela_startup.service` and `bela_daemon.service`
+ * cgroup tear-down. Non-RT only.
+ */
+static bool spawnTransientSystemdUnit(const char *scriptBody, const char *arg1,
+                                      const char *arg2) {
+  pid_t pid = ::fork();
+  if (pid < 0)
+    return false;
+  if (pid == 0) {
+    // Child: close inherited FDs (WebSocket, I2C, etc.) before exec.
+    for (int fd = 3; fd < 1024; ++fd)
+      ::close(fd);
+    const char *const argv[] = {"/usr/bin/systemd-run",
+                                "--no-block",
+                                "--collect",
+                                "--quiet",
+                                "/bin/sh",
+                                "-c",
+                                scriptBody,
+                                "_",
+                                arg1,
+                                arg2 ? arg2 : "",
+                                nullptr};
+    ::execv("/usr/bin/systemd-run", const_cast<char *const *>(argv));
+    _exit(127);
+  }
+  int status = 0;
+  while (::waitpid(pid, &status, 0) < 0 && errno == EINTR) {
+  }
+  return WIFEXITED(status) && WEXITSTATUS(status) == 0;
+}
+
 // ---------------------------------------------------------------------------
 // Bela callbacks
 // ---------------------------------------------------------------------------
@@ -600,11 +816,14 @@ static void printChangedSwitches() {
 bool setup(BelaContext *context, void *userData) {
   // Build project-directory paths from the runtime project name so the code
   // works regardless of what the project was named in Bela IDE.
+  snprintf(kGuiProjectName, sizeof(kGuiProjectName), "%s", context->projectName);
   snprintf(kGuiConfigPath, sizeof(kGuiConfigPath),
            "/root/Bela/projects/%s/config.json", context->projectName);
 
   // Load hardware mappings from JSON before any other initialisation.
   ConfigLoader::load(kGuiConfigPath);
+  gHardwareManager.setUiControlMode(DEV_MODE);
+  gHardwareManager.resetVirtualControlsToDefaults();
 
   // Apply routing.*.gain defaults to the codec (same APIs as the Meters UI).
   applyCodecGainsFromConfig();
@@ -660,8 +879,36 @@ bool setup(BelaContext *context, void *userData) {
   }
   gStereoMonoSlewCoeff =
       onePoleLpCoeff(kMonoCrossfadeMs, context->audioSampleRate);
+  gMasterBusSlewCoeff =
+      onePoleLpCoeff(kMasterBusSmoothMs, context->audioSampleRate);
+  gMonoWarmthCoeff =
+      onePoleLpCoeff(kMasterWarmthSmoothMs, context->audioSampleRate);
+  gBassMonoHpf.setHighPass(kBassMonoFreqDefaultHz, kButterworthQ,
+                           context->audioSampleRate);
+  gLastBassMonoFreqHz = kBassMonoFreqDefaultHz;
+  for (int ch = 0; ch < kNumAuxChannels; ++ch) {
+    gAuxMute[ch].store(false, std::memory_order_relaxed);
+    gAuxSolo[ch].store(false, std::memory_order_relaxed);
+  }
   gDubSiren.setup(context->audioSampleRate);
   gSamplePlayer.setup(context->audioSampleRate, context->projectName);
+  gDigitalFxManager.setup(context->audioSampleRate);
+
+  for (int s = 0; s < DigitalFxManager::kNumSendSources; ++s) {
+    gFxSendTrigger[s][0].store(false, std::memory_order_relaxed);
+    gFxSendTrigger[s][1].store(false, std::memory_order_relaxed);
+  }
+  gFxTestToneEnabled.store(false, std::memory_order_relaxed);
+  gSirenFxTrigger.store(false, std::memory_order_relaxed);
+  gFxTestTonePhase = 0.f;
+  for (int ch = 0; ch < kNumAuxChannels; ++ch) {
+    gFxTestToneEnv[ch][0] = 0.f;
+    gFxTestToneEnv[ch][1] = 0.f;
+  }
+  gFxTestAttackCoeff =
+      onePoleLpCoeff(kFxTestToneAttackMs, context->audioSampleRate);
+  gFxTestReleaseCoeff =
+      onePoleLpCoeff(kFxTestToneReleaseMs, context->audioSampleRate);
 
   float sr = context->audioSampleRate;
   gFxHpf4k.setHighPass(kFxMidHighFreq, kFxFilterQ, sr); // FX1 TOPS: HPF @ 4 kHz
@@ -708,16 +955,21 @@ bool setup(BelaContext *context, void *userData) {
       Bela_createAuxiliaryTask(readCpuTempTask, 1, "cpu-temp", nullptr);
   Bela_scheduleAuxiliaryTask(gCpuTempTask);
 
+  gSampleReloadTask =
+      Bela_createAuxiliaryTask(reloadSamplesTask, 1, "sample-reload", nullptr);
+
   // ---- GUI setup --------------------------------------------------------
   // Allocate live send buffers (never resized after this point).
   gPotValuesBuf.assign(kAllNamedPotsCount, 0.f);
   gSwitchBuf.assign(9, 0.f);
   gSirenBuf.assign(3, 0.f);
   gSamplerStateBuf.assign(kGuiSamplerStateSize, 0.f);
+  gSamplerNamesBuf.assign(kGuiSamplerNamesSize, 0.f);
   gAudioLevelsBuf.assign(13, 0.f);
   gMuxRawBuf.assign(kGuiMuxRawBufSize, 0.f);
   gCodecGainsBuf.assign(20, 0.f);
   gCpuTempBuf.assign(1, -1.f);
+  gFxStateBuf.assign(kGuiFxStateBufSize, 0.f);
 
   // Fill static mapping buffers from the (possibly JSON-overridden) globals.
   gPotMappingBuf.resize(kAllNamedPotsCount * 4);
@@ -852,6 +1104,580 @@ bool setup(BelaContext *context, void *userData) {
           rt_printf("[GUI] Sampler play slot %d\n", slot);
         }
 
+        // Sampler stop: { samplerStop: true }
+        if (root.find(L"samplerStop") != root.end()) {
+          gSamplePlayer.stop();
+        }
+
+        // Sampler per-slot settings: { samplerSlotCfg: { slot, loop, gain, pitch } }
+        if (root.find(L"samplerSlotCfg") != root.end() &&
+            root[L"samplerSlotCfg"]->IsObject()) {
+          const JSONObject &sc = root[L"samplerSlotCfg"]->AsObject();
+          auto itSlot = sc.find(L"slot");
+          if (itSlot != sc.end() && itSlot->second->IsNumber()) {
+            int slot = (int)itSlot->second->AsNumber();
+            bool loop = false;
+            float gain = 1.0f;
+            float pitch = 0.0f;
+            auto itLoop = sc.find(L"loop");
+            if (itLoop != sc.end())
+              loop = itLoop->second->IsBool() ? itLoop->second->AsBool()
+                                              : (itLoop->second->AsNumber() > 0.5);
+            auto itGain = sc.find(L"gain");
+            if (itGain != sc.end() && itGain->second->IsNumber())
+              gain = (float)itGain->second->AsNumber();
+            auto itPitch = sc.find(L"pitch");
+            if (itPitch != sc.end() && itPitch->second->IsNumber())
+              pitch = (float)itPitch->second->AsNumber();
+            gSamplePlayer.setSlotParams(slot, loop, gain, pitch);
+          }
+        }
+
+        // Sampler upload WAV/MP3 from browser: { uploadSample: { name, dataB64 }, reqId? }
+        if (root.find(L"uploadSample") != root.end() &&
+            root[L"uploadSample"]->IsObject()) {
+          std::string reqId;
+          if (root.find(L"reqId") != root.end() && root[L"reqId"]->IsString())
+            reqId = JSON::ws2s(root[L"reqId"]->AsString());
+          const JSONObject &uo = root[L"uploadSample"]->AsObject();
+          auto itName = uo.find(L"name");
+          auto itData = uo.find(L"dataB64");
+          if (itName == uo.end() || !itName->second->IsString() ||
+              itData == uo.end() || !itData->second->IsString()) {
+            sendConfigActionAck("uploadSample", false, reqId, "Missing name or data");
+          } else {
+            std::string name = JSON::ws2s(itName->second->AsString());
+            std::string b64  = JSON::ws2s(itData->second->AsString());
+            std::vector<uint8_t> bytes;
+            if (!isValidSampleUploadName(name)) {
+              sendConfigActionAck("uploadSample", false, reqId, "Invalid WAV/MP3 filename");
+            } else if (b64.size() > 6 * 1024 * 1024 || !decodeBase64Bytes(b64, bytes)) {
+              sendConfigActionAck("uploadSample", false, reqId, "Decode error or file > 4 MB");
+            } else {
+              std::string dir = gSamplePlayer.samplesDir();
+              if (dir.empty()) dir = "samples";
+              std::string fullPath = dir + "/" + name;
+              FILE *fp = fopen(fullPath.c_str(), "wb");
+              if (!fp) {
+                sendConfigActionAck("uploadSample", false, reqId, "Cannot open destination file");
+              } else {
+                size_t written = fwrite(bytes.data(), 1, bytes.size(), fp);
+                fclose(fp);
+                if (written != bytes.size()) {
+                  sendConfigActionAck("uploadSample", false, reqId, "Short write");
+                } else {
+                  Bela_scheduleAuxiliaryTask(gSampleReloadTask);
+                  rt_printf("[GUI] Uploaded sample %s (%zu bytes)\n", name.c_str(), bytes.size());
+                  sendConfigActionAck("uploadSample", true, reqId);
+                }
+              }
+            }
+          }
+        }
+
+        // Channel Mute: { auxMute: { aux: 0..3, muted: bool } }
+        if (root.find(L"auxMute") != root.end() && root[L"auxMute"]->IsObject()) {
+          const JSONObject &mo = root[L"auxMute"]->AsObject();
+          auto itAux = mo.find(L"aux");
+          auto itMut = mo.find(L"muted");
+          if (itAux != mo.end() && itAux->second->IsNumber() && itMut != mo.end()) {
+            int aux = (int)itAux->second->AsNumber();
+            bool m = itMut->second->IsBool() ? itMut->second->AsBool()
+                                             : (itMut->second->AsNumber() > 0.5);
+            if (aux >= 0 && aux < kNumAuxChannels)
+              gAuxMute[aux].store(m, std::memory_order_relaxed);
+          }
+        }
+
+        // Channel Solo: { auxSolo: { aux: 0..3, solo: bool } }
+        if (root.find(L"auxSolo") != root.end() && root[L"auxSolo"]->IsObject()) {
+          const JSONObject &so = root[L"auxSolo"]->AsObject();
+          auto itAux = so.find(L"aux");
+          auto itSol = so.find(L"solo");
+          if (itAux != so.end() && itAux->second->IsNumber() && itSol != so.end()) {
+            int aux = (int)itAux->second->AsNumber();
+            bool s = itSol->second->IsBool() ? itSol->second->AsBool()
+                                             : (itSol->second->AsNumber() > 0.5);
+            if (aux >= 0 && aux < kNumAuxChannels)
+              gAuxSolo[aux].store(s, std::memory_order_relaxed);
+          }
+        }
+
+        // GUI Kill switches latch mask (bits 0..3 = SUB, KICK, MID, TOP)
+        if (root.find(L"guiKillsMask") != root.end() && root[L"guiKillsMask"]->IsNumber()) {
+          uint8_t m = (uint8_t)((int)root[L"guiKillsMask"]->AsNumber() & 0x0F);
+          gGuiKillsMask.store(m, std::memory_order_relaxed);
+        }
+
+        // GUI Dub Siren momentary/latch gate (works in both HW and Virtual mode)
+        if (root.find(L"sirenGate") != root.end()) {
+          bool g = root[L"sirenGate"]->IsBool() ? root[L"sirenGate"]->AsBool()
+                                                : (root[L"sirenGate"]->AsNumber() > 0.5);
+          gGuiSirenGate.store(g, std::memory_order_relaxed);
+        }
+
+        // Master Bus DSP: { masterBus: { warmth, bassMono, bassMonoFreq, stereoWidth, punch } }
+        if (root.find(L"masterBus") != root.end() && root[L"masterBus"]->IsObject()) {
+          const JSONObject &mb = root[L"masterBus"]->AsObject();
+          auto itW = mb.find(L"warmth");
+          if (itW != mb.end() && itW->second->IsNumber())
+            gMasterWarmth.store(clamp((float)itW->second->AsNumber(), 0.f, 1.f),
+                                std::memory_order_relaxed);
+          auto itBm = mb.find(L"bassMono");
+          if (itBm != mb.end()) {
+            bool bm = itBm->second->IsBool() ? itBm->second->AsBool()
+                                             : (itBm->second->AsNumber() > 0.5);
+            gBassMonoEnabled.store(bm, std::memory_order_relaxed);
+          }
+          auto itBmf = mb.find(L"bassMonoFreq");
+          if (itBmf != mb.end() && itBmf->second->IsNumber())
+            gBassMonoFreqHz.store(clamp((float)itBmf->second->AsNumber(),
+                                        kBassMonoFreqMinHz, kBassMonoFreqMaxHz),
+                                  std::memory_order_relaxed);
+          auto itSw = mb.find(L"stereoWidth");
+          if (itSw != mb.end() && itSw->second->IsNumber())
+            gStereoWidth.store(clamp((float)itSw->second->AsNumber(), 0.f, kStereoWidthMax),
+                               std::memory_order_relaxed);
+          auto itP = mb.find(L"punch");
+          if (itP != mb.end() && itP->second->IsNumber())
+            gMasterDynamics.store(clamp((float)itP->second->AsNumber(), 0.f, 1.f),
+                                  std::memory_order_relaxed);
+        }
+
+        // Series FX chaining: { fxChain: { echoToSpring, tapeToEcho } }
+        if (root.find(L"fxChain") != root.end() && root[L"fxChain"]->IsObject()) {
+          const JSONObject &fc = root[L"fxChain"]->AsObject();
+          auto itEs = fc.find(L"echoToSpring");
+          if (itEs != fc.end() && itEs->second->IsNumber())
+            gDigitalFxManager.setEchoToSpring((float)itEs->second->AsNumber());
+          auto itTe = fc.find(L"tapeToEcho");
+          if (itTe != fc.end() && itTe->second->IsNumber())
+            gDigitalFxManager.setTapeToEcho((float)itTe->second->AsNumber());
+        }
+
+        // Live UI Control (Dev) mode toggle
+        if (root.find(L"uiDevMode") != root.end()) {
+          bool dev = false;
+          if (root[L"uiDevMode"]->IsBool())
+            dev = root[L"uiDevMode"]->AsBool();
+          else if (root[L"uiDevMode"]->IsNumber())
+            dev = root[L"uiDevMode"]->AsNumber() > 0.5;
+          bool wasDev = gHardwareManager.isUiControlMode();
+          gHardwareManager.setUiControlMode(dev);
+          if (dev && !wasDev) {
+            gHardwareManager.resetVirtualControlsToDefaults();
+          }
+          refreshUiDevModeMetaSlot();
+          gForceStaticMetaSend.store(true, std::memory_order_relaxed);
+          rt_printf("[GUI] UI Control (Dev) mode → %s\n",
+                    dev ? "ACTIVE (Virtual Controls)" : "OFF (Hardware Controls)");
+        }
+
+        // Virtual pot update from UI
+        if (root.find(L"uiPot") != root.end() && root[L"uiPot"]->IsNumber() &&
+            root.find(L"val") != root.end() && root[L"val"]->IsNumber()) {
+          int potIdx = (int)root[L"uiPot"]->AsNumber();
+          float val = (float)root[L"val"]->AsNumber();
+          gHardwareManager.setVirtualNamedPot(potIdx, val);
+        }
+
+        // Virtual switch update from UI
+        if (root.find(L"uiSwitch") != root.end() && root[L"uiSwitch"]->IsNumber() &&
+            root.find(L"val") != root.end()) {
+          int swIdx = (int)root[L"uiSwitch"]->AsNumber();
+          bool active = false;
+          if (root[L"val"]->IsBool())
+            active = root[L"val"]->AsBool();
+          else if (root[L"val"]->IsNumber())
+            active = root[L"val"]->AsNumber() > 0.5;
+          if (swIdx >= 0 && swIdx < 9) {
+            gHardwareManager.setVirtualSwitchByRef(*kGuiSwitchRefs[swIdx], active);
+          }
+        }
+
+        // Reset virtual controls to clean musical defaults
+        if (root.find(L"uiReset") != root.end()) {
+          gHardwareManager.resetVirtualControlsToDefaults();
+          rt_printf("[GUI] Virtual controls reset to defaults\n");
+        }
+
+        // Dynamic Digital FX send routing: { fxRoute: { aux: 0..3, send: 0..1, dest: 0..3 } }
+        if (root.find(L"fxRoute") != root.end() && root[L"fxRoute"]->IsObject()) {
+          const JSONObject &ro = root[L"fxRoute"]->AsObject();
+          auto itAux = ro.find(L"aux");
+          auto itSend = ro.find(L"send");
+          auto itDest = ro.find(L"dest");
+          if (itAux != ro.end() && itAux->second->IsNumber() &&
+              itSend != ro.end() && itSend->second->IsNumber() &&
+              itDest != ro.end() && itDest->second->IsNumber()) {
+            int aux = (int)itAux->second->AsNumber();
+            int send = (int)itSend->second->AsNumber();
+            int dest = (int)itDest->second->AsNumber();
+            gDigitalFxManager.setAuxRouting(aux, send, static_cast<FxSendDest>(dest));
+            if (aux == 4) {
+              rt_printf("[GUI] FX Routing: SIREN Send%d -> %d\n", send + 1, dest);
+            } else {
+              rt_printf("[GUI] FX Routing: AUX%d Send%d -> %d\n", aux + 1, send + 1, dest);
+            }
+          }
+        }
+
+        // Direct FX Send Trigger from GUI FX tab:
+        //   { fxTrigger: { aux: 0..4, send: 0..1, active: bool, testTone?: bool } }
+        if (root.find(L"fxTrigger") != root.end() && root[L"fxTrigger"]->IsObject()) {
+          const JSONObject &ft = root[L"fxTrigger"]->AsObject();
+          auto itAux = ft.find(L"aux");
+          auto itSend = ft.find(L"send");
+          auto itAct = ft.find(L"active");
+          auto itTone = ft.find(L"testTone");
+          if (itTone != ft.end()) {
+            bool tt = itTone->second->IsBool()
+                          ? itTone->second->AsBool()
+                          : (itTone->second->AsNumber() > 0.5);
+            gFxTestToneEnabled.store(tt, std::memory_order_relaxed);
+          }
+          if (itAux != ft.end() && itAux->second->IsNumber() &&
+              itSend != ft.end() && itSend->second->IsNumber() &&
+              itAct != ft.end()) {
+            int aux = (int)itAux->second->AsNumber();
+            int send = (int)itSend->second->AsNumber();
+            bool active = itAct->second->IsBool()
+                              ? itAct->second->AsBool()
+                              : (itAct->second->AsNumber() > 0.5);
+            if (aux >= 0 && aux < DigitalFxManager::kNumSendSources &&
+                (send == 0 || send == 1)) {
+              gFxSendTrigger[aux][send].store(active, std::memory_order_relaxed);
+              if (aux == 4) {
+                bool anySiren =
+                    gFxSendTrigger[4][0].load(std::memory_order_relaxed) ||
+                    gFxSendTrigger[4][1].load(std::memory_order_relaxed);
+                gSirenFxTrigger.store(anySiren, std::memory_order_relaxed);
+              }
+            }
+          }
+        }
+
+        if (root.find(L"fxTestTone") != root.end()) {
+          bool tt = root[L"fxTestTone"]->IsBool()
+                        ? root[L"fxTestTone"]->AsBool()
+                        : (root[L"fxTestTone"]->AsNumber() > 0.5);
+          gFxTestToneEnabled.store(tt, std::memory_order_relaxed);
+        }
+
+        if (root.find(L"fxTriggerClearAll") != root.end()) {
+          for (int s = 0; s < DigitalFxManager::kNumSendSources; ++s) {
+            gFxSendTrigger[s][0].store(false, std::memory_order_relaxed);
+            gFxSendTrigger[s][1].store(false, std::memory_order_relaxed);
+          }
+          gSirenFxTrigger.store(false, std::memory_order_relaxed);
+        }
+
+        // SUB ROAR parameters: { subRoar: { tune, drive, decay, cutoff, level, enabled } }
+        if (root.find(L"subRoar") != root.end() && root[L"subRoar"]->IsObject()) {
+          const JSONObject &so = root[L"subRoar"]->AsObject();
+          auto itTune = so.find(L"tune");
+          if (itTune != so.end() && itTune->second->IsNumber())
+            gDigitalFxManager.subRoar().setTune((float)itTune->second->AsNumber());
+          auto itDrive = so.find(L"drive");
+          if (itDrive != so.end() && itDrive->second->IsNumber())
+            gDigitalFxManager.subRoar().setDrive((float)itDrive->second->AsNumber());
+          auto itDecay = so.find(L"decay");
+          if (itDecay != so.end() && itDecay->second->IsNumber())
+            gDigitalFxManager.subRoar().setDecay((float)itDecay->second->AsNumber());
+          auto itCutoff = so.find(L"cutoff");
+          if (itCutoff != so.end() && itCutoff->second->IsNumber())
+            gDigitalFxManager.subRoar().setCutoff((float)itCutoff->second->AsNumber());
+          auto itLevel = so.find(L"level");
+          if (itLevel != so.end() && itLevel->second->IsNumber())
+            gDigitalFxManager.subRoar().setReturnGain((float)itLevel->second->AsNumber());
+          auto itEn = so.find(L"enabled");
+          if (itEn != so.end()) {
+            bool en = itEn->second->IsBool() ? itEn->second->AsBool() : (itEn->second->AsNumber() > 0.5);
+            gDigitalFxManager.subRoar().setEnabled(en);
+          }
+        }
+
+        // ECHO DUB parameters: { echoDub: { time, feedback, tone, flutter, level, kill, enabled } }
+        const wchar_t* dubKey = (root.find(L"echoDub") != root.end()) ? L"echoDub"
+                              : (root.find(L"echuDub") != root.end()) ? L"echuDub" : nullptr;
+        if (dubKey && root[dubKey]->IsObject()) {
+          const JSONObject &eo = root[dubKey]->AsObject();
+          auto itTime = eo.find(L"time");
+          if (itTime != eo.end() && itTime->second->IsNumber())
+            gDigitalFxManager.echoDub().setTime((float)itTime->second->AsNumber());
+          auto itFb = eo.find(L"feedback");
+          if (itFb != eo.end() && itFb->second->IsNumber())
+            gDigitalFxManager.echoDub().setFeedback((float)itFb->second->AsNumber());
+          auto itTone = eo.find(L"tone");
+          if (itTone != eo.end() && itTone->second->IsNumber())
+            gDigitalFxManager.echoDub().setTone((float)itTone->second->AsNumber());
+          auto itFl = eo.find(L"flutter");
+          if (itFl != eo.end() && itFl->second->IsNumber())
+            gDigitalFxManager.echoDub().setFlutter((float)itFl->second->AsNumber());
+          auto itLevel = eo.find(L"level");
+          if (itLevel != eo.end() && itLevel->second->IsNumber())
+            gDigitalFxManager.echoDub().setReturnGain((float)itLevel->second->AsNumber());
+          auto itKill = eo.find(L"kill");
+          if (itKill != eo.end()) {
+            bool kill = itKill->second->IsBool() ? itKill->second->AsBool() : (itKill->second->AsNumber() > 0.5);
+            gDigitalFxManager.echoDub().setKillSend(kill);
+          }
+          auto itEn = eo.find(L"enabled");
+          if (itEn != eo.end()) {
+            bool en = itEn->second->IsBool() ? itEn->second->AsBool() : (itEn->second->AsNumber() > 0.5);
+            gDigitalFxManager.echoDub().setEnabled(en);
+          }
+          auto itPp = eo.find(L"pingPong");
+          if (itPp != eo.end()) {
+            bool pp = itPp->second->IsBool() ? itPp->second->AsBool() : (itPp->second->AsNumber() > 0.5);
+            gDigitalFxManager.echoDub().setPingPong(pp);
+          }
+        }
+
+        // ECHO DUB buffer clear: { echoDubClear: true } or { echuDubClear: true }
+        if (root.find(L"echoDubClear") != root.end() || root.find(L"echuDubClear") != root.end()) {
+          gDigitalFxManager.echoDub().clear();
+          rt_printf("[GUI] ECHO DUB delay buffer cleared\n");
+        }
+
+        // TUBBY SPRING parameters: { tubbySpring: { dwell, decay, tone, level, enabled } }
+        if (root.find(L"tubbySpring") != root.end() && root[L"tubbySpring"]->IsObject()) {
+          const JSONObject &tso = root[L"tubbySpring"]->AsObject();
+          auto itDwell = tso.find(L"dwell");
+          if (itDwell != tso.end() && itDwell->second->IsNumber())
+            gDigitalFxManager.tubbySpring().setDwell((float)itDwell->second->AsNumber());
+          auto itDecay = tso.find(L"decay");
+          if (itDecay != tso.end() && itDecay->second->IsNumber())
+            gDigitalFxManager.tubbySpring().setDecay((float)itDecay->second->AsNumber());
+          auto itTone = tso.find(L"tone");
+          if (itTone != tso.end() && itTone->second->IsNumber())
+            gDigitalFxManager.tubbySpring().setTone((float)itTone->second->AsNumber());
+          auto itLevel = tso.find(L"level");
+          if (itLevel != tso.end() && itLevel->second->IsNumber())
+            gDigitalFxManager.tubbySpring().setReturnGain((float)itLevel->second->AsNumber());
+          auto itEn = tso.find(L"enabled");
+          if (itEn != tso.end()) {
+            bool en = itEn->second->IsBool() ? itEn->second->AsBool() : (itEn->second->AsNumber() > 0.5);
+            gDigitalFxManager.tubbySpring().setEnabled(en);
+          }
+        }
+
+        // TUBBY SPRING virtual splash impact: { tubbySpringSplash: true }
+        if (root.find(L"tubbySpringSplash") != root.end()) {
+          gDigitalFxManager.tubbySpring().triggerSplash();
+          rt_printf("[GUI] TUBBY SPRING splash triggered\n");
+        }
+
+        // BLACK ARK PHASER parameters: { blackArk: { rate, depth, feedback, stages, level, enabled } }
+        if (root.find(L"blackArk") != root.end() && root[L"blackArk"]->IsObject()) {
+          const JSONObject &bao = root[L"blackArk"]->AsObject();
+          auto itRate = bao.find(L"rate");
+          if (itRate != bao.end() && itRate->second->IsNumber())
+            gDigitalFxManager.blackArk().setRate((float)itRate->second->AsNumber());
+          auto itDepth = bao.find(L"depth");
+          if (itDepth != bao.end() && itDepth->second->IsNumber())
+            gDigitalFxManager.blackArk().setDepth((float)itDepth->second->AsNumber());
+          auto itFb = bao.find(L"feedback");
+          if (itFb != bao.end() && itFb->second->IsNumber())
+            gDigitalFxManager.blackArk().setFeedback((float)itFb->second->AsNumber());
+          auto itSt = bao.find(L"stages");
+          if (itSt != bao.end() && itSt->second->IsNumber())
+            gDigitalFxManager.blackArk().setStages((int)itSt->second->AsNumber());
+          auto itLevel = bao.find(L"level");
+          if (itLevel != bao.end() && itLevel->second->IsNumber())
+            gDigitalFxManager.blackArk().setReturnGain((float)itLevel->second->AsNumber());
+          auto itEn = bao.find(L"enabled");
+          if (itEn != bao.end()) {
+            bool en = itEn->second->IsBool() ? itEn->second->AsBool() : (itEn->second->AsNumber() > 0.5);
+            gDigitalFxManager.blackArk().setEnabled(en);
+          }
+        }
+
+        // TAPE DRIVE parameters: { tapeDrive: { drive, warmth, asymmetry, level, sirenInsert, enabled } }
+        if (root.find(L"tapeDrive") != root.end() && root[L"tapeDrive"]->IsObject()) {
+          const JSONObject &tdo = root[L"tapeDrive"]->AsObject();
+          auto itDrv = tdo.find(L"drive");
+          if (itDrv != tdo.end() && itDrv->second->IsNumber())
+            gDigitalFxManager.tapeDrive().setDrive((float)itDrv->second->AsNumber());
+          auto itWarm = tdo.find(L"warmth");
+          if (itWarm != tdo.end() && itWarm->second->IsNumber())
+            gDigitalFxManager.tapeDrive().setWarmth((float)itWarm->second->AsNumber());
+          auto itAsym = tdo.find(L"asymmetry");
+          if (itAsym != tdo.end() && itAsym->second->IsNumber())
+            gDigitalFxManager.tapeDrive().setAsymmetry((float)itAsym->second->AsNumber());
+          auto itLevel = tdo.find(L"level");
+          if (itLevel != tdo.end() && itLevel->second->IsNumber())
+            gDigitalFxManager.tapeDrive().setReturnGain((float)itLevel->second->AsNumber());
+          auto itEn = tdo.find(L"enabled");
+          if (itEn != tdo.end()) {
+            bool en = itEn->second->IsBool() ? itEn->second->AsBool() : (itEn->second->AsNumber() > 0.5);
+            gDigitalFxManager.tapeDrive().setEnabled(en);
+          }
+        }
+
+
+        // SHIMMER DELAY parameters: { shimmerDelay: { semitones, delayTime, feedback, grainSize, level, enabled } }
+        if (root.find(L"shimmerDelay") != root.end() && root[L"shimmerDelay"]->IsObject()) {
+          const JSONObject &sdo = root[L"shimmerDelay"]->AsObject();
+          auto itSemi = sdo.find(L"semitones");
+          if (itSemi != sdo.end() && itSemi->second->IsNumber())
+            gDigitalFxManager.shimmerDelay().setSemitones((int)itSemi->second->AsNumber());
+          auto itTime = sdo.find(L"delayTime");
+          if (itTime != sdo.end() && itTime->second->IsNumber())
+            gDigitalFxManager.shimmerDelay().setDelayTime((float)itTime->second->AsNumber());
+          auto itFb = sdo.find(L"feedback");
+          if (itFb != sdo.end() && itFb->second->IsNumber())
+            gDigitalFxManager.shimmerDelay().setFeedback((float)itFb->second->AsNumber());
+          auto itGrain = sdo.find(L"grainSize");
+          if (itGrain != sdo.end() && itGrain->second->IsNumber())
+            gDigitalFxManager.shimmerDelay().setGrainSize((float)itGrain->second->AsNumber());
+          auto itLevel = sdo.find(L"level");
+          if (itLevel != sdo.end() && itLevel->second->IsNumber())
+            gDigitalFxManager.shimmerDelay().setReturnGain((float)itLevel->second->AsNumber());
+          auto itEn = sdo.find(L"enabled");
+          if (itEn != sdo.end()) {
+            bool en = itEn->second->IsBool() ? itEn->second->AsBool() : (itEn->second->AsNumber() > 0.5);
+            gDigitalFxManager.shimmerDelay().setEnabled(en);
+          }
+        }
+        if (root.find(L"shimmerClear") != root.end()) {
+          gDigitalFxManager.shimmerDelay().clear();
+          rt_printf("[GUI] SHIMMER DELAY memory cleared\n");
+        }
+
+        // DUB DUCKER parameters: { dubDucker: { threshold, releaseMs, duckAmount, source, enabled } }
+        if (root.find(L"dubDucker") != root.end() && root[L"dubDucker"]->IsObject()) {
+          const JSONObject &ddo = root[L"dubDucker"]->AsObject();
+          auto itTh = ddo.find(L"threshold");
+          if (itTh != ddo.end() && itTh->second->IsNumber())
+            gDigitalFxManager.ducker().setThreshold((float)itTh->second->AsNumber());
+          auto itRel = ddo.find(L"releaseMs");
+          if (itRel != ddo.end() && itRel->second->IsNumber())
+            gDigitalFxManager.ducker().setReleaseMs((float)itRel->second->AsNumber());
+          auto itAmt = ddo.find(L"duckAmount");
+          if (itAmt != ddo.end() && itAmt->second->IsNumber())
+            gDigitalFxManager.ducker().setDuckAmount((float)itAmt->second->AsNumber());
+          auto itSrc = ddo.find(L"source");
+          if (itSrc != ddo.end() && itSrc->second->IsNumber())
+            gDigitalFxManager.ducker().setSource((int)itSrc->second->AsNumber());
+          auto itEn = ddo.find(L"enabled");
+          if (itEn != ddo.end()) {
+            bool en = itEn->second->IsBool() ? itEn->second->AsBool() : (itEn->second->AsNumber() > 0.5);
+            gDigitalFxManager.ducker().setEnabled(en);
+          }
+        }
+
+
+
+        // Save config.json directly on Bela: { saveConfigText: "...", reqId?: "..." }
+        if (root.find(L"saveConfigText") != root.end() &&
+            root[L"saveConfigText"]->IsString()) {
+          std::string reqId;
+          if (root.find(L"reqId") != root.end() && root[L"reqId"]->IsString())
+            reqId = JSON::ws2s(root[L"reqId"]->AsString());
+          std::string jsonText = JSON::ws2s(root[L"saveConfigText"]->AsString());
+          std::string err;
+          bool ok = ConfigLoader::saveRawJson(kGuiConfigPath, jsonText, err);
+          if (ok)
+            rt_printf("[GUI] Saved config.json (%zu bytes)\n", jsonText.size());
+          else
+            rt_printf("[GUI] Save config.json failed: %s\n", err.c_str());
+          sendConfigActionAck("save", ok, reqId, err);
+        }
+
+        // Read raw config.json (WebSocket fallback for Export): { readConfig: true, reqId?: "..." }
+        if (root.find(L"readConfig") != root.end()) {
+          std::string reqId;
+          if (root.find(L"reqId") != root.end() && root[L"reqId"]->IsString())
+            reqId = JSON::ws2s(root[L"reqId"]->AsString());
+          std::string content;
+          std::string err;
+          bool ok = ConfigLoader::readRawJson(kGuiConfigPath, content, err);
+          sendConfigActionAck("read", ok, reqId, err, ok ? content : "");
+        }
+
+        // Restart Bela audio program only (~2-3s, keeps Wi-Fi/hotspot intact)
+        if (root.find(L"restartAudio") != root.end()) {
+          std::string reqId;
+          if (root.find(L"reqId") != root.end() && root[L"reqId"]->IsString())
+            reqId = JSON::ws2s(root[L"reqId"]->AsString());
+          if (!isValidProjectName(kGuiProjectName)) {
+            sendConfigActionAck("restartAudio", false, reqId,
+                                "Invalid project name");
+          } else if (gRestartOrRebootPending.exchange(true,
+                                                      std::memory_order_relaxed)) {
+            sendConfigActionAck("restartAudio", false, reqId,
+                                "Restart already in progress");
+          } else {
+            char pidStr[32];
+            snprintf(pidStr, sizeof(pidStr), "%ld", (long)::getpid());
+            char scriptBuf[1024];
+            int sn = snprintf(
+                scriptBuf, sizeof(scriptBuf),
+                "PID=\"$1\"; PROJ=\"$2\"; W=0; "
+                "/usr/bin/systemctl is-active --quiet bela_startup && W=1; "
+                "i=0; while kill -0 \"$PID\" 2>/dev/null && [ \"$i\" -lt %d ]; do "
+                "sleep 0.05; i=$((i+1)); done; "
+                "if [ \"$W\" -eq 1 ]; then "
+                "S=$(/usr/bin/systemctl show -p ActiveState --value bela_startup 2>/dev/null); "
+                "[ \"$S\" = active ] || [ \"$S\" = activating ] || /usr/bin/systemctl start bela_startup; "
+                "else "
+                "/usr/bin/make -C /root/Bela PROJECT=\"$PROJ\" stoprunning >/dev/null 2>&1 || true; "
+                "if /usr/bin/grep -q '^ACTIVE=1' /opt/Bela/startup_env 2>/dev/null && "
+                "/usr/bin/grep -q \"^PROJECT=$PROJ$\" /opt/Bela/startup_env 2>/dev/null; then "
+                "/usr/bin/systemctl start bela_startup; "
+                "else "
+                "/usr/bin/make -C /root/Bela PROJECT=\"$PROJ\" CL=\"-Jsettings.json\" runscreen; "
+                "fi; fi",
+                kRestartWaitPollIterations);
+            bool spawned = (sn > 0 && (size_t)sn < sizeof(scriptBuf)) &&
+                           spawnTransientSystemdUnit(scriptBuf, pidStr, kGuiProjectName);
+            if (spawned) {
+              rt_printf("[GUI] Audio restart scheduled — fading out...\n");
+              sendConfigActionAck("restartAudio", true, reqId);
+              gShutdownSignalReceived.store(true, std::memory_order_relaxed);
+            } else {
+              gRestartOrRebootPending.store(false, std::memory_order_relaxed);
+              sendConfigActionAck("restartAudio", false, reqId,
+                                  "Failed to spawn systemd restart unit");
+            }
+          }
+        }
+
+        // Full Linux OS reboot (~25-30s, triggered from Mapping -> Advanced)
+        if (root.find(L"rebootBoard") != root.end()) {
+          std::string reqId;
+          if (root.find(L"reqId") != root.end() && root[L"reqId"]->IsString())
+            reqId = JSON::ws2s(root[L"reqId"]->AsString());
+          if (gRestartOrRebootPending.exchange(true,
+                                               std::memory_order_relaxed)) {
+            sendConfigActionAck("rebootBoard", false, reqId,
+                                "Reboot already in progress");
+          } else {
+            char pidStr[32];
+            snprintf(pidStr, sizeof(pidStr), "%ld", (long)::getpid());
+            char scriptBuf[512];
+            int sn = snprintf(
+                scriptBuf, sizeof(scriptBuf),
+                "PID=\"$1\"; i=0; "
+                "while kill -0 \"$PID\" 2>/dev/null && [ \"$i\" -lt %d ]; do "
+                "sleep 0.05; i=$((i+1)); done; "
+                "/usr/bin/sync; /usr/bin/systemctl reboot",
+                kRestartWaitPollIterations);
+            bool spawned = (sn > 0 && (size_t)sn < sizeof(scriptBuf)) &&
+                           spawnTransientSystemdUnit(scriptBuf, pidStr, nullptr);
+            if (spawned) {
+              rt_printf("[GUI] Board reboot scheduled — fading out...\n");
+              sendConfigActionAck("rebootBoard", true, reqId);
+              gShutdownSignalReceived.store(true, std::memory_order_relaxed);
+            } else {
+              gRestartOrRebootPending.store(false, std::memory_order_relaxed);
+              sendConfigActionAck("rebootBoard", false, reqId,
+                                  "Failed to spawn systemd reboot unit");
+            }
+          }
+        }
+
         return true; // let the default handler process connection-reply etc.
       },
       nullptr);
@@ -882,6 +1708,12 @@ void render(BelaContext *context, void *userData) {
     gShutdownRampRemaining = gShutdownRampTotal;
   }
 
+  // Check if sample bank reload completed and push updated names to GUI
+  if (gSamplePlayer.consumeBankReloaded()) {
+    fillSamplerNamesBuf();
+    gForceStaticMetaSend.store(true, std::memory_order_relaxed);
+  }
+
   // Apply live mic/HPF changes queued by the gui_control callback (non-RT).
   {
     uint8_t pending = gMicHpfPendingMask.exchange(0);
@@ -900,21 +1732,41 @@ void render(BelaContext *context, void *userData) {
   gHardwareManager.scanStep(context);
 
   // Shared controls between L and R strips (same gain/EQ/FX send on both sides)
+  bool anyAuxSolo = false;
+  for (int ch = 0; ch < kNumAuxChannels; ++ch) {
+    if (gAuxSolo[ch].load(std::memory_order_relaxed)) {
+      anyAuxSolo = true;
+      break;
+    }
+  }
+
+  bool auxTrig1[kNumAuxChannels] = {};
+  bool auxTrig2[kNumAuxChannels] = {};
   for (int ch = 0; ch < kNumAuxChannels; ++ch) {
     const auto &pots = kAuxPotBindings[ch];
+    auxTrig1[ch] = gFxSendTrigger[ch][0].load(std::memory_order_relaxed);
+    auxTrig2[ch] = gFxSendTrigger[ch][1].load(std::memory_order_relaxed);
+    const bool muted = anyAuxSolo
+                           ? !gAuxSolo[ch].load(std::memory_order_relaxed)
+                           : gAuxMute[ch].load(std::memory_order_relaxed);
     const float gain =
         scaleInputGainPot(gHardwareManager.getPotValue(pots.gain));
     const float eqL = potToGainDb(gHardwareManager.getPotValue(pots.eqLow));
     const float eqM = potToGainDb(gHardwareManager.getPotValue(pots.eqMid));
     const float eqH = potToGainDb(gHardwareManager.getPotValue(pots.eqHigh));
-    const float fx1 = scaleFxSendPot(gHardwareManager.getPotValue(pots.fx1));
-    const float fx2 = scaleFxSendPot(gHardwareManager.getPotValue(pots.fx2));
+    const float fx1 = auxTrig1[ch]
+                          ? 1.f
+                          : scaleFxSendPot(gHardwareManager.getPotValue(pots.fx1));
+    const float fx2 = auxTrig2[ch]
+                          ? 1.f
+                          : scaleFxSendPot(gHardwareManager.getPotValue(pots.fx2));
 
     for (int side = 0; side < 2; ++side) {
       gChannelStrips[ch][side].setInputGain(gain);
       gChannelStrips[ch][side].setEqGains(eqL, eqM, eqH);
       gChannelStrips[ch][side].setFxSend1Level(fx1);
       gChannelStrips[ch][side].setFxSend2Level(fx2);
+      gChannelStrips[ch][side].setMuted(muted);
     }
   }
 
@@ -962,11 +1814,12 @@ void render(BelaContext *context, void *userData) {
     }
   }
 
-  // --- Master kill switches — mirrored on both buses ---
-  const bool killSub = gHardwareManager.getSwitchState(KILL_SUB);
-  const bool killKick = gHardwareManager.getSwitchState(KILL_KICK);
-  const bool killMid = gHardwareManager.getSwitchState(KILL_MID);
-  const bool killTop = gHardwareManager.getSwitchState(KILL_TOP);
+  // --- Master kill switches — mirrored on both buses (HW OR GUI latch) ---
+  const uint8_t guiKillMask = gGuiKillsMask.load(std::memory_order_relaxed);
+  const bool killSub  = gHardwareManager.getSwitchState(KILL_SUB)  || ((guiKillMask & 0x01) != 0);
+  const bool killKick = gHardwareManager.getSwitchState(KILL_KICK) || ((guiKillMask & 0x02) != 0);
+  const bool killMid  = gHardwareManager.getSwitchState(KILL_MID)  || ((guiKillMask & 0x04) != 0);
+  const bool killTop  = gHardwareManager.getSwitchState(KILL_TOP)  || ((guiKillMask & 0x08) != 0);
   for (MasterFx *bus : gMasterBuses) {
     bus->setKills(killSub, killKick, killMid, killTop);
   }
@@ -989,12 +1842,23 @@ void render(BelaContext *context, void *userData) {
     }
   }
 
-  // --- Master output gain — mirrored on both buses ---
+  // --- Master output gain, dynamics & warmth — mirrored on both buses ---
+  const float warmthTarget   = gMasterWarmth.load(std::memory_order_relaxed);
+  const float dynamicsTarget = gMasterDynamics.load(std::memory_order_relaxed);
+  const bool  bassMonoOn     = gBassMonoEnabled.load(std::memory_order_relaxed);
+  const float bassMonoFreq   = gBassMonoFreqHz.load(std::memory_order_relaxed);
+  const float stereoWidthTgt = gStereoWidth.load(std::memory_order_relaxed);
+  if (fabsf(bassMonoFreq - gLastBassMonoFreqHz) > 0.5f) {
+    gBassMonoHpf.setHighPass(bassMonoFreq, kButterworthQ, context->audioSampleRate);
+    gLastBassMonoFreqHz = bassMonoFreq;
+  }
   {
     const float mg =
         scaleMasterGainPot(gHardwareManager.getPotValue(MASTER_GAIN));
     for (MasterFx *bus : gMasterBuses) {
       bus->setMasterGain(mg);
+      bus->setDynamics(dynamicsTarget);
+      bus->setWarmth(warmthTarget);
     }
   }
 
@@ -1035,18 +1899,29 @@ void render(BelaContext *context, void *userData) {
   }
 
   // --- Dub siren controls ---
-  const float sirenGain = gHardwareManager.getPotValue(SIREN_GAIN);
-  const float sirenFxSend =
+  const float rawSirenGain = gHardwareManager.getPotValue(SIREN_GAIN);
+  const float rawSirenFxSend =
       scaleFxSendPot(gHardwareManager.getPotValue(SIREN_FX_SEND));
-  const float sirenFxSend2 =
+  const float rawSirenFxSend2 =
       scaleFxSendPot(gHardwareManager.getPotValue(SIREN_FX2_SEND));
+  const bool sirenTrig1 = gFxSendTrigger[4][0].load(std::memory_order_relaxed);
+  const bool sirenTrig2 = gFxSendTrigger[4][1].load(std::memory_order_relaxed);
+  const bool sirenFxTrig =
+      gSirenFxTrigger.load(std::memory_order_relaxed) || sirenTrig1 || sirenTrig2;
+  const float sirenGain =
+      (sirenFxTrig && rawSirenGain < kDevModeSirenGain) ? kDevModeSirenGain
+                                                        : rawSirenGain;
+  const float sirenFxSend = sirenTrig1 ? 1.f : rawSirenFxSend;
+  const float sirenFxSend2 = sirenTrig2 ? 1.f : rawSirenFxSend2;
+  const bool sirenGate =
+      gHardwareManager.getSwitchState(SIREN_TRIGGER) || sirenFxTrig ||
+      gGuiSirenGate.load(std::memory_order_relaxed);
 
   gDubSiren.setControls(gHardwareManager.getPotValue(SIREN_TYPE),
                         gHardwareManager.getPotValue(SIREN_MOD), sirenGain,
-                        sirenFxSend, sirenFxSend2,
-                        gHardwareManager.getSwitchState(SIREN_TRIGGER));
+                        sirenFxSend, sirenFxSend2, sirenGate);
   // Sampler shares siren gain / FX sends; trigger comes from the GUI only.
-  gSamplePlayer.setControls(sirenGain, sirenFxSend, sirenFxSend2);
+  gSamplePlayer.setControls(rawSirenGain, rawSirenFxSend, rawSirenFxSend2);
 
   // --- FX return input gains ---
   const float fx1ReturnGain =
@@ -1076,6 +1951,17 @@ void render(BelaContext *context, void *userData) {
   bool clipAux[kNumAuxChannels] = {};
   bool sigAux[kNumAuxChannels] = {};
   bool clipMaster = false;
+  const bool testToneOn = gFxTestToneEnabled.load(std::memory_order_relaxed);
+  bool anyTestToneActive = false;
+  for (int ch = 0; ch < kNumAuxChannels; ++ch) {
+    if ((testToneOn && (auxTrig1[ch] || auxTrig2[ch])) ||
+        gFxTestToneEnv[ch][0] > 1e-6f || gFxTestToneEnv[ch][1] > 1e-6f) {
+      anyTestToneActive = true;
+      break;
+    }
+  }
+  const float testTonePhaseInc =
+      kTwoPi * kFxTestToneFreqHz / context->audioSampleRate;
 
   for (unsigned int n = 0; n < context->audioFrames; n++) {
     float inL[kNumAuxChannels];
@@ -1084,6 +1970,16 @@ void render(BelaContext *context, void *userData) {
     float dryR[kNumAuxChannels];
     float fx1AuxSum = 0.f;
     float fx2AuxSum = 0.f;
+    float testToneSample = 0.f;
+    if (anyTestToneActive) {
+      gFxTestTonePhase += testTonePhaseInc;
+      if (gFxTestTonePhase >= kTwoPi)
+        gFxTestTonePhase -= kTwoPi;
+      const float s1Osc = sinf(gFxTestTonePhase);
+      const float c1Osc = cosf(gFxTestTonePhase);
+      testToneSample =
+          (0.65f * s1Osc + 0.35f * (2.f * s1Osc * c1Osc)) * kFxTestToneGain;
+    }
 
     for (int ch = 0; ch < kNumAuxChannels; ++ch) {
       const ChannelConfig &cfg = *kAuxConfigs[ch];
@@ -1111,23 +2007,43 @@ void render(BelaContext *context, void *userData) {
           sigAux[ch] = true;
       }
 
-      if (cfg.isStereo()) {
-        fx1AuxSum += 0.5f * (gChannelStrips[ch][0].fxOut() +
-                             gChannelStrips[ch][1].fxOut());
-        fx2AuxSum += 0.5f * (gChannelStrips[ch][0].fxOut2() +
-                             gChannelStrips[ch][1].fxOut2());
-      } else {
-        fx1AuxSum += gChannelStrips[ch][0].fxOut();
-        fx2AuxSum += gChannelStrips[ch][0].fxOut2();
+      float s1 = cfg.isStereo() ? 0.5f * (gChannelStrips[ch][0].fxOut() +
+                                          gChannelStrips[ch][1].fxOut())
+                                : gChannelStrips[ch][0].fxOut();
+      float s2 = cfg.isStereo() ? 0.5f * (gChannelStrips[ch][0].fxOut2() +
+                                          gChannelStrips[ch][1].fxOut2())
+                                : gChannelStrips[ch][0].fxOut2();
+      if (anyTestToneActive) {
+        const float target1 = (testToneOn && auxTrig1[ch]) ? 1.f : 0.f;
+        const float coeff1 =
+            (target1 > gFxTestToneEnv[ch][0]) ? gFxTestAttackCoeff
+                                              : gFxTestReleaseCoeff;
+        gFxTestToneEnv[ch][0] += coeff1 * (target1 - gFxTestToneEnv[ch][0]);
+        gFxTestToneEnv[ch][0] = flushDenormal(gFxTestToneEnv[ch][0]);
+        s1 += testToneSample * gFxTestToneEnv[ch][0];
+
+        const float target2 = (testToneOn && auxTrig2[ch]) ? 1.f : 0.f;
+        const float coeff2 =
+            (target2 > gFxTestToneEnv[ch][1]) ? gFxTestAttackCoeff
+                                              : gFxTestReleaseCoeff;
+        gFxTestToneEnv[ch][1] += coeff2 * (target2 - gFxTestToneEnv[ch][1]);
+        gFxTestToneEnv[ch][1] = flushDenormal(gFxTestToneEnv[ch][1]);
+        s2 += testToneSample * gFxTestToneEnv[ch][1];
       }
+      gDigitalFxManager.routeAux1Send(ch, s1, fx1AuxSum);
+      gDigitalFxManager.routeAux2Send(ch, s2, fx2AuxSum);
     }
 
     // Siren + sampler: mono sources, present equally on L and R
     float sirenOut = gDubSiren.process();
     float samplerOut = gSamplePlayer.process();
 
-    // FX send 1: sum AUX channels + Siren + Sampler
-    float fxSend = fx1AuxSum + gDubSiren.fxOut() + gSamplePlayer.fxOut();
+    // Route Dub Siren FX sends dynamically (Source 4 = SIREN)
+    gDigitalFxManager.routeAux1Send(4, gDubSiren.fxOut(), fx1AuxSum);
+    gDigitalFxManager.routeAux2Send(4, gDubSiren.fxOut2(), fx2AuxSum);
+
+    // FX send 1: sum AUX channels + Siren + Sampler (if routed to Hardware, Siren is in fx1AuxSum)
+    float fxSend = fx1AuxSum + gSamplePlayer.fxOut();
     if (fxModeTops)
       fxSend = gFxHpf4k.process(fxSend); // > 4 kHz only
     else if (fxModeMids)
@@ -1135,8 +2051,8 @@ void render(BelaContext *context, void *userData) {
     else
       fxSend = gFxMidHpf.process(fxSend); // > 250 Hz (MID+TOP)
 
-    // FX send 2: mono FX bus → OUT3
-    float fxSend2 = fx2AuxSum + gDubSiren.fxOut2() + gSamplePlayer.fxOut2();
+    // FX send 2: mono FX bus → OUT1 (if routed to Hardware, Siren is in fx2AuxSum)
+    float fxSend2 = fx2AuxSum + gSamplePlayer.fxOut2();
     if (fx2ModeTops)
       fxSend2 = gFx2Hpf4k.process(fxSend2); // > 4 kHz only
     else if (fx2ModeMids)
@@ -1145,17 +2061,7 @@ void render(BelaContext *context, void *userData) {
     else
       fxSend2 = gFx2MidHpf.process(fxSend2); // > 250 Hz (MID+TOP)
 
-    // FX returns: mono, added equally to both buses
-    float fxReturn = gMasterFx.processFxReturn(
-        audioRead(context, n, FX1_RETURN_IN) * fx1ReturnGain);
-    float fxReturn2 = gMasterFx.processFxReturn2(
-        audioRead(context, n, FX2_RETURN_IN) * fx2ReturnGain);
-    const float monoExtras = sirenOut + samplerOut;
-
-    // ---- Left master bus (unlimited raw linear output) ----
-    // Routing controlled by kFxReturnPostMaster (SoftwareConfig.h).
-    // Mic-mode AUX dry: bypasses ParamEq / HPF-LPF / kills; still gets GEQ +
-    // BandTrim + gain.
+    // Dry sums before master bus
     float dryNormalL = 0.f, dryMicL = 0.f;
     for (int ch = 0; ch < kNumAuxChannels; ++ch) {
       if (kAuxConfigs[ch]->micMode)
@@ -1163,7 +2069,25 @@ void render(BelaContext *context, void *userData) {
       else
         dryNormalL += dryL[ch];
     }
-    dryNormalL += monoExtras;
+
+    // Sidechain key detection: Siren/Sampler, Mic inputs, or Master bus
+    gDigitalFxManager.ducker().updateKey(sirenOut + samplerOut, dryMicL, dryNormalL + sirenOut + samplerOut);
+
+    // FX returns: mono, added equally to both buses
+    float fxReturn = gMasterFx.processFxReturn(
+        audioRead(context, n, FX1_RETURN_IN) * fx1ReturnGain);
+    float fxReturn2 = gMasterFx.processFxReturn2(
+        audioRead(context, n, FX2_RETURN_IN) * fx2ReturnGain);
+    float digitalFxL = 0.f, digitalFxR = 0.f;
+    gDigitalFxManager.processStereo(digitalFxL, digitalFxR);
+    const float monoExtrasL = sirenOut + samplerOut + digitalFxL;
+    const float monoExtrasR = sirenOut + samplerOut + digitalFxR;
+
+    // ---- Left master bus (unlimited raw linear output) ----
+    // Routing controlled by kFxReturnPostMaster (SoftwareConfig.h).
+    // Mic-mode AUX dry: bypasses ParamEq / HPF-LPF / kills; still gets GEQ +
+    // BandTrim + gain.
+    dryNormalL += monoExtrasL;
 
     float rawOutL;
     if (kFxReturnPostMaster) {
@@ -1187,7 +2111,7 @@ void render(BelaContext *context, void *userData) {
         else
           dryNormalR += dryR[ch];
       }
-      dryNormalR += monoExtras;
+      dryNormalR += monoExtrasR;
 
       if (kFxReturnPostMaster) {
         rawOutR = gMasterFxR.process(dryNormalR);
@@ -1203,26 +2127,52 @@ void render(BelaContext *context, void *userData) {
       rawOutR = rawOutL;
     }
 
+    // Mid-Side Bass Mono (< bassMonoFreq) & Stereo Width shaping
+    gSmoothStereoWidth += gMasterBusSlewCoeff * (stereoWidthTgt - gSmoothStereoWidth);
+    gSmoothBassMonoMix += gMasterBusSlewCoeff * ((bassMonoOn ? 1.f : 0.f) - gSmoothBassMonoMix);
+    float shapedL = rawOutL;
+    float shapedR = rawOutR;
+    if (stereoOut && (gSmoothBassMonoMix > 0.001f || fabsf(gSmoothStereoWidth - 1.f) > 0.001f)) {
+      const float mid      = 0.5f * (rawOutL + rawOutR);
+      const float side     = 0.5f * (rawOutL - rawOutR);
+      const float sideHpf  = gBassMonoHpf.process(side);
+      const float sideMono = side + gSmoothBassMonoMix * (sideHpf - side);
+      const float sideOut  = sideMono * gSmoothStereoWidth;
+      shapedL = mid + sideOut;
+      shapedR = mid - sideOut;
+    } else {
+      // Keep HPF delay line warm
+      gBassMonoHpf.process(0.5f * (rawOutL - rawOutR));
+    }
+
     // Advance smooth crossfade between Stereo (1.f) and Mono (0.f)
     const float targetStereoMix = stereoOut ? 1.f : 0.f;
     gStereoMonoMix += gStereoMonoSlewCoeff * (targetStereoMix - gStereoMonoMix);
 
-    // Final Master outputs (Professional Stereo vs Fold-down Mono)
+    // Final Master outputs (Analog Warmth -> Brickwall Limiter)
     float finalL, finalR;
     if (gStereoMonoMix >= 1.f - kCrossfadeEpsilon) {
-      // Pure Stereo mode: independent L & R limiters
-      finalL = gMasterFx.limitOutput(rawOutL);
-      finalR = gMasterFxR.limitOutput(rawOutR);
+      // Pure Stereo mode: warmth + independent L & R limiters
+      const float warmL = gMasterFx.applyWarmth(shapedL);
+      const float warmR = gMasterFxR.applyWarmth(shapedR);
+      finalL = gMasterFx.limitOutput(warmL);
+      finalR = gMasterFxR.limitOutput(warmR);
       if (fabsf(rawOutL) >= kClipThreshold ||
           fabsf(rawOutR) >= kClipThreshold || fabsf(finalL) >= kClipThreshold ||
           fabsf(finalR) >= kClipThreshold)
         clipMaster = true;
     } else if (gStereoMonoMix <= kCrossfadeEpsilon) {
       // Pure Mono mode: sum raw outputs with constant power law, apply Air
-      // compensation, limit once
+      // compensation, analog warmth, limit once
       float monoSum = kMonoFoldDownGain * (rawOutL + rawOutR);
       if (kMonoAirCompEnabled)
         monoSum = gMonoAirFilter.process(monoSum);
+      gMonoWarmthSmooth += gMonoWarmthCoeff * (warmthTarget - gMonoWarmthSmooth);
+      if (gMonoWarmthSmooth >= 0.001f) {
+        float preG = 1.f + gMonoWarmthSmooth * (kMasterWarmthMaxGain - 1.f);
+        float norm = fastTanh(preG);
+        if (norm > 1e-4f) monoSum = fastTanh(monoSum * preG) / norm;
+      }
       float outMono = gMonoLimiter.process(monoSum);
       finalL = outMono;
       finalR = outMono;
@@ -1232,12 +2182,18 @@ void render(BelaContext *context, void *userData) {
     } else {
       // Crossfade transition: smooth anti-click interpolation between stereo
       // and mono
-      float stereoL = gMasterFx.limitOutput(rawOutL);
-      float stereoR = gMasterFxR.limitOutput(rawOutR);
+      float stereoL = gMasterFx.limitOutput(gMasterFx.applyWarmth(shapedL));
+      float stereoR = gMasterFxR.limitOutput(gMasterFxR.applyWarmth(shapedR));
 
       float monoSum = kMonoFoldDownGain * (rawOutL + rawOutR);
       if (kMonoAirCompEnabled)
         monoSum = gMonoAirFilter.process(monoSum);
+      gMonoWarmthSmooth += gMonoWarmthCoeff * (warmthTarget - gMonoWarmthSmooth);
+      if (gMonoWarmthSmooth >= 0.001f) {
+        float preG = 1.f + gMonoWarmthSmooth * (kMasterWarmthMaxGain - 1.f);
+        float norm = fastTanh(preG);
+        if (norm > 1e-4f) monoSum = fastTanh(monoSum * preG) / norm;
+      }
       float outMono = gMonoLimiter.process(monoSum);
 
       finalL = gStereoMonoMix * stereoL + (1.f - gStereoMonoMix) * outMono;
@@ -1374,18 +2330,18 @@ void render(BelaContext *context, void *userData) {
       gPotValuesBuf[i] = gHardwareManager.getPotValue(kAllNamedPots[i]);
     gGui.sendBuffer(0, gPotValuesBuf);
 
-    // Buffer 1: switch states
-    gSwitchBuf[0] = gHardwareManager.getSwitchState(KILL_SUB) ? 1.f : 0.f;
-    gSwitchBuf[1] = gHardwareManager.getSwitchState(KILL_KICK) ? 1.f : 0.f;
-    gSwitchBuf[2] = gHardwareManager.getSwitchState(KILL_MID) ? 1.f : 0.f;
-    gSwitchBuf[3] = gHardwareManager.getSwitchState(KILL_TOP) ? 1.f : 0.f;
+    // Buffer 1: switch states (effective HW OR GUI overrides)
+    gSwitchBuf[0] = killSub ? 1.f : 0.f;
+    gSwitchBuf[1] = killKick ? 1.f : 0.f;
+    gSwitchBuf[2] = killMid ? 1.f : 0.f;
+    gSwitchBuf[3] = killTop ? 1.f : 0.f;
     gSwitchBuf[4] = gHardwareManager.getSwitchState(FX_FILTER_MIDS) ? 1.f : 0.f;
     gSwitchBuf[5] = gHardwareManager.getSwitchState(FX_FILTER_TOPS) ? 1.f : 0.f;
     gSwitchBuf[6] =
         gHardwareManager.getSwitchState(FX2_FILTER_TOPS) ? 1.f : 0.f;
     gSwitchBuf[7] =
         gHardwareManager.getSwitchState(FX2_FILTER_MIDS) ? 1.f : 0.f;
-    gSwitchBuf[8] = gHardwareManager.getSwitchState(SIREN_TRIGGER) ? 1.f : 0.f;
+    gSwitchBuf[8] = sirenGate ? 1.f : 0.f;
     gGui.sendBuffer(1, gSwitchBuf);
 
     // Buffer 2: siren state [presetIdx, gate, mod]
@@ -1393,7 +2349,7 @@ void render(BelaContext *context, void *userData) {
     gSirenBuf[0] = floorf(sirenTypePot * (float)DubSiren::kNumPresets);
     if (gSirenBuf[0] >= (float)DubSiren::kNumPresets)
       gSirenBuf[0] = (float)(DubSiren::kNumPresets - 1);
-    gSirenBuf[1] = gHardwareManager.getSwitchState(SIREN_TRIGGER) ? 1.f : 0.f;
+    gSirenBuf[1] = sirenGate ? 1.f : 0.f;
     gSirenBuf[2] = gHardwareManager.getPotValue(SIREN_MOD);
     gGui.sendBuffer(2, gSirenBuf);
 
@@ -1430,10 +2386,38 @@ void render(BelaContext *context, void *userData) {
     gCpuTempBuf[0] = gCpuTempC.load(std::memory_order_relaxed);
     gGui.sendBuffer(9, gCpuTempBuf);
 
+    // Buffer 12: Digital FX & Master Bus state (34 floats)
+    gFxStateBuf[0] = gDigitalFxManager.subRoar().getAndResetPeak();
+    gFxStateBuf[1] = gDigitalFxManager.echoDub().getAndResetPeak();
+    gFxStateBuf[2] = gDigitalFxManager.tubbySpring().getAndResetPeak();
+    gFxStateBuf[3] = gDigitalFxManager.blackArk().getAndResetPeak();
+    gFxStateBuf[4] = gDigitalFxManager.tapeDrive().getAndResetPeak();
+    gFxStateBuf[5] = gDigitalFxManager.shimmerDelay().getAndResetPeak();
+    gFxStateBuf[6] = gDigitalFxManager.ducker().getGainReductionForMeter();
+    for (int c = 0; c < DigitalFxManager::kNumSendSources; ++c) {
+      gFxStateBuf[7 + c * 2]     = (float)static_cast<int>(gDigitalFxManager.getAuxRouting(c, 0));
+      gFxStateBuf[7 + c * 2 + 1] = (float)static_cast<int>(gDigitalFxManager.getAuxRouting(c, 1));
+    }
+    for (int ch = 0; ch < kNumAuxChannels; ++ch) {
+      gFxStateBuf[17 + ch] = gAuxMute[ch].load(std::memory_order_relaxed) ? 1.f : 0.f;
+      gFxStateBuf[21 + ch] = gAuxSolo[ch].load(std::memory_order_relaxed) ? 1.f : 0.f;
+    }
+    gFxStateBuf[25] = (float)guiKillMask;
+    gFxStateBuf[26] = warmthTarget;
+    gFxStateBuf[27] = bassMonoOn ? 1.f : 0.f;
+    gFxStateBuf[28] = bassMonoFreq;
+    gFxStateBuf[29] = stereoWidthTgt;
+    gFxStateBuf[30] = dynamicsTarget;
+    gFxStateBuf[31] = gDigitalFxManager.echoDub().isPingPong() ? 1.f : 0.f;
+    gFxStateBuf[32] = gDigitalFxManager.getEchoToSpring();
+    gFxStateBuf[33] = gDigitalFxManager.getTapeToEcho();
+    gGui.sendBuffer(12, gFxStateBuf);
+
     // Buffers 4+5+6+11: mapping + config + sample names — resend for
-    // (re)connects. First tick is forced (gGuiStaticSendCount starts at the
+    // (re)connects or when metadata changes. First tick is forced (gGuiStaticSendCount starts at the
     // divisor).
-    if (++gGuiStaticSendCount >= kGuiStaticBufSendDivisor) {
+    if (gForceStaticMetaSend.exchange(false, std::memory_order_relaxed) ||
+        ++gGuiStaticSendCount >= kGuiStaticBufSendDivisor) {
       gGuiStaticSendCount = 0;
       gGui.sendBuffer(4, gPotMappingBuf);
       gGui.sendBuffer(5, gSwitchMappingBuf);

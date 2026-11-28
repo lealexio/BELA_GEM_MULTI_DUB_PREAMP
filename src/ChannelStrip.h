@@ -55,6 +55,15 @@ public:
      */
     void setFxSend2Level(float level);
 
+    /**
+     * Enables or disables click-free channel mute (8 ms S-like EMA ramp).
+     * Applies to both dry output and post-fader FX sends.
+     */
+    void setMuted(bool muted);
+
+    /** Returns true if channel mute target is currently active. */
+    bool isMuted() const { return targetMuteGain_ < 0.5f; }
+
     /** Process one sample through the full chain. Returns the dry output. */
     float process(float input);
 
@@ -80,6 +89,9 @@ private:
     float fxSendLevel2_    = 0.f;
     float lastOut_         = 0.f;   // stored by process(), read by fxOut()
     float gainSmoothCoeff_ = 0.f;   // one-pole coefficient for EQ gain smoothing
+    float muteSmoothCoeff_ = 0.f;   // one-pole coefficient for click-free mute
+    float muteGain_        = 1.f;
+    float targetMuteGain_  = 1.f;
 
     NoiseGate gate_;
 

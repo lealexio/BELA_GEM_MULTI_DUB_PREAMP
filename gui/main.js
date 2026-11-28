@@ -6,17 +6,37 @@ import { initContext, getContext } from './context.js';
 import { injectCSS } from './css.js';
 import { buildUI } from './dom/shell.js';
 import { layoutTopChrome, hideP5Dom } from './dom/utils.js';
-import { updateSiren, syncMicInputs } from './dom/live.js';
+import { updateSiren, syncMicInputs, refreshLiveMasterBusUi } from './dom/live.js';
 import { updateSampler } from './dom/sampler.js';
 import { updateConsole, updateSwitches } from './dom/console.js';
-import { startMeterAnim, syncCodecGains, updateClipIndicators, clearClipBadges, syncMasterStereo } from './dom/meters.js';
+import { startMeterAnim, syncCodecGains, updateClipIndicators, clearClipBadges, syncMasterStereo, rebuildMetersSection } from './dom/meters.js';
 import { TAB_LIVE } from './config.js';
 import { isLiveTileOn } from './live-layout.js';
 import { updateMasterEq, resizeMasterEqCanvas } from './dom/masterEq.js';
-import { tryBuildMappingTable, updateDetectMode, fillRoutingFromConfigMeta, fillIgnoredPotsFromConfigMeta } from './dom/mapping.js';
+import { tryBuildMappingTable, updateDetectMode, updateMappingLive, fillRoutingFromConfigMeta, fillIgnoredPotsFromConfigMeta, applyBoardConfigToMapping, resetMappingStateForRestart, setMappingStatus } from './dom/mapping.js';
+import { syncUiDevMode, updateDevControlsLive } from './dom/devControl.js';
+import { updateFxLive } from './dom/fx.js';
+import { ensureConfigControlListener, fetchBoardConfigJson } from './board-config.js';
 import {
     updateBelaRxWatchdog, isBelaConnected, updateBadge, updateTempBadge
 } from './bela/connection.js';
+
+/** Fetches Bela's config.json over HTTP and hydrates Mapping + Meters dynamically. */
+function syncBoardConfigFromBela(isAfterRestart = false) {
+    fetchBoardConfigJson().then(res => {
+        if (!res.ok || !res.parsed) return;
+        const ctx = getContext();
+        ctx.boardConfigJson = res.parsed;
+        ctx.boardConfigRawText = res.text;
+        if (!ctx.mappingUserEdited) {
+            applyBoardConfigToMapping(res.parsed, {
+                markDirty: false,
+                applyControls: !!isAfterRestart
+            });
+        }
+        rebuildMetersSection();
+    });
+}
 
 export default function sketch(p) {
     initContext(createState());
@@ -25,6 +45,8 @@ export default function sketch(p) {
         injectCSS();
         buildUI();
         layoutTopChrome();
+        ensureConfigControlListener();
+        syncBoardConfigFromBela(false);
 
         if (typeof p.noCanvas === 'function')
             p.noCanvas();
@@ -52,14 +74,35 @@ export default function sketch(p) {
             return;
         }
 
+        ensureConfigControlListener();
         const b = Bela.data.buffers;
         updateBelaRxWatchdog(b);
 
         if (!isBelaConnected()) {
+            if (ctx.awaitingRestartReconnect) {
+                if (!ctx.sawOfflineDuringRestart) {
+                    ctx.sawOfflineDuringRestart = true;
+                    ctx.restartOfflinePerfMs = performance.now();
+                }
+                ctx.potMapping = null;
+                ctx.switchMapping = null;
+                ctx.configMeta = null;
+            }
             updateBadge();
             updateTempBadge(undefined);
             clearClipBadges();
             return;
+        }
+
+        if (ctx.awaitingRestartReconnect && ctx.sawOfflineDuringRestart &&
+            b[4] && b[4].ts > (ctx.restartOfflinePerfMs || 0) &&
+            b[5] && b[5].ts > (ctx.restartOfflinePerfMs || 0) &&
+            b[6] && b[6].ts > (ctx.restartOfflinePerfMs || 0)) {
+            ctx.awaitingRestartReconnect = false;
+            ctx.sawOfflineDuringRestart = false;
+            resetMappingStateForRestart();
+            syncBoardConfigFromBela(true);
+            setMappingStatus('Bela restarted & config reloaded ✓', false);
         }
 
         if (b[0]) {
@@ -83,9 +126,11 @@ export default function sketch(p) {
             ctx.samplerState = b[10];
             ctx.samplerStateLive = true;
         }
-        // Buffer 11: packed sample names (static, resent periodically)
-        if (b[11] && b[11].length && !ctx.samplerNamesBuilt) {
+        // Buffer 11: packed sample names (static, resent periodically or on upload)
+        if (b[11] && b[11].length && b[11].ts !== ctx._lastSamplerNamesTs) {
+            ctx._lastSamplerNamesTs = b[11].ts;
             ctx.samplerNamesBuf = Float32Array.from(b[11]);
+            ctx.samplerNamesBuilt = false;
         }
         if (b[7]) {
             if (!ctx.prevMuxRawValues) {
@@ -126,6 +171,7 @@ export default function sketch(p) {
             ctx.configMeta = b[6];
             syncMicInputs(b[6]);
             syncMasterStereo(b[6]);
+            syncUiDevMode(b[6]);
         }
 
         // Buffer 8: codec gain state — sync all connected clients (no send back to Bela).
@@ -135,11 +181,20 @@ export default function sketch(p) {
         if (b[9] && b[9].length) updateTempBadge(b[9][0]);
         else updateTempBadge(undefined);
 
+        // Buffer 12: Digital FX state [peaks, routing]
+        if (b[12]) {
+            ctx.fxState = b[12];
+            updateFxLive();
+        }
+
         if (ctx.consoleReady) updateConsole();
         updateSiren();
         updateSampler();
         updateSwitches();
+        refreshLiveMasterBusUi();
         updateMasterEq();
+        updateDevControlsLive();
+        updateMappingLive();
         // updateClipIndicators() is already called inside updateMetersFrame() (rAF loop).
         // Call it here only when the meter rAF is NOT running (meters tile hidden / tab inactive).
         if (ctx.meterAnimId == null) updateClipIndicators();

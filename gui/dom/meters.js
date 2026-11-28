@@ -11,7 +11,7 @@ import {
     CONFIG_META,
     ROUTING_KEY_TO_BUFFER3
 } from '../config.js';
-import { ROUTING_CONFIG } from '../routing-config.js';
+import { getEffectiveRouting } from '../board-config.js';
 import { el, cardTitle } from './utils.js';
 import { belaControlReady } from '../bela/connection.js';
 
@@ -70,7 +70,6 @@ function _sendGain(payload) {
 
 let _masterStereoBtn = null;
 let _masterStereoSyncHoldUntil = 0;
-let _masterStereoMapCb = null;  // cached `.ri-stereo[data-key="master"]` checkbox
 const MASTER_STEREO_SYNC_HOLD_MS = 2500;
 
 function _sendMasterStereo(payload) {
@@ -84,13 +83,13 @@ function _setMasterStereoBtnState(btn, isStereo) {
     if (isStereo) {
         btn.classList.remove('mono');
         btn.classList.add('stereo');
-        btn.textContent = 'STÉRÉO';
-        btn.title = 'Master mode: Stéréo (cliquer pour Mono L+R)';
+        btn.textContent = 'STEREO';
+        btn.title = 'Master mode: Stereo (click for Mono L+R)';
     } else {
         btn.classList.remove('stereo');
         btn.classList.add('mono');
         btn.textContent = 'MONO';
-        btn.title = 'Master mode: Mono Canal L + R (cliquer pour Stéréo)';
+        btn.title = 'Master mode: Mono L+R (click for Stereo)';
     }
 }
 
@@ -216,6 +215,7 @@ function _createInlineGain(desc) {
  */
 export function syncCodecGains(buf) {
     if (!buf || buf.length < 20) return;
+    getContext().lastCodecGainsBuf = buf;
     const now = Date.now();
     for (let ch = 0; ch < 10; ch++) {
         const inPicker = _inputPickers[ch];
@@ -406,18 +406,20 @@ function levelToDbLabel(raw) {
 
 /**
  * Builds header clip badges once (one pill per routed I/O).
+ * @param {boolean} [forceRebuild=false]
  * @returns {Object<number, HTMLElement>|null}
  */
-function ensureClipBadges() {
-    if (_clipBadgesByIdx) {
-        const sample = Object.values(_clipBadgesByIdx)[0];
-        if (sample && sample.isConnected) return _clipBadgesByIdx;
-        _clipBadgesByIdx = null;
-    }
+function ensureClipBadges(forceRebuild = false) {
     const host = document.getElementById('clip-badges');
     if (!host) return null;
+    if (!forceRebuild && _clipBadgesByIdx) {
+        const sample = Object.values(_clipBadgesByIdx)[0];
+        if (sample && sample.isConnected) return _clipBadgesByIdx;
+    }
+    _clipBadgesByIdx = null;
+    host.innerHTML = '';
 
-    const { inputChannels, outputChannels } = buildFullRouting(ROUTING_CONFIG);
+    const { inputChannels, outputChannels } = buildFullRouting(getEffectiveRouting());
     const byIdx = {};
     [...inputChannels, ...outputChannels].forEach(ch => {
         if (ch.buf3 == null || byIdx[ch.buf3]) return;
@@ -494,13 +496,11 @@ export function clearClipBadges() {
         ctx.clipHoldUntil.fill(0);
 }
 
-/** Builds the meters section (VU strips + inline codec gains) for the Live tab. */
-export function buildMetersSection() {
-    const wrap = el('div', { id: 'meters-wrap' });
-    const columns = el('div', { className: 'meters-columns' });
-
+/** Populates VU meter columns from the active routing config. */
+function _populateMetersColumns(columns) {
+    const routing = getEffectiveRouting();
     const { levelGroups, levelLabels, inputChannels, outputChannels } =
-        buildFullRouting(ROUTING_CONFIG);
+        buildFullRouting(routing);
 
     const gainByBuf3 = _buildGainByBuf3(inputChannels, outputChannels);
 
@@ -508,6 +508,7 @@ export function buildMetersSection() {
         _inputPickers[ch] = null;
         _outputPickers[ch] = null;
     }
+    _masterStereoBtn = null;
 
     const ctx = getContext();
     ctx.meterVu = [];
@@ -528,8 +529,8 @@ export function buildMetersSection() {
             mid.appendChild(lbl);
 
             if (idx === ROUTING_KEY_TO_BUFFER3.master) {
-                const initIsStereo = (ROUTING_CONFIG.out && ROUTING_CONFIG.out.master && ROUTING_CONFIG.out.master.stereo !== undefined)
-                    ? !!ROUTING_CONFIG.out.master.stereo : true;
+                const initIsStereo = (routing.out && routing.out.master && routing.out.master.stereo !== undefined)
+                    ? !!routing.out.master.stereo : true;
                 const modeBtn = el('button', {
                     className: 'meter-mode-btn ' + (initIsStereo ? 'stereo' : 'mono'),
                     type: 'button'
@@ -542,8 +543,6 @@ export function buildMetersSection() {
                     _setMasterStereoBtnState(modeBtn, nextIsStereo);
                     _masterStereoSyncHoldUntil = Date.now() + MASTER_STEREO_SYNC_HOLD_MS;
                     _sendMasterStereo({ event: 'custom', masterStereo: nextIsStereo });
-                    const mapCb = document.querySelector('.ri-stereo[data-key="master"]');
-                    if (mapCb) mapCb.checked = nextIsStereo;
                 });
                 _masterStereoBtn = modeBtn;
                 mid.appendChild(modeBtn);
@@ -619,9 +618,35 @@ export function buildMetersSection() {
         card.appendChild(row);
         columns.appendChild(card);
     });
+}
 
+/** Builds the meters section (VU strips + inline codec gains) for the Live tab. */
+export function buildMetersSection() {
+    const wrap = el('div', { id: 'meters-wrap' });
+    const columns = el('div', { className: 'meters-columns' });
+    _populateMetersColumns(columns);
     wrap.appendChild(columns);
     return wrap;
+}
+
+/** Rebuilds VU meter bindings and clip badges from the latest board routing config. */
+export function rebuildMetersSection() {
+    ensureClipBadges(true);
+    const wrap = document.getElementById('meters-wrap');
+    if (!wrap) return;
+    const columns = el('div', { className: 'meters-columns' });
+    _populateMetersColumns(columns);
+    wrap.innerHTML = '';
+    wrap.appendChild(columns);
+    _inputGainSyncHoldUntil.fill(0);
+    _outputGainSyncHoldUntil.fill(0);
+    _masterStereoSyncHoldUntil = 0;
+    const ctx = getContext();
+    if (ctx.configMeta) syncMasterStereo(ctx.configMeta);
+    if (ctx.lastCodecGainsBuf) syncCodecGains(ctx.lastCodecGainsBuf);
+    if (ctx.currentTab === TAB_LIVE) {
+        ctx.meterVu.forEach(vu => { if (vu) vu.resize(); });
+    }
 }
 
 /** Starts the meter animation loop while the Live tab is visible. */
@@ -714,11 +739,5 @@ export function syncMasterStereo(meta) {
         } else {
             _setMasterStereoBtnState(_masterStereoBtn, remoteIsStereo);
         }
-    }
-    const mapCb = _masterStereoMapCb && _masterStereoMapCb.isConnected
-        ? _masterStereoMapCb
-        : (_masterStereoMapCb = document.querySelector('.ri-stereo[data-key="master"]'));
-    if (mapCb && now >= _masterStereoSyncHoldUntil) {
-        mapCb.checked = remoteIsStereo;
     }
 }

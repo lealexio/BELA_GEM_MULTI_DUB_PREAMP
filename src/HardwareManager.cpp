@@ -2,6 +2,7 @@
 #include "SoftwareConfig.h"
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 #include <fcntl.h>
 #include <linux/i2c-dev.h>
 #include <sys/ioctl.h>
@@ -24,6 +25,10 @@ HardwareManager::HardwareManager() {
   for (int i = 0; i < kNumMux * kPotsPerMux; i++) {
     potValues_[i] = 0.f;
     potInitialised_[i] = false;
+    virtualPotValues_[i] = 0.f;
+  }
+  for (int i = 0; i < 16; i++) {
+    virtualSwitchActive_[i].store(false);
   }
   for (int i = 0; i < kNumClipChannels; i++) {
     clipPending_[i].store(false);
@@ -38,6 +43,7 @@ HardwareManager::HardwareManager() {
   startupAnimationStep_ = 0;
   currentChannel_ = 0;
   sampleCount_ = 0;
+  resetVirtualControlsToDefaults();
 }
 
 HardwareManager::~HardwareManager() { closeMcp23017(); }
@@ -69,6 +75,9 @@ bool HardwareManager::setup(BelaContext *context) {
 }
 
 void HardwareManager::scanStep(BelaContext *context) {
+  if (uiControlMode_.load(std::memory_order_relaxed)) {
+    return; // Bypass physical scanning when in UI virtual control mode
+  }
   if (context->analogFrames == 0 || context->analogInChannels < 1)
     return;
   int analogFrameRatio = context->audioFrames / context->analogFrames;
@@ -138,10 +147,16 @@ void HardwareManager::scanStep(BelaContext *context) {
 float HardwareManager::getPotValue(int muxId, int potId) const {
   if (muxId < 0 || muxId >= kNumMux || potId < 0 || potId >= kPotsPerMux)
     return 0.f;
+  if (uiControlMode_.load(std::memory_order_relaxed)) {
+    return virtualPotValues_[muxId * kPotsPerMux + potId];
+  }
   return potValues_[muxId * kPotsPerMux + potId];
 }
 
 float HardwareManager::getCenteredPotValue(int muxId, int potId) const {
+  if (uiControlMode_.load(std::memory_order_relaxed)) {
+    return getPotValue(muxId, potId);
+  }
   float v = getPotValue(muxId, potId);
   float delta = v - kPotCenter;
   if (fabsf(delta) <= kSnapRadiusCenter) {
@@ -150,6 +165,62 @@ float HardwareManager::getCenteredPotValue(int muxId, int potId) const {
   float sign = (delta > 0.f) ? 1.f : -1.f;
   float scale = kPotCenter / (kPotCenter - kSnapRadiusCenter);
   return kPotCenter + sign * (fabsf(delta) - kSnapRadiusCenter) * scale;
+}
+
+void HardwareManager::setVirtualPotValue(int muxId, int potId, float val) {
+  if (muxId < 0 || muxId >= kNumMux || potId < 0 || potId >= kPotsPerMux)
+    return;
+  if (val < 0.f) val = 0.f;
+  if (val > 1.f) val = 1.f;
+  virtualPotValues_[muxId * kPotsPerMux + potId] = val;
+}
+
+void HardwareManager::setVirtualNamedPot(int potIdx, float val) {
+  if (potIdx < 0 || potIdx >= kAllNamedPotsCount)
+    return;
+  if (val < 0.f) val = 0.f;
+  if (val > 1.f) val = 1.f;
+  const PotRef &ref = kAllNamedPots[potIdx];
+  float stored = ref.reversed ? (1.f - val) : val;
+  if (ref.mux >= 0 && ref.mux < kNumMux && ref.pot >= 0 && ref.pot < kPotsPerMux) {
+    virtualPotValues_[ref.mux * kPotsPerMux + ref.pot] = stored;
+  }
+}
+
+void HardwareManager::setVirtualSwitchByRef(const SwitchRef &sw, bool active) {
+  int key = (sw.portB ? 8 : 0) + sw.pin;
+  if (key >= 0 && key < 16) {
+    virtualSwitchActive_[key].store(active, std::memory_order_relaxed);
+  }
+}
+
+void HardwareManager::resetVirtualControlsToDefaults() {
+  for (int i = 0; i < kNumMux * kPotsPerMux; ++i) {
+    virtualPotValues_[i] = 0.f;
+  }
+  for (int i = 0; i < 16; ++i) {
+    virtualSwitchActive_[i].store(false, std::memory_order_relaxed);
+  }
+  const bool isDev = uiControlMode_.load(std::memory_order_relaxed);
+  for (int i = 0; i < kAllNamedPotsCount; ++i) {
+    const PotRef &ref = kAllNamedPots[i];
+    if (!ref.name)
+      continue;
+    float defVal = ref.centered ? 0.5f : 0.0f;
+    if (isDev) {
+      if (strcmp(ref.name, "AUX1_INPUT_GAIN") == 0 ||
+          strcmp(ref.name, "AUX2_INPUT_GAIN") == 0 ||
+          strcmp(ref.name, "AUX3_INPUT_GAIN") == 0 ||
+          strcmp(ref.name, "AUX4_INPUT_GAIN") == 0) {
+        defVal = kDevModeAuxGain;
+      } else if (strcmp(ref.name, "SIREN_GAIN") == 0) {
+        defVal = kDevModeSirenGain;
+      } else if (strcmp(ref.name, "MASTER_GAIN") == 0) {
+        defVal = kDevModeMasterGain;
+      }
+    }
+    setVirtualNamedPot(i, defVal);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -431,76 +502,76 @@ void HardwareManager::readMcp23017() {
           if (!r || !r->enabled || r->pin < 0 || r->pin > 7)
             continue;
 
-            bool clip =
-                clipPending_[i].exchange(false, std::memory_order_relaxed);
-            bool sig =
-                signalPending_[i].exchange(false, std::memory_order_relaxed);
+          bool clip =
+              clipPending_[i].exchange(false, std::memory_order_relaxed);
+          bool sig =
+              signalPending_[i].exchange(false, std::memory_order_relaxed);
 
-            // 1. Digital Clip management (absolute priority: solid ON
-            // for 1.0–1.5s)
-            if (clip) {
-              clipHoldTicks_[i] = holdTicksClip;
-              signalFlashTicks_[i] = 0;
-              signalCycleTicks_[i] = 0;
+          // 1. Digital Clip management (absolute priority: solid ON
+          // for 1.0–1.5s)
+          if (clip) {
+            clipHoldTicks_[i] = holdTicksClip;
+            signalFlashTicks_[i] = 0;
+            signalCycleTicks_[i] = 0;
+            signalSilenceTicks_[i] = 0;
+          }
+
+          bool active = false;
+
+          if (clipHoldTicks_[i] > 0) {
+            clipHoldTicks_[i]--;
+            active = true;
+          } else {
+            // 2. Signal Present management (brief 35 ms impulse / slow 1 Hz
+            // rhythm)
+            if (sig) {
               signalSilenceTicks_[i] = 0;
+            } else {
+              signalSilenceTicks_[i]++;
             }
 
-            bool active = false;
-
-            if (clipHoldTicks_[i] > 0) {
-              clipHoldTicks_[i]--;
-              active = true;
-            } else {
-              // 2. Signal Present management (brief 35 ms impulse / slow 1 Hz
-              // rhythm)
+            if (signalCycleTicks_[i] == 0) {
+              // Idle state: immediate flash upon rising edge of audio signal
               if (sig) {
-                signalSilenceTicks_[i] = 0;
-              } else {
-                signalSilenceTicks_[i]++;
+                signalFlashTicks_[i] = flashTicksSignal;
+                signalCycleTicks_[i] = periodTicksSignal;
+                active = true;
               }
+            } else {
+              // Active 1 Hz periodic cycle
+              if (signalFlashTicks_[i] > 0) {
+                signalFlashTicks_[i]--;
+                active = true;
+              }
+              signalCycleTicks_[i]--;
 
+              // End of 1 Hz cycle: repeat flash if audio was recently active
               if (signalCycleTicks_[i] == 0) {
-                // Idle state: immediate flash upon rising edge of audio signal
-                if (sig) {
+                if (signalSilenceTicks_[i] < silenceTicksWindow) {
                   signalFlashTicks_[i] = flashTicksSignal;
                   signalCycleTicks_[i] = periodTicksSignal;
                   active = true;
                 }
-              } else {
-                // Active 1 Hz periodic cycle
-                if (signalFlashTicks_[i] > 0) {
-                  signalFlashTicks_[i]--;
-                  active = true;
-                }
-                signalCycleTicks_[i]--;
-
-                // End of 1 Hz cycle: repeat flash if audio was recently active
-                if (signalCycleTicks_[i] == 0) {
-                  if (signalSilenceTicks_[i] < silenceTicksWindow) {
-                    signalFlashTicks_[i] = flashTicksSignal;
-                    signalCycleTicks_[i] = periodTicksSignal;
-                    active = true;
-                  }
-                }
               }
             }
+          }
 
-            bool pinHigh = r->activeLow ? !active : active;
-            uint8_t bit = (1 << r->pin);
+          bool pinHigh = r->activeLow ? !active : active;
+          uint8_t bit = (1 << r->pin);
 
-            if (!r->portB) {
-              if (pinHigh)
-                newOlatA |= bit;
-              else
-                newOlatA &= ~bit;
-            } else {
-              if (pinHigh)
-                newOlatB |= bit;
-              else
-                newOlatB &= ~bit;
-            }
+          if (!r->portB) {
+            if (pinHigh)
+              newOlatA |= bit;
+            else
+              newOlatA &= ~bit;
+          } else {
+            if (pinHigh)
+              newOlatB |= bit;
+            else
+              newOlatB &= ~bit;
           }
         }
+      }
 
         // Only write to I2C if the output latch state has changed
         if (newOlatA != currentOlatA_) {
@@ -526,12 +597,22 @@ void HardwareManager::readMcp23017() {
   }
 
   bool HardwareManager::getSwitchState(int pin) const {
+    if (uiControlMode_.load(std::memory_order_relaxed)) {
+      if (pin >= 0 && pin < 8)
+        return !virtualSwitchActive_[pin].load(std::memory_order_relaxed);
+      return true;
+    }
     if (!mcpConnected_.load() || pin < 0 || pin > 7)
       return false;
     return (mcpPortA_.load() >> pin) & 1;
   }
 
   bool HardwareManager::getSwitchStateB(int pin) const {
+    if (uiControlMode_.load(std::memory_order_relaxed)) {
+      if (pin >= 0 && pin < 8)
+        return !virtualSwitchActive_[8 + pin].load(std::memory_order_relaxed);
+      return true;
+    }
     if (!mcpConnected_.load() || pin < 0 || pin > 7)
       return false;
     return (mcpPortB_.load() >> pin) & 1;

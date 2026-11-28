@@ -4,7 +4,108 @@
 
 /** Tab indices — must match shell.js tab bar order. */
 export const TAB_LIVE = 0;
-export const TAB_MAPPING = 1;
+export const TAB_FX = 1;
+export const TAB_DEV = 2;
+export const TAB_MAPPING = 3;
+
+/** Digital FX send destinations. */
+export const FX_DEST_HARDWARE     = 0;
+export const FX_DEST_SUB_ROAR     = 1;
+export const FX_DEST_ECHO_DUB     = 2;
+export const FX_DEST_ECHU_DUB     = FX_DEST_ECHO_DUB; // alias
+export const FX_DEST_TUBBY_SPRING = 3;
+export const FX_DEST_BLACK_ARK    = 4;
+export const FX_DEST_TAPE_DRIVE   = 5;
+export const FX_DEST_SHIMMER_DELAY= 6;
+export const FX_DEST_MUTE         = 7;
+
+export const SUB_ROAR_DEFAULTS = {
+    tune: 45,
+    drive: 0.45,
+    decay: 850,
+    cutoff: 80,
+    level: 1.0,
+    enabled: true
+};
+
+export const ECHO_DUB_DEFAULTS = {
+    time: 375,
+    feedback: 0.65,
+    tone: 2800,
+    flutter: 0.20,
+    level: 0.75,
+    kill: false,
+    pingPong: false,
+    sync: false,
+    subdiv: '1/8d',
+    enabled: true
+};
+export const ECHU_DUB_DEFAULTS = ECHO_DUB_DEFAULTS;
+
+export const TUBBY_SPRING_DEFAULTS = {
+    dwell: 0.65,
+    decay: 0.70,
+    tone: 3200,
+    level: 0.85,
+    enabled: true
+};
+
+export const BLACK_ARK_DEFAULTS = {
+    rate: 0.25,
+    depth: 0.75,
+    feedback: 0.60,
+    stages: 6,
+    level: 0.80,
+    sync: false,
+    subdiv: '1/1',
+    enabled: true
+};
+
+export const TAPE_DRIVE_DEFAULTS = {
+    drive: 0.35,
+    warmth: 11000,
+    asymmetry: 0.30,
+    level: 1.0,
+    enabled: true
+};
+
+export const SHIMMER_DELAY_DEFAULTS = {
+    semitones: 12,
+    delayTime: 375,
+    feedback: 0.55,
+    grainSize: 50,
+    level: 0.75,
+    sync: false,
+    subdiv: '1/8d',
+    enabled: true
+};
+
+export const DUB_DUCKER_DEFAULTS = {
+    threshold: 0.08,
+    releaseMs: 350,
+    duckAmount: 0.75,
+    source: 0, // 0: Siren, 1: Mic, 2: Master, 3: All
+    enabled: true
+};
+
+export const FX_CHAIN_DEFAULTS = {
+    echoToSpring: 0.0,
+    tapeToEcho: 0.0
+};
+
+export const MASTER_BUS_DEFAULTS = {
+    warmth: 0.0,
+    bassMono: true,
+    bassMonoFreq: 100,
+    stereoWidth: 1.0,
+    punch: 0.0
+};
+
+export const TEMPO_DEFAULTS = {
+    bpm: 130,
+    min: 40,
+    max: 220
+};
 
 /**
  * Selectable Live dashboard tiles (Mapping excluded).
@@ -13,6 +114,7 @@ export const TAB_MAPPING = 1;
 export const LIVE_TILES = [
     { id: 'siren', label: 'Siren', pair: true, defaultOn: true },
     { id: 'mic', label: 'Mic inputs', pair: true, defaultOn: true },
+    { id: 'masterBus', label: 'Channels & Master DSP', pair: false, defaultOn: true },
     { id: 'sampler', label: 'Sampler', pair: false, defaultOn: true },
     { id: 'meters', label: 'VU meters', pair: false, defaultOn: true },
     { id: 'switches', label: 'Switches', pair: false, defaultOn: false },
@@ -31,6 +133,13 @@ export const LIVE_LAYOUT_STORAGE_KEY_V1 = 'belaDubPreamp.liveLayout.v1';
 export const LIVE_LAYOUT_STORAGE_KEY = 'belaDubPreamp.liveLayout.v2';
 /** localStorage key for UI theme ('dark' | 'light'). */
 export const THEME_STORAGE_KEY = 'belaDubPreamp.theme';
+export const PRESETS_STORAGE_KEY = 'belaDubPreamp.presets.v1';
+export const MIDI_STORAGE_KEY = 'belaDubPreamp.midiMap.v1';
+export const TEMPO_STORAGE_KEY = 'belaDubPreamp.tempo.v1';
+export const SAMPLER_CFG_STORAGE_KEY = 'belaDubPreamp.samplerCfg.v1';
+
+/** Keyboard pad labels for Sampler slots 0..7. */
+export const SAMPLER_PAD_KEYS = ['Q', 'W', 'E', 'R', 'A', 'S', 'D', 'F'];
 
 /** Minimum pot travel (0–1) required to accept a detect hit. */
 export const DETECT_POT_MIN_DELTA = 0.25;
@@ -100,6 +209,23 @@ export function isPotCentered(name) {
     return false;
 }
 
+/**
+ * Returns the default value for a virtual pot when in UI Control / Developer Mode.
+ * - AUX1..4 INPUT_GAIN: 0.5 (50%)
+ * - SIREN_GAIN: 0.5 (50%)
+ * - MASTER_GAIN: 0.05 (5%)
+ * - Bipolar centered controls: 0.5 (0 dB)
+ * - All other pots: 0.0
+ */
+export function getPotDevDefault(name) {
+    if (!name) return 0.0;
+    if (/^AUX\d_INPUT_GAIN$/.test(name)) return 0.5;
+    if (name === 'SIREN_GAIN') return 0.5;
+    if (name === 'MASTER_GAIN') return 0.05;
+    if (isPotCentered(name)) return 0.5;
+    return 0.0;
+}
+
 /** Switch names matching kGuiSwitchRefs[] order in render.cpp. */
 export const SWITCH_NAMES = [
     'KILL_SUB', 'KILL_KICK', 'KILL_MID', 'KILL_TOP',
@@ -129,8 +255,64 @@ export const CONFIG_META = {
     HPF_AUX1: 24, HPF_AUX2: 25, HPF_AUX3: 26, HPF_AUX4: 27,
     AUX1_R: 28, AUX2_R: 29, AUX3_R: 30, AUX4_R: 31,
     MASTER_STEREO: 32,
-    IGNORED_COUNT: 33, IGNORED_BASE: 34
+    UI_DEV_MODE: 33,
+    IGNORED_COUNT: 34, IGNORED_BASE: 35,
+    DEV_MODE_BOOT: 99,
+    CLIP_LED_BASE: 100
 };
+
+/** Clip LED keys in buffer 6 order (Master, AUX1..4). */
+export const CLIP_LED_KEYS = ['master', 'aux1', 'aux2', 'aux3', 'aux4'];
+export const CLIP_LED_LABELS = {
+    master: 'Master',
+    aux1: 'AUX 1',
+    aux2: 'AUX 2',
+    aux3: 'AUX 3',
+    aux4: 'AUX 4'
+};
+
+/** Decodes one packed clip LED float from buffer 6 into { enabled, port, pin, activeLow }. */
+export function decodeClipLedMeta(val) {
+    const v = Math.round(val);
+    if (isNaN(v) || v < 0) {
+        return { enabled: false, port: 'A', pin: 0, activeLow: false };
+    }
+    return {
+        enabled: true,
+        port: (v & 8) ? 'B' : 'A',
+        pin: v & 7,
+        activeLow: !!(v & 16)
+    };
+}
+
+/** Parses one clipLeds entry from config.json ("B5" string or { port, pin, activeLow }). */
+export function parseClipLedConfigEntry(val) {
+    if (typeof val === 'string' && val.length >= 2) {
+        const port = val[0].toUpperCase();
+        const pin = parseInt(val.slice(1), 10);
+        if ((port === 'A' || port === 'B') && !isNaN(pin) && pin >= 0 && pin <= 7) {
+            return { enabled: true, port, pin, activeLow: false };
+        }
+    } else if (val && typeof val === 'object') {
+        const pin = parseInt(val.pin, 10);
+        const port = String(val.port || (val.portB ? 'B' : 'A')).toUpperCase().startsWith('B') ? 'B' : 'A';
+        if (!isNaN(pin) && pin >= 0 && pin <= 7) {
+            return { enabled: true, port, pin, activeLow: !!val.activeLow };
+        }
+    }
+    return { enabled: false, port: 'A', pin: 0, activeLow: false };
+}
+
+/** Serializes one clip LED entry for config.json ("B5" shorthand or object if activeLow). */
+export function serializeClipLedEntry(entry) {
+    if (!entry || !entry.enabled) return null;
+    const port = entry.port === 'B' ? 'B' : 'A';
+    const pin = Math.max(0, Math.min(7, Math.round(Number(entry.pin) || 0)));
+    if (entry.activeLow) {
+        return { port, pin, activeLow: true };
+    }
+    return `${port}${pin}`;
+}
 
 /** Mic-mode HPF Hz range — must match kMicHpfFMin/FMax in SoftwareConfig.h. */
 export const MIC_HPF_HZ_MIN = 0;

@@ -13,6 +13,7 @@ If `config.json` is missing or invalid, the system automatically falls back to d
 
 ```json
 {
+  "developerMode": true,
   "mux": {
     "activeMux": 8
   },
@@ -23,7 +24,7 @@ If `config.json` is missing or invalid, the system automatically falls back to d
   },
   "i2c": {
     "bus": "/dev/i2c-1",
-    "address": "0x20"
+    "mcpAddress": 32
   },
   "routing": {
     "in": {
@@ -31,37 +32,48 @@ If `config.json` is missing or invalid, the system automatically falls back to d
       "aux2": { "channels": [4, 5], "mic": false, "hpf": 0, "gain": 0 },
       "aux3": { "channels": [6, 7], "mic": false, "hpf": 0, "gain": 0 },
       "aux4": { "channels": [8, 9], "mic": false, "hpf": 0, "gain": 0 },
-      "fx1Return": { "channel": 0, "gain": 0 },
-      "fx2Return": { "channel": 1, "gain": 0 }
+      "fx1Return": { "channels": [0], "mic": false, "hpf": 0, "gain": 0 },
+      "fx2Return": { "channels": [1], "mic": false, "hpf": 0, "gain": 0 }
     },
     "out": {
       "master": { "channels": [2, 3], "stereo": true, "gain": 0 },
-      "fx1Send": { "channel": 0, "gain": 0 },
-      "fx2Send": { "channel": 1, "gain": 0 },
-      "vu": {
-        "top": 6,
-        "mid": 7,
-        "kick": 8,
-        "sub": 9
-      }
+      "fx1Send": { "channels": [0], "gain": 0 },
+      "fx2Send": { "channels": [1], "gain": 0 },
+      "vuSub": { "channel": 9, "gain": 0 },
+      "vuKick": { "channel": 8, "gain": 0 },
+      "vuMid": { "channel": 7, "gain": 0 },
+      "vuTop": { "channel": 6, "gain": 0 }
     }
   },
-  "switches": {
-    "killSub": { "pin": 1, "reversed": false, "portB": false },
-    "killKick": { "pin": 0, "reversed": false, "portB": false },
-    "killMid": { "pin": 2, "reversed": false, "portB": false },
-    "killTop": { "pin": 3, "reversed": false, "portB": false },
-    "fxFilterMids": { "pin": 5, "reversed": false, "portB": false },
-    "fxFilterTops": { "pin": 6, "reversed": false, "portB": false },
-    "sirenTrigger": { "pin": 7, "reversed": false, "portB": false }
-  },
+  "pots": [
+    { "name": "AUX1_INPUT_GAIN", "mux": 0, "pot": 0, "reversed": true, "centered": false }
+  ],
+  "switches": [
+    { "name": "KILL_SUB", "pin": 0, "reversed": false, "port": "A" },
+    { "name": "KILL_KICK", "pin": 1, "reversed": false, "port": "A" },
+    { "name": "KILL_MID", "pin": 2, "reversed": true, "port": "A" },
+    { "name": "KILL_TOP", "pin": 3, "reversed": false, "port": "A" },
+    { "name": "FX_FILTER_MIDS", "pin": 5, "reversed": false, "port": "A" },
+    { "name": "FX_FILTER_TOPS", "pin": 6, "reversed": false, "port": "A" },
+    { "name": "FX2_FILTER_TOPS", "pin": 4, "reversed": false, "port": "A" },
+    { "name": "FX2_FILTER_MIDS", "pin": 7, "reversed": false, "port": "A" },
+    { "name": "SIREN_TRIGGER", "pin": 0, "reversed": false, "port": "B" }
+  ],
   "clipLeds": {
-    "master": { "pin": 4, "portB": true, "activeLow": false, "enabled": true }
-  }
+    "master": "B5",
+    "aux1": "A6",
+    "aux2": "A7",
+    "aux3": "B6",
+    "aux4": "B7"
+  },
+  "ignoredPots": [
+    { "mux": 7, "pot": 0 }
+  ]
 }
 ```
 
 ### 1.2 Channel Routing Options
+- **Developer Mode:** `"developerMode": true` — Boots in UI Virtual Control mode (no physical ADC/MUX scan). AUX1..4 Gain In are initialized to 50%, Siren Gain to 50%, and Master Volume to 5%.
 - **Mono Source:** `"channels": [2, -1]` (Input on channel 2 duplicated to left and right).
 - **Stereo Source:** `"channels": [2, 3]` (Left on channel 2, Right on channel 3).
 - **Mic Mode:** `"mic": true` — Bypasses master parametric EQ, filters, and kills for this channel.

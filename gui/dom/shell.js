@@ -1,7 +1,7 @@
 /** Top-level UI shell: header, tabs, tab switching, theme toggle. */
 import { getContext } from '../context.js';
-import { TAB_LIVE, TAB_MAPPING, THEME_STORAGE_KEY } from '../config.js';
-import { el, projectFileUrl } from './utils.js';
+import { TAB_LIVE, TAB_FX, TAB_DEV, TAB_MAPPING, THEME_STORAGE_KEY } from '../config.js';
+import { el, svgIcon, projectFileUrl } from './utils.js';
 import {
     buildLivePane,
     setLiveLayoutGearButton,
@@ -12,9 +12,26 @@ import { isLiveTileOn } from '../live-layout.js';
 import { startMeterAnim, stopMeterAnim } from './meters.js';
 import { drawMasterEqCurve } from './masterEq.js';
 import { buildMappingPane, cancelDetect } from './mapping.js';
+import { buildDevControlPane } from './devControl.js';
+import { buildFxPane, clearMomentaryFxTriggers } from './fx.js';
+import { loadSavedBpm, tapTempo, nudgeBpm, registerBpmListener } from '../tempo.js';
+import {
+    initInputControls, openMidiModal, registerMidiBadgeButton, registerPerfToggleHook
+} from '../input-control.js';
 
 let _currentTheme = 'dark';
 let _themeToggleBtn = null;
+
+const ICON_MOON = 'M21 12.79A9 9 0 1 1 11.21 3a7 7 0 0 0 9.79 9.79Z';
+const ICON_SUN = [
+    'M12 3v2', 'M12 19v2', 'M4.93 4.93l1.41 1.41', 'M17.66 17.66l1.41 1.41',
+    'M3 12h2', 'M19 12h2', 'M4.93 19.07l1.41-1.41', 'M17.66 6.34l1.41-1.41',
+    'M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8Z'
+];
+const ICON_SLIDERS = [
+    'M4 21v-7', 'M4 10V3', 'M12 21v-9', 'M12 8V3', 'M20 21v-5', 'M20 12V3',
+    'M2 14h4', 'M10 10h4', 'M18 16h4'
+];
 
 /** Returns the active theme ('dark' | 'light'). */
 export function getActiveTheme() {
@@ -37,9 +54,13 @@ export function getInitialTheme() {
 export function updateThemeButton() {
     if (!_themeToggleBtn) return;
     const isDark = _currentTheme === 'dark';
-    _themeToggleBtn.innerHTML = (isDark ? '🌙' : '☀️') + '<span class="theme-btn-lbl"> ' + (isDark ? 'Dark' : 'Light') + '</span>';
-    _themeToggleBtn.title = isDark ? 'Mode sombre actif (cliquer pour mode clair)' : 'Mode clair actif (cliquer pour mode sombre)';
-    _themeToggleBtn.setAttribute('aria-label', isDark ? 'Passer en mode clair' : 'Passer en mode sombre');
+    _themeToggleBtn.innerHTML = '';
+    _themeToggleBtn.appendChild(svgIcon(isDark ? ICON_MOON : ICON_SUN, '0 0 24 24', 14));
+    const lbl = el('span', { className: 'theme-btn-lbl' });
+    lbl.textContent = isDark ? 'Dark' : 'Light';
+    _themeToggleBtn.appendChild(lbl);
+    _themeToggleBtn.title = isDark ? 'Switch to light theme' : 'Switch to dark theme';
+    _themeToggleBtn.setAttribute('aria-label', isDark ? 'Switch to light theme' : 'Switch to dark theme');
 }
 
 /** Applies a theme ('dark' | 'light'), persists to localStorage and redraws canvas if needed. */
@@ -63,19 +84,43 @@ export function toggleTheme() {
     setTheme(_currentTheme === 'dark' ? 'light' : 'dark');
 }
 
+/** Toggles Performance / Zen live mode. */
+export function togglePerfMode(forceState) {
+    const ctx = getContext();
+    const next = (typeof forceState === 'boolean') ? forceState : !ctx.perfMode;
+    ctx.perfMode = next;
+    const root = document.getElementById('bela-gui');
+    if (root) root.classList.toggle('perf-mode', next);
+    const btn = document.getElementById('perf-toggle-btn');
+    if (btn) {
+        btn.classList.toggle('active', next);
+        btn.setAttribute('aria-pressed', next ? 'true' : 'false');
+    }
+    if (next && ctx.currentTab !== TAB_LIVE) {
+        switchTab(TAB_LIVE);
+    } else if (ctx.currentTab === TAB_LIVE) {
+        ctx.meterVu.forEach(vu => { if (vu) vu.resize(); });
+        if (isLiveTileOn(ctx.liveLayoutPrefs, 'masterEq')) drawMasterEqCurve();
+    }
+}
+
 /** Builds the full DOM tree (header, tabs, all panes). */
 export function buildUI() {
     setTheme(getInitialTheme());
+    getContext().tempoBpm = loadSavedBpm();
+    initInputControls();
+    registerPerfToggleHook(() => togglePerfMode());
 
     document.body.innerHTML = '';
 
-    const root = el('div', {id: 'bela-gui'});
-    const topChrome = el('div', {id: 'top-chrome'});
+    const root = el('div', { id: 'bela-gui' });
+    const topChrome = el('header', { id: 'top-chrome' });
 
-    const hdr = el('div', {id: 'gui-header'});
+    const hdr = el('div', { id: 'gui-header' });
     const connBadge = el('span', { className: 'badge', id: 'conn-badge' });
     connBadge.textContent = 'OFFLINE';
     hdr.appendChild(connBadge);
+
     const tempBadge = el('span', {
         className: 'badge temp unknown',
         id: 'temp-badge',
@@ -83,6 +128,15 @@ export function buildUI() {
     });
     tempBadge.textContent = '--°C';
     hdr.appendChild(tempBadge);
+
+    const devBadge = el('span', {
+        className: 'badge dev-badge',
+        id: 'dev-badge',
+        title: 'Virtual control mode active'
+    });
+    devBadge.textContent = 'VIRTUAL';
+    hdr.appendChild(devBadge);
+
     const clipBadges = el('div', {
         id: 'clip-badges',
         className: 'clip-badges',
@@ -90,21 +144,79 @@ export function buildUI() {
     });
     hdr.appendChild(clipBadges);
     hdr.appendChild(el('span', { className: 'spacer' }));
+
     const logo = el('img', { id: 'gui-logo', alt: 'Fulla Vibes' });
     logo.src = projectFileUrl('LOGO.png');
     hdr.appendChild(logo);
     topChrome.appendChild(hdr);
 
-    const tabBar = el('div', {id: 'tab-bar'});
-    ['Live', 'Mapping'].forEach((lbl, i) => {
-        const btn = el('button', {className: 'tab-btn' + (i === TAB_LIVE ? ' active' : '')});
+    const tabBar = el('nav', { id: 'tab-bar', role: 'tablist', 'aria-label': 'Main navigation' });
+    const tabPaneIds = ['pane-live', 'tab-fx', 'pane-dev', 'pane-mapping'];
+    ['Live', 'FX', 'Controls', 'Mapping'].forEach((lbl, i) => {
+        const btn = el('button', {
+            type: 'button',
+            className: 'tab-btn' + (i === TAB_LIVE ? ' active' : ''),
+            role: 'tab',
+            'aria-selected': i === TAB_LIVE ? 'true' : 'false',
+            'aria-controls': tabPaneIds[i]
+        });
         btn.textContent = lbl;
         btn.dataset.tab = i;
         btn.addEventListener('click', () => switchTab(i));
         tabBar.appendChild(btn);
     });
 
-    tabBar.appendChild(el('span', {className: 'tab-bar-spacer'}));
+    tabBar.appendChild(el('span', { className: 'tab-bar-spacer' }));
+
+    // Global Tap Tempo / BPM widget
+    const tempoWrap = el('div', { className: 'tempo-bar', title: 'Global BPM & Tap Tempo (shortcut: T)' });
+    const tapBtn = el('button', { type: 'button', className: 'tempo-tap-btn', textContent: 'TAP' });
+    const bpmDown = el('button', { type: 'button', className: 'tempo-nudge-btn', textContent: '−', 'aria-label': 'Decrease BPM' });
+    const bpmVal = el('span', { className: 'tempo-bpm-val', textContent: `${getContext().tempoBpm} BPM` });
+    const bpmUp = el('button', { type: 'button', className: 'tempo-nudge-btn', textContent: '+', 'aria-label': 'Increase BPM' });
+
+    const flashTap = () => {
+        tapBtn.classList.add('flash');
+        setTimeout(() => tapBtn.classList.remove('flash'), 120);
+    };
+    tapBtn.addEventListener('click', () => {
+        tapTempo();
+        flashTap();
+    });
+    bpmDown.addEventListener('click', () => nudgeBpm(-1));
+    bpmUp.addEventListener('click', () => nudgeBpm(1));
+    registerBpmListener((bpm) => {
+        bpmVal.textContent = `${bpm} BPM`;
+        flashTap();
+    });
+    tempoWrap.appendChild(tapBtn);
+    tempoWrap.appendChild(bpmDown);
+    tempoWrap.appendChild(bpmVal);
+    tempoWrap.appendChild(bpmUp);
+    tabBar.appendChild(tempoWrap);
+
+    // WebMIDI & Shortcuts modal button
+    const midiBtn = el('button', {
+        type: 'button',
+        id: 'midi-modal-btn',
+        className: 'chrome-pill-btn',
+        textContent: 'MIDI'
+    });
+    midiBtn.addEventListener('click', openMidiModal);
+    registerMidiBadgeButton(midiBtn);
+    tabBar.appendChild(midiBtn);
+
+    // Performance / Zen live mode button
+    const perfBtn = el('button', {
+        type: 'button',
+        id: 'perf-toggle-btn',
+        className: 'chrome-pill-btn',
+        textContent: 'Perf',
+        title: 'Performance mode (shortcut: P)',
+        'aria-pressed': 'false'
+    });
+    perfBtn.addEventListener('click', () => togglePerfMode());
+    tabBar.appendChild(perfBtn);
 
     const themeBtn = el('button', {
         type: 'button',
@@ -121,9 +233,14 @@ export function buildUI() {
         id: 'live-layout-gear',
         className: 'live-layout-gear',
         title: 'Live layout',
-        'aria-label': 'Settings'
+        'aria-label': 'Live layout',
+        'aria-expanded': 'false',
+        'aria-haspopup': 'dialog'
     });
-    gear.textContent = 'Settings';
+    gear.appendChild(svgIcon(ICON_SLIDERS, '0 0 24 24', 14));
+    const gearLbl = el('span', { className: 'gear-btn-lbl' });
+    gearLbl.textContent = 'Layout';
+    gear.appendChild(gearLbl);
     gear.addEventListener('click', () => {
         const ctx = getContext();
         if (ctx.currentTab !== TAB_LIVE) {
@@ -139,8 +256,10 @@ export function buildUI() {
     topChrome.appendChild(tabBar);
     root.appendChild(topChrome);
 
-    const content = el('div', {id: 'tab-content'});
+    const content = el('main', { id: 'tab-content' });
     content.appendChild(buildLivePane());
+    content.appendChild(buildFxPane());
+    content.appendChild(buildDevControlPane());
     content.appendChild(buildMappingPane());
     root.appendChild(content);
 
@@ -151,9 +270,13 @@ export function buildUI() {
 export function switchTab(idx) {
     const ctx = getContext();
     if (idx !== TAB_MAPPING) cancelDetect();
+    if (idx !== TAB_FX) clearMomentaryFxTriggers();
     ctx.currentTab = idx;
-    document.querySelectorAll('.tab-btn').forEach((b, i) =>
-        b.classList.toggle('active', i === idx));
+    document.querySelectorAll('.tab-btn').forEach((b, i) => {
+        const active = i === idx;
+        b.classList.toggle('active', active);
+        b.setAttribute('aria-selected', active ? 'true' : 'false');
+    });
     document.querySelectorAll('.tab-pane').forEach((p, i) =>
         p.classList.toggle('active', i === idx));
     if (idx === TAB_LIVE) {

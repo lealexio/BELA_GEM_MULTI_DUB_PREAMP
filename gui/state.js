@@ -1,8 +1,21 @@
 /** Runtime GUI state (mutable, shared across modules via context). */
-import { MASTER_EQ_CONFIG } from './config.js';
+import {
+    MASTER_EQ_CONFIG,
+    SUB_ROAR_DEFAULTS,
+    ECHO_DUB_DEFAULTS,
+    TUBBY_SPRING_DEFAULTS,
+    BLACK_ARK_DEFAULTS,
+    TAPE_DRIVE_DEFAULTS,
+    SHIMMER_DELAY_DEFAULTS,
+    DUB_DUCKER_DEFAULTS,
+    FX_CHAIN_DEFAULTS,
+    MASTER_BUS_DEFAULTS,
+    TEMPO_DEFAULTS
+} from './config.js';
 
 /** Creates the initial mutable GUI state object. */
 export function createState() {
+    const echoDubState = { ...ECHO_DUB_DEFAULTS };
     return {
         potValues: new Float32Array(60),
         switchStates: new Float32Array(9),
@@ -17,6 +30,66 @@ export function createState() {
         samplerListEl: null,
         samplerEmptyEl: null,
         audioLevels: new Float32Array(13),
+        fxState: new Float32Array(34),
+        fxRouting: [
+            [0, 0], // AUX 1 [Send 1, Send 2]
+            [0, 0], // AUX 2 [Send 1, Send 2]
+            [0, 0], // AUX 3 [Send 1, Send 2]
+            [0, 0], // AUX 4 [Send 1, Send 2]
+            [0, 0]  // SIREN [Send 1, Send 2]
+        ],
+        subRoar: { ...SUB_ROAR_DEFAULTS },
+        echoDub: echoDubState,
+        echuDub: echoDubState, // backward-compat alias
+        tubbySpring: { ...TUBBY_SPRING_DEFAULTS },
+        blackArk: { ...BLACK_ARK_DEFAULTS },
+        tapeDrive: { ...TAPE_DRIVE_DEFAULTS },
+        shimmerDelay: { ...SHIMMER_DELAY_DEFAULTS },
+        dubDucker: { ...DUB_DUCKER_DEFAULTS },
+        fxChain: { ...FX_CHAIN_DEFAULTS },
+        masterBus: { ...MASTER_BUS_DEFAULTS },
+        auxMuted: [false, false, false, false],
+        auxSolo: [false, false, false, false],
+        guiKillsMask: 0,
+        tempoBpm: TEMPO_DEFAULTS.bpm,
+        perfMode: false,
+        samplerSelectedSlot: 0,
+        samplerSlotCfg: {},
+        midiConnected: false,
+        midiDeviceName: '',
+        midiLearnTarget: null,
+        fxSubMeterEl: null,
+        fxDubMeterEl: null,
+        fxSpringMeterEl: null,
+        fxPhaserMeterEl: null,
+        fxTapeMeterEl: null,
+        fxShimmerMeterEl: null,
+        fxDuckerMeterEl: null,
+        fxRouteSelects: [],
+        fxTriggers: [
+            [false, false],
+            [false, false],
+            [false, false],
+            [false, false],
+            [false, false]
+        ],
+        fxMomentaryTriggers: [
+            [false, false],
+            [false, false],
+            [false, false],
+            [false, false],
+            [false, false]
+        ],
+        fxLatchedTriggers: [
+            [false, false],
+            [false, false],
+            [false, false],
+            [false, false],
+            [false, false]
+        ],
+        fxTestTone: false,
+        fxTriggerButtons: [],
+        fxLatchButtons: [],
         potMapping: null,
         switchMapping: null,
         configMeta: null,
@@ -39,6 +112,10 @@ export function createState() {
         consoleFilterMode: 'normal',
         currentTab: 0,
         mappingBuilt: false,
+        mappingSubTab: 'controls',
+        mappingFilter: 'all',
+        mappingSearch: '',
+        mappingGuided: null,
         routingFilledFromMeta: false,
         detectMode: null,
         masterEqCurveDb: new Float32Array(MASTER_EQ_CONFIG.CURVE_POINTS),
@@ -56,6 +133,23 @@ export function createState() {
         belaRxFingerprint: '',
         belaConnState: 'offline',
         belaLastLagMs: 0,
-        belaRxPackets: 0
+        belaRxPackets: 0,
+        uiDevMode: false,
+        devInteractingPot: -1,
+        devControlInitialized: false,
+        boardConfigJson: null,
+        boardConfigRawText: null,
+        loadedConfigBase: null,
+        mappingDirty: false,
+        mappingActionBusy: false,
+        awaitingRestartReconnect: false,
+        devModeBoot: false,
+        clipLedsConfig: {
+            master: { enabled: false, port: 'A', pin: 0, activeLow: false },
+            aux1: { enabled: false, port: 'A', pin: 0, activeLow: false },
+            aux2: { enabled: false, port: 'A', pin: 0, activeLow: false },
+            aux3: { enabled: false, port: 'A', pin: 0, activeLow: false },
+            aux4: { enabled: false, port: 'A', pin: 0, activeLow: false }
+        }
     };
 }

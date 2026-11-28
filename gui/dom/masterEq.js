@@ -393,6 +393,45 @@ function drawMasterEqOnCanvas(canvas, ctx2d) {
     ctx2d.globalAlpha = isDark ? 0.14 : 0.08;
     ctx2d.fill();
     ctx2d.globalAlpha = 1;
+
+    // Kill Switch visual overlay bands
+    const killBands = [
+        { idx: 0, label: 'SUB KILLED',  f0: cfg.FREQ_MIN, f1: cfg.KILL_FC[0] },
+        { idx: 1, label: 'KICK KILLED', f0: cfg.KILL_FC[0], f1: cfg.KILL_FC[1] },
+        { idx: 2, label: 'MID KILLED',  f0: cfg.KILL_FC[1], f1: cfg.KILL_FC[2] },
+        { idx: 3, label: 'TOP KILLED',  f0: cfg.KILL_FC[2], f1: cfg.FREQ_MAX }
+    ];
+    killBands.forEach(kb => {
+        if (_stableSwitches[kb.idx] <= 0.5) return;
+        const x0 = masterEqFreqToX(kb.f0, plotX, plotW);
+        const x1 = masterEqFreqToX(kb.f1, plotX, plotW);
+        const w = Math.max(0, x1 - x0);
+        ctx2d.save();
+        ctx2d.beginPath();
+        ctx2d.rect(x0, plotY, w, plotH);
+        ctx2d.clip();
+
+        ctx2d.fillStyle = isDark ? 'rgba(239, 68, 68, 0.14)' : 'rgba(220, 38, 38, 0.10)';
+        ctx2d.fillRect(x0, plotY, w, plotH);
+
+        ctx2d.strokeStyle = isDark ? 'rgba(239, 68, 68, 0.25)' : 'rgba(220, 38, 38, 0.20)';
+        ctx2d.lineWidth = 1;
+        for (let sx = x0 - plotH; sx < x1 + plotH; sx += 12) {
+            ctx2d.beginPath();
+            ctx2d.moveTo(sx, plotY + plotH);
+            ctx2d.lineTo(sx + plotH, plotY);
+            ctx2d.stroke();
+        }
+
+        if (w > 46) {
+            ctx2d.fillStyle = isDark ? '#fca5a5' : '#b91c1c';
+            ctx2d.font = 'bold 10px monospace';
+            ctx2d.textAlign = 'center';
+            ctx2d.textBaseline = 'top';
+            ctx2d.fillText(kb.label, x0 + w * 0.5, plotY + 6);
+        }
+        ctx2d.restore();
+    });
 }
 
 /** Redraws the master EQ plot on every registered canvas. */
@@ -538,17 +577,10 @@ export function buildMasterEqCard(opts) {
         className: 'card live-tile'
     });
     card.dataset.tile = 'masterEq';
-    card.appendChild(cardTitle('Master EQ — frequency response'));
-
-    const notice = el('div', { className: 'master-eq-notice' });
-    notice.textContent =
-        'Theoretical representation — the curve is recalculated from pot values, not a measurement of the actual audio signal.';
-    card.appendChild(notice);
-
-    const caption = el('div', { className: 'master-eq-caption' });
-    caption.textContent =
-        'Dry master chain: Parametric EQ → Graphic EQ → HPF/LPF → Band Trim → Kill switches. Excludes master gain and FX returns.';
-    card.appendChild(caption);
+    const hdr = el('div', { className: 'card-header-row' });
+    hdr.appendChild(cardTitle('Master EQ'));
+    hdr.appendChild(el('span', { className: 'card-meta', textContent: 'Theoretical dry curve' }));
+    card.appendChild(hdr);
 
     const wrap = el('div', { className: 'master-eq-wrap' });
     const canvas = el('canvas', { id: canvasId, className: 'master-eq-canvas' });

@@ -30,6 +30,7 @@ const banner = `/* AUTO-GENERATED — edit gui/, run: npm run build:gui */
  *   [9] Float32[1]       — CPU temperature °C (sysfs thermal_zone0, ~2 s poll)
  *   [10] Float32[5]      — sampler: [folderOk, count, playingSlot, isPlaying, playhead]
  *   [11] Float32[32×64]  — sampler filenames packed as ASCII floats (fixed width)
+ *   [12] Float32[10]     — digital FX state: [subPeak, echuPeak, aux1-4 sends 1-2 routing]
  */
 `;
 

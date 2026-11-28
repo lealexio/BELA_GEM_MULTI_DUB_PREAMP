@@ -9,6 +9,9 @@
 void ChannelStrip::setup(float sampleRate) {
     sampleRate_      = sampleRate;
     gainSmoothCoeff_ = onePoleLpCoeff(kEqGainSmoothMs, sampleRate_);
+    muteSmoothCoeff_ = onePoleLpCoeff(kChannelMuteRampMs, sampleRate_);
+    muteGain_        = 1.f;
+    targetMuteGain_  = 1.f;
     gate_.setup(sampleRate_);
     // Initialise filters at 0 dB so the strip is transparent on startup
     low_.setLowShelf  (kEqLowFreq,  0.f,         sampleRate_);
@@ -26,6 +29,10 @@ void ChannelStrip::setFxSend1Level(float level) {
 
 void ChannelStrip::setFxSend2Level(float level) {
     fxSendLevel2_ = level;
+}
+
+void ChannelStrip::setMuted(bool muted) {
+    targetMuteGain_ = muted ? 0.f : 1.f;
 }
 
 void ChannelStrip::setEqGains(float gainLowDb, float gainMidDb, float gainHighDb) {
@@ -57,6 +64,10 @@ float ChannelStrip::process(float input) {
                 && fabsf(smoothMid_)  < kEqGainEpsilonDb
                 && fabsf(smoothHigh_) < kEqGainEpsilonDb;
     float out = allFlat ? gated : high_.process(mid_.process(low_.process(gated)));
+
+    muteGain_ += muteSmoothCoeff_ * (targetMuteGain_ - muteGain_);
+    if (muteGain_ < 1e-6f && targetMuteGain_ == 0.f) muteGain_ = 0.f;
+    out *= muteGain_;
 
     lastOut_ = out;
     return out;
